@@ -1,0 +1,98 @@
+{
+  "name": "openclaw-swarm",
+  "version": "9.0.0",
+  "description": "Claw-Swarm V9.0 — Field-mediated swarm intelligence plugin / 场中介蜂群智能引擎: 12-dimensional signal field, 7-domain architecture, forward-decay encoding, dual-process routing, species evolution, zero feature flags for OpenClaw",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "main": "src/index.js",
+  "openclaw": {
+    "id": "openclaw-swarm",
+    "extensions": [
+      "./src/index.js"
+    ]
+  },
+  "clawdbot": {
+    "extensions": [
+      "./src/index.js"
+    ]
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./core/*": "./src/core/*",
+    "./communication/*": "./src/communication/*",
+    "./intelligence/*": "./src/intelligence/*",
+    "./orchestration/*": "./src/orchestration/*",
+    "./quality/*": "./src/quality/*",
+    "./observe/*": "./src/observe/*",
+    "./bridge/*": "./src/bridge/*"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DEEP-IOS/claw-swarm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DEEP-IOS/claw-swarm/issues"
+  },
+  "homepage": "https://github.com/DEEP-IOS/claw-swarm#readme",
+  "author": "DEEP-IOS",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "swarm",
+    "multi-agent",
+    "pheromone",
+    "openclaw",
+    "plugin",
+    "bio-inspired",
+    "stigmergy",
+    "signal-field",
+    "field-mediated-coupling",
+    "moe",
+    "contract-net",
+    "shapley",
+    "sna",
+    "12-dimensional",
+    "forward-decay",
+    "dual-process",
+    "species-evolution"
+  ],
+  "dependencies": {
+    "ajv": "^8.18.0",
+    "eventemitter3": "^5.0.1",
+    "nanoid": "^5.1.2",
+    "tiktoken": "^1.0.22",
+    "zod": "^3.24.2"
+  },
+  "optionalDependencies": {
+    "@xenova/transformers": "^2.0.0",
+    "usearch": "^2.0.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
+    "vitest": "^2.1.8"
+  },
+  "files": [
+    "src/core/",
+    "src/communication/",
+    "src/intelligence/",
+    "src/orchestration/",
+    "src/quality/",
+    "src/observe/",
+    "src/bridge/",
+    "src/index.js",
+    "src/index-v9.js",
+    "src/swarm-core-v9.js",
+    "openclaw.plugin.json",
+    "install.js",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md"
+  ]
+}

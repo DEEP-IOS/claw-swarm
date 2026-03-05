@@ -1,0 +1,52 @@
+# Console build artifacts & dependencies
+src/observe/dashboard/console/node_modules/
+src/observe/dashboard/console/dist/
+src/observe/dashboard/console/.vite/
+
+# Tests
+tests/
+vitest.config.js
+
+# V9 internal planning docs
+docs/v9/
+
+# Docs (large assets)
+docs/assets/console-demo.gif
+
+# Tools (dev only)
+tools/
+
+# CI
+.github/
+
+# QA
+docs/qa/
+.markdown-link-check.json
+
+# Config
+.ai-tool-config/
+.sisyphus/
+
+# Internal research (not for public distribution)
+docs/zh-CN/research-application-*.md
+
+# Dev files
+decision-log.md
+test-hooks-req.json
+test-spawn.mjs
+clawdbot.plugin.json
+nul
+
+# Handoff docs (internal)
+HANDOFF-*.md
+AGENTS.md
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Souls (internal agent prompts)
+souls/

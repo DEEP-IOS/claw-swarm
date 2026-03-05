@@ -1,0 +1,234 @@
+{
+  "id": "openclaw-swarm",
+  "name": "Claw-Swarm V9.0",
+  "description": "Field-mediated swarm intelligence engine — 12-dimensional signal field, forward-decay encoding, 7-domain architecture (core/communication/intelligence/orchestration/quality/observe/bridge), zero feature flags, zero idle modules, pheromone ACO, dual-process routing, species evolution, real-time monitoring dashboard",
+  "version": "9.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "field": {
+        "type": "object",
+        "description": "12-dimensional SignalStore configuration (signal field foundation)",
+        "properties": {
+          "maxSignals": { "type": "number", "default": 100000, "description": "Maximum signal count before garbage collection" },
+          "gcIntervalMs": { "type": "number", "default": 60000, "description": "Garbage collection scan interval (ms)" },
+          "gcThreshold": { "type": "number", "default": 0.001, "description": "Minimum signal strength before expiry" }
+        }
+      },
+      "store": {
+        "type": "object",
+        "description": "Domain persistence store (DomainStore) configuration",
+        "properties": {
+          "snapshotDir": { "type": "string", "description": "Directory for domain state snapshots. Defaults to <dataDir>/snapshots" },
+          "snapshotIntervalMs": { "type": "number", "default": 30000, "description": "Auto-snapshot interval (ms)" }
+        }
+      },
+      "communication": {
+        "type": "object",
+        "description": "Communication domain — pheromone engine, gossip protocol, state convergence, relay",
+        "properties": {
+          "pheromone": {
+            "type": "object",
+            "description": "Pheromone engine (MMAS ACO bounds, decay, trail limits)",
+            "properties": {
+              "defaultDecayRate": { "type": "number", "default": 0.05, "description": "Global pheromone decay rate per tick" },
+              "defaultMaxTTLMin": { "type": "number", "default": 120, "description": "Default max trail TTL in minutes" },
+              "mmasMin": { "type": "number", "default": 0.01, "description": "ACO minimum pheromone bound" },
+              "mmasMax": { "type": "number", "default": 1.0, "description": "ACO maximum pheromone bound" }
+            }
+          },
+          "gossip": {
+            "type": "object",
+            "description": "Gossip protocol settings",
+            "properties": {
+              "sharingPolicy": { "type": "string", "default": "all", "description": "'all', 'zone', or 'none'" }
+            }
+          },
+          "stateConvergence": {
+            "type": "object",
+            "description": "State convergence and failure detection",
+            "properties": {
+              "antiEntropyIntervalMs": { "type": "number", "default": 30000, "description": "Anti-entropy scan interval (ms)" },
+              "suspectTimeoutMs": { "type": "number", "default": 10000, "description": "Suspect state timeout (ms)" },
+              "confirmDeadTimeoutMs": { "type": "number", "default": 30000, "description": "Dead confirmation timeout (ms)" }
+            }
+          },
+          "relay": {
+            "type": "object",
+            "description": "Swarm relay client (gateway connection)",
+            "properties": {
+              "gatewayUrl": { "type": "string", "default": "http://127.0.0.1:18789", "description": "Gateway endpoint URL" },
+              "maxRetries": { "type": "number", "default": 3, "description": "Max connection retry attempts" },
+              "baseDelayMs": { "type": "number", "default": 500, "description": "Base backoff delay (ms)" }
+            }
+          }
+        }
+      },
+      "intelligence": {
+        "type": "object",
+        "description": "Intelligence domain — embedding, context engine, working memory, dual-process routing",
+        "properties": {
+          "embedding": {
+            "type": "object",
+            "description": "Dual-mode embedding engine (local ONNX or API)",
+            "properties": {
+              "mode": { "type": "string", "default": "auto", "description": "'onnx', 'api', 'auto', or 'mock'" },
+              "modelPath": { "type": "string", "description": "ONNX model file path (for local mode)" },
+              "apiConfig": {
+                "type": "object",
+                "description": "API endpoint config (for API mode)",
+                "properties": {
+                  "endpoint": { "type": "string" },
+                  "headers": { "type": "object", "additionalProperties": true }
+                }
+              }
+            }
+          },
+          "context": {
+            "type": "object",
+            "description": "Context engine settings",
+            "properties": {
+              "maxTokens": { "type": "number", "default": 128000, "description": "Maximum context window tokens" },
+              "reservedTokens": { "type": "number", "default": 4000, "description": "Reserved token buffer for system prompts" }
+            }
+          },
+          "workingMemory": {
+            "type": "object",
+            "description": "Working memory buffer",
+            "properties": {
+              "defaultCapacity": { "type": "number", "default": 15, "description": "Default working memory slot count" }
+            }
+          }
+        }
+      },
+      "orchestration": {
+        "type": "object",
+        "description": "Orchestration domain — budget tracking, ABC scheduling, conflict resolution, swarm advisor",
+        "properties": {
+          "budget": {
+            "type": "object",
+            "description": "Token budget management",
+            "properties": {
+              "defaultBudgetPerDAG": { "type": "number", "default": 100000, "description": "Default token budget per DAG" },
+              "warningThreshold": { "type": "number", "default": 0.8, "description": "Budget warning threshold (0-1)" },
+              "globalSessionBudget": { "type": "number", "default": 500000, "description": "Global session token budget" },
+              "exhaustionWarningMultiplier": { "type": "number", "default": 1.2, "description": "Budget exhaustion warning multiplier" }
+            }
+          },
+          "abcScheduler": {
+            "type": "object",
+            "description": "Artificial Bee Colony scheduler",
+            "properties": {
+              "employedRatio": { "type": "number", "default": 0.5, "description": "Employed bee ratio" },
+              "onlookerRatio": { "type": "number", "default": 0.3, "description": "Onlooker bee ratio" },
+              "scoutRatio": { "type": "number", "default": 0.2, "description": "Scout bee ratio" },
+              "abandonThreshold": { "type": "number", "default": 5, "description": "Solution abandon threshold" }
+            }
+          }
+        }
+      },
+      "quality": {
+        "type": "object",
+        "description": "Quality domain — evidence gates, circuit breaker, failure vaccination, anomaly detection",
+        "properties": {
+          "evidenceGate": {
+            "type": "object",
+            "description": "Evidence-based quality gate",
+            "properties": {
+              "hardThreshold": { "type": "number", "default": 0.6, "description": "Hard pass threshold" },
+              "softThreshold": { "type": "number", "default": 0.3, "description": "Soft flag threshold" }
+            }
+          },
+          "circuitBreaker": {
+            "type": "object",
+            "description": "Circuit breaker for failure isolation",
+            "properties": {
+              "failureThreshold": { "type": "number", "default": 3, "description": "Failures before tripping" },
+              "cooldownMs": { "type": "number", "default": 30000, "description": "Cooldown duration (ms)" },
+              "halfOpenSuccesses": { "type": "number", "default": 2, "description": "Successes to close from half-open" }
+            }
+          },
+          "anomalyDetector": {
+            "type": "object",
+            "description": "Statistical anomaly detection",
+            "properties": {
+              "windowSize": { "type": "number", "default": 50, "description": "Rolling window size" },
+              "sigmaThreshold": { "type": "number", "default": 2.0, "description": "Standard deviations for anomaly" }
+            }
+          }
+        }
+      },
+      "observe": {
+        "type": "object",
+        "description": "Observe domain — dashboard, metrics, traces, health monitoring, state broadcast",
+        "properties": {
+          "dashboard": {
+            "type": "object",
+            "description": "Real-time monitoring dashboard",
+            "properties": {
+              "port": { "type": "number", "default": 19100, "description": "Dashboard HTTP port" },
+              "consolePath": { "type": "string", "default": "./console", "description": "Path to console static assets" }
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "description": "Metrics collector settings",
+            "additionalProperties": true
+          },
+          "traces": {
+            "type": "object",
+            "description": "Distributed trace collector",
+            "properties": {
+              "maxSpanAgeMs": { "type": "number", "default": 86400000, "description": "Max span age before cleanup (ms)" }
+            }
+          },
+          "health": {
+            "type": "object",
+            "description": "Health checker",
+            "properties": {
+              "maxHistory": { "type": "number", "default": 100, "description": "Max health check history entries" }
+            }
+          },
+          "broadcast": {
+            "type": "object",
+            "description": "WebSocket state broadcaster",
+            "properties": {
+              "maxEventsPerSecond": { "type": "number", "default": 10, "description": "Event rate limit" }
+            }
+          }
+        }
+      },
+      "modelFallback": {
+        "type": "object",
+        "description": "Model fallback chains for LLM provider resilience",
+        "properties": {
+          "chains": { "type": "object", "additionalProperties": true, "description": "Fallback chain map per model name" },
+          "maxRetries": { "type": "number", "default": 3, "description": "Max retries per model" },
+          "maxDelay": { "type": "number", "default": 16000, "description": "Max backoff delay (ms)" }
+        }
+      },
+      "spawnClient": {
+        "type": "object",
+        "description": "Sub-agent spawn client (gateway integration)",
+        "properties": {
+          "gatewayHost": { "type": "string", "default": "127.0.0.1", "description": "Gateway host" },
+          "gatewayPort": { "type": "number", "default": 18789, "description": "Gateway port" },
+          "ipcTimeoutMs": { "type": "number", "default": 30000, "description": "IPC message timeout (ms)" }
+        }
+      },
+      "readinessGuard": {
+        "type": "object",
+        "description": "Readiness guard — blocks hook execution until core is initialized",
+        "properties": {
+          "timeoutMs": { "type": "number", "default": 30000, "description": "Readiness timeout (ms)" }
+        }
+      },
+      "hooks": {
+        "type": "object",
+        "description": "Hook adapter configuration overrides",
+        "additionalProperties": true
+      }
+    }
+  }
+}

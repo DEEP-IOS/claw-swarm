@@ -1,0 +1,65 @@
+# ── Dependencies / 依赖 ──────────────────────────────────────
+node_modules/
+
+# ── Database / 数据库 ────────────────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.backup-*
+
+# ── OS files / 操作系统文件 ──────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Editor / 编辑器 ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ── Logs / 日志 ──────────────────────────────────────────────
+*.log
+npm-debug.log*
+
+# ── Coverage / 覆盖率 ───────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Build artifacts / 构建产物 ───────────────────────────────
+dist/
+build/
+*.tgz
+
+# ── Environment / 环境变量 ───────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Test reports / 测试报告 ──────────────────────────────────
+test-reports/
+
+# ── Windows artifacts / Windows 产物 ─────────────────────────
+nul
+
+# ── Runtime / 运行时产物 ──────────────────────────────────────
+.gateway.pid
+
+# ── Internal audit / 内部审计 ────────────────────────────────
+.sisyphus/
+
+# ── V9 Planning / V9 内部规划文档 ────────────────────────────
+docs/v9/
+
+# ── Legacy / 旧版文件 ────────────────────────────────────────
+internal/
+
+# ── Local AI tool config / AI 工具本地配置 ───────────────────
+.ai-tool-config/
+
+# ── Internal research / 内部研究文档 ──────────────────────────
+docs/zh-CN/research-application-*.md
