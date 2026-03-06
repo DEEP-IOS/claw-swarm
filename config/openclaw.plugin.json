@@ -1,0 +1,63 @@
+{
+  "id": "claw-swarm",
+  "name": "蜂群 Claw-Swarm",
+  "version": "4.0.0",
+  "description": "Unified swarm intelligence: memory, pheromones, governance, agent design, and collaboration",
+  "description_zh": "统一蜂群智能：记忆、信息素、治理、智能体设计与协作",
+  "author": "DEEP-IOS",
+  "license": "MIT",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "capabilities": {
+    "hooks": [
+      "before_agent_start",
+      "after_tool_call",
+      "agent_end",
+      "before_reset",
+      "gateway_stop",
+      "subagent_spawning",
+      "subagent_ended",
+      "message_sending"
+    ],
+    "tools": [
+      "collaborate",
+      "pheromone",
+      "swarm_manage",
+      "swarm_spawn",
+      "swarm_design"
+    ],
+    "services": [
+      "pheromone-decay"
+    ]
+  },
+  "subsystems": {
+    "memory": {
+      "default": true,
+      "description": "Agent memory and context injection"
+    },
+    "pheromone": {
+      "default": true,
+      "description": "Bio-inspired indirect communication"
+    },
+    "governance": {
+      "default": false,
+      "description": "Capability scoring, voting, and tier management"
+    },
+    "soul": {
+      "default": true,
+      "description": "Agent persona templates and evolution"
+    },
+    "collaboration": {
+      "default": true,
+      "description": "Peer directory, struggle detection, mention routing"
+    },
+    "orchestration": {
+      "default": true,
+      "description": "Task distribution and role management"
+    }
+  },
+  "replaces": ["ome"],
+  "tags": ["swarm", "multi-agent", "governance", "pheromone", "memory", "bio-inspired"]
+}
