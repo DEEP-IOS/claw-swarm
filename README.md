@@ -9,6 +9,12 @@
 ![Tests](https://img.shields.io/badge/tests-475%20across%2030%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
+<p align="center">
+  <img src="docs/dashboard-preview.png" alt="Claw-Swarm Dashboard — real-time swarm visualization with force-directed agent graph, quality gate, pheromone signals, and RED metrics" width="100%">
+  <br>
+  <em>Real-time monitoring dashboard with Gource-inspired swarm visualization (<code>http://localhost:19100/?demo</code>)</em>
+</p>
+
 ---
 
 ## Overview / 概述

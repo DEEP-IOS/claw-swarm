@@ -758,15 +758,96 @@ function animate(time){
 }
 
 // ============================================================================
+// Demo Mode — activate with ?demo in URL
+// ============================================================================
+function initDemo(){
+  statusEl.textContent='LIVE';statusEl.style.background='#3fb950';
+  const cx=W/devicePixelRatio/2,cy=H/devicePixelRatio/2,now=Date.now();
+  const demoAgents=[
+    {id:'scout-α',persona:'scout-bee',tier:'senior'},
+    {id:'worker-β',persona:'worker-bee',tier:'mid'},
+    {id:'worker-γ',persona:'worker-bee',tier:'junior'},
+    {id:'queen-Ω',persona:'queen-messenger',tier:'senior'},
+    {id:'nurse-δ',persona:'default',tier:'mid'},
+  ];
+  demoAgents.forEach((a,i)=>{
+    const angle=(i/demoAgents.length)*Math.PI*2+0.3;
+    const r=60+Math.random()*30;
+    const color=PERSONA_COLORS[a.persona]||PERSONA_COLORS.default;
+    state.agents.set(a.id,{id:a.id,persona:a.persona,tier:a.tier,status:'active',
+      x:cx+Math.cos(angle)*r,y:cy+Math.sin(angle)*r,
+      vx:(Math.random()-0.5)*0.2,vy:(Math.random()-0.5)*0.2,
+      radius:a.persona==='queen-messenger'?16:10,targetRadius:a.persona==='queen-messenger'?16:10,
+      color,glow:0.8,lastActive:now,birthTime:now-8000,zoneId:'zone-1'});
+  });
+  renderAgentList();
+  // Quality evals
+  [{agent:'scout-α',score:0.94,passed:true},{agent:'worker-β',score:0.87,passed:true},
+   {agent:'worker-γ',score:0.72,passed:true},{agent:'nurse-δ',score:0.91,passed:true},
+   {agent:'worker-β',score:0.43,passed:false}].forEach(q=>{
+    state.qualityEvals.push({...q,agentId:q.agent,ts:now});
+  });
+  renderQualityList();
+  // RED + Swarm
+  $('#mRate').textContent='147';$('#mError').textContent='3.2%';$('#mDur').textContent='285ms';
+  state.swarm={tasksCompleted:23,tasksFailed:2,pheromoneEvents:89,memoryEvents:34};
+  $('#mTasks').textContent='23';$('#mPh').textContent='89';$('#mMem').textContent='34';
+  // Pheromones
+  Object.assign(state.pheromonesByType,{trail:42,alarm:8,recruit:15,queen:3,dance:21});
+  updatePheromoneUI();
+  // Recent tasks + memory for hover panels
+  state.recentTasks=[
+    {status:'completed',taskId:'t1',description:'auth-refactor',duration:2300,timestamp:now},
+    {status:'completed',taskId:'t2',description:'api-endpoint',duration:1100,timestamp:now},
+    {status:'failed',taskId:'t3',description:'db-migration',duration:null,timestamp:now},
+    {status:'completed',taskId:'t4',description:'style-fix',duration:800,timestamp:now},
+  ];
+  state.recentMemoryOps=[
+    {action:'record',layer:'episodic',agentId:'scout-α',timestamp:now},
+    {action:'query',layer:'semantic',agentId:'worker-β',timestamp:now},
+    {action:'snapshot',layer:'working',agentId:'queen-Ω',timestamp:now},
+  ];
+  // Header
+  $('#headerStats').textContent='Agents: 5 | Tasks: 23/2';
+  // Pheromone trails + particles on canvas
+  const aa=[...state.agents.values()];
+  for(let i=0;i<6;i++){
+    const f=aa[i%aa.length],t=aa[(i+2)%aa.length];
+    const types=['trail','trail','recruit','alarm','dance'];
+    state.trails.push({fx:f.x,fy:f.y,tx:t.x,ty:t.y,type:types[i%types.length],
+      color:PH_COLORS[types[i%types.length]],intensity:0.4+Math.random()*0.5,maxAge:400,age:Math.floor(Math.random()*200)});
+  }
+  for(let i=0;i<5;i++){
+    const f=aa[i%aa.length],t=aa[(i+3)%aa.length];
+    state.particles.push({fx:f.x,fy:f.y,tx:t.x,ty:t.y,progress:Math.random()*0.7,
+      speed:0.002+Math.random()*0.002,color:f.color,size:2+Math.random()*2,trail:[]});
+  }
+  // Event log
+  const entries=[
+    {cls:'task',text:'<b style="color:var(--green)">[task.completed]</b> scout-α finished auth-refactor (2.3s)'},
+    {cls:'pheromone',text:'<b style="color:var(--accent)">[pheromone.emitted]</b> trail pheromone by worker-β → zone-3'},
+    {cls:'quality',text:'<b style="color:var(--purple)">[quality.evaluated]</b> worker-γ scored 72% — PASSED'},
+    {cls:'agent',text:'<b style="color:var(--green)">[agent.registered]</b> nurse-δ joined as nurse-bee (mid)'},
+    {cls:'error',text:'<b style="color:var(--red)">[task.failed]</b> worker-β db-migration timed out'},
+    {cls:'memory',text:'<b style="color:#3fb9a0">[memory.record]</b> episodic memory stored by scout-α'},
+  ];
+  const hh=new Date().getHours().toString().padStart(2,'0');
+  const mm=new Date().getMinutes().toString().padStart(2,'0');
+  logEl.innerHTML=entries.map((e,i)=>
+    `<div class="entry ${e.cls}"><span class="ts">${hh}:${(parseInt(mm)-i).toString().padStart(2,'0')}:${(30+i*5).toString().padStart(2,'0')}</span>${e.text}</div>`
+  ).join('');
+}
+
+// ============================================================================
 // Init
 // ============================================================================
-connectSSE();
-setInterval(pollMetrics,5000);
-pollMetrics();
+const isDemo=location.search.includes('demo');
+if(!isDemo){connectSSE();setInterval(pollMetrics,5000);pollMetrics();}
 // Clear canvas fully on first frame
 ctx.fillStyle='#0d1117';
 ctx.fillRect(0,0,W,H);
 requestAnimationFrame(animate);
+if(isDemo)setTimeout(initDemo,100);
 </script>
 </body>
 </html>
