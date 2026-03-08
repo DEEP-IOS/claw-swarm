@@ -6,53 +6,98 @@
 <title>Claw-Swarm V5.0 Dashboard</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--dim:#8b949e;--accent:#f0883e;--green:#3fb950;--red:#f85149;--blue:#58a6ff}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:grid;grid-template-rows:48px 1fr 200px;grid-template-columns:240px 1fr 280px}
-header{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px}
-header h1{font-size:16px;color:var(--accent)}
-header .badge{background:var(--green);color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
-header .stat{color:var(--dim);font-size:12px;margin-left:auto}
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--dim:#8b949e;--accent:#f0883e;--green:#3fb950;--red:#f85149;--blue:#58a6ff;--purple:#bc8cff}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:grid;grid-template-rows:48px 1fr auto 160px;grid-template-columns:220px 1fr 240px;overflow:hidden}
+/* ── Header ── */
+header{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px;z-index:10}
+header h1{font-size:15px;color:var(--accent);white-space:nowrap}
+header .badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.5px}
+header .stat{color:var(--dim);font-size:12px;margin-left:auto;white-space:nowrap}
+/* ── Sidebar ── */
 .sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:8px}
-.sidebar h2{font-size:12px;color:var(--dim);padding:8px;text-transform:uppercase;letter-spacing:1px}
-.agent{padding:6px 10px;border-radius:6px;margin:2px 0;font-size:13px;cursor:default}
+.sidebar h2{font-size:11px;color:var(--dim);padding:6px 8px;text-transform:uppercase;letter-spacing:1px}
+.agent{padding:5px 8px;border-radius:6px;margin:2px 0;font-size:12px;display:flex;align-items:center;gap:6px;transition:background .15s}
 .agent:hover{background:var(--border)}
-.agent .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-.dot.active{background:var(--green)}.dot.busy{background:var(--accent)}.dot.offline{background:var(--dim)}
-.main{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}
-.card h3{font-size:13px;color:var(--accent);margin-bottom:8px}
-.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.metric{text-align:center;padding:12px;background:var(--bg);border-radius:6px}
-.metric .val{font-size:24px;font-weight:700;color:var(--blue)}
-.metric .label{font-size:11px;color:var(--dim);margin-top:4px}
-.ph-bar{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px}
-.ph-bar .bar{height:6px;border-radius:3px;background:var(--accent);transition:width .3s}
-.ph-bar .type{width:60px;color:var(--dim)}
-.ph-bar .val{width:40px;text-align:right;color:var(--text);font-size:11px}
+.agent .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.agent .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .tier{font-size:9px;color:var(--dim);background:var(--bg);padding:1px 4px;border-radius:3px}
+.dot-active{background:var(--green)}.dot-busy{background:var(--accent)}.dot-offline{background:var(--dim)}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+.dot-active{animation:pulse-dot 2s ease-in-out infinite}
+/* ── Canvas Area ── */
+.canvas-area{position:relative;overflow:hidden;background:var(--bg)}
+.canvas-area canvas{display:block;width:100%;height:100%}
+/* ── Right Panel ── */
 .panel-right{background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;padding:8px}
-.panel-right h2{font-size:12px;color:var(--dim);padding:8px;text-transform:uppercase;letter-spacing:1px}
-.quality-item{padding:6px 10px;font-size:12px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border)}
-.quality-item .pass{color:var(--green)}.quality-item .fail{color:var(--red)}
-.log{grid-column:1/-1;background:var(--surface);border-top:1px solid var(--border);overflow-y:auto;padding:8px;font-family:'Cascadia Code',monospace;font-size:12px;line-height:1.6}
-.log .entry{padding:1px 8px;border-left:3px solid var(--border)}
+.panel-right h2{font-size:11px;color:var(--dim);padding:6px 8px;text-transform:uppercase;letter-spacing:1px}
+.quality-item{padding:5px 8px;font-size:11px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:2px;animation:slideIn .3s ease-out}
+.quality-item .qi-top{display:flex;justify-content:space-between;align-items:center}
+.quality-item .qi-agent{color:var(--text);font-weight:500}
+.quality-item .qi-score{font-weight:700;font-size:12px}
+.qi-pass{color:var(--green)}.qi-fail{color:var(--red)}
+.quality-item .qi-bar{height:3px;border-radius:2px;background:var(--border);overflow:hidden;margin-top:2px}
+.quality-item .qi-bar-fill{height:100%;border-radius:2px;transition:width .4s ease-out}
+.quality-item .qi-time{font-size:9px;color:var(--dim)}
+@keyframes slideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+/* ── Bottom Metrics Bar ── */
+.bottom-bar{grid-column:1/-1;background:var(--surface);border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;padding:8px 12px}
+.card{background:var(--bg);border-radius:6px;padding:10px 12px}
+.card h3{font-size:11px;color:var(--accent);margin-bottom:6px;font-weight:600}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.metric{text-align:center;padding:8px 4px;background:var(--surface);border-radius:5px;position:relative;cursor:default;transition:background .15s}
+.metric:hover{background:var(--border)}
+.metric .val{font-size:20px;font-weight:700;color:var(--blue)}
+.metric .label{font-size:10px;color:var(--dim);margin-top:2px}
+.ph-bar{display:flex;align-items:center;gap:4px;margin:2px 0;font-size:11px}
+.ph-bar .type{width:52px;color:var(--dim);font-size:10px}
+.ph-bar .bar-track{flex:1;height:5px;border-radius:3px;background:var(--surface);overflow:hidden}
+.ph-bar .bar-fill{height:100%;border-radius:3px;transition:width .5s ease-out}
+.ph-bar .val{width:32px;text-align:right;color:var(--text);font-size:10px}
+/* ── Hover Tooltip Panel ── */
+.tooltip-panel{position:absolute;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;min-width:200px;max-width:280px;box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s ease-out;font-size:11px}
+.tooltip-panel.visible{opacity:1;pointer-events:auto}
+.tooltip-panel h4{font-size:11px;color:var(--accent);margin-bottom:6px}
+.tooltip-panel .tp-row{display:flex;justify-content:space-between;padding:2px 0;color:var(--text)}
+.tooltip-panel .tp-val{color:var(--blue);font-weight:600}
+.tooltip-panel .tp-divider{border-top:1px solid var(--border);margin:4px 0}
+.tooltip-panel .tp-item{padding:1px 0;color:var(--dim);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-mini-bar{display:inline-block;height:4px;border-radius:2px;background:var(--accent);margin-right:4px;vertical-align:middle}
+/* ── Event Log ── */
+.log{grid-column:1/-1;background:var(--surface);border-top:1px solid var(--border);overflow-y:auto;padding:6px 8px;font-family:'Cascadia Code','Fira Code',monospace;font-size:11px;line-height:1.5}
+.log .entry{padding:1px 6px;border-left:3px solid var(--border)}
 .log .entry.task{border-color:var(--blue)}.log .entry.agent{border-color:var(--green)}
-.log .entry.pheromone{border-color:var(--accent)}.log .entry.error{border-color:var(--red)}
-.log .ts{color:var(--dim);margin-right:8px}
+.log .entry.pheromone{border-color:var(--accent)}.log .entry.quality{border-color:var(--purple)}
+.log .entry.memory{border-color:#3fb9a0}.log .entry.error{border-color:var(--red)}
+.log .ts{color:var(--dim);margin-right:6px}
+/* ── Pheromone colors ── */
+.ph-trail{background:var(--accent)}.ph-alarm{background:var(--red)}.ph-recruit{background:var(--blue)}
+.ph-queen{background:var(--purple)}.ph-dance{background:var(--green)}
 </style>
 </head>
 <body>
 <header>
-  <h1>🐝 Claw-Swarm V5.0</h1>
-  <span class="badge" id="status">CONNECTING</span>
-  <span class="stat" id="headerStats">—</span>
+  <h1>&#x1f41d; Claw-Swarm V5.0</h1>
+  <span class="badge" id="status" style="background:var(--accent);color:#000">CONNECTING</span>
+  <span class="stat" id="headerStats">Agents: 0 | Tasks: 0/0</span>
 </header>
 
 <div class="sidebar">
   <h2>Agents</h2>
-  <div id="agentList"><div class="agent"><span class="dot offline"></span>No agents</div></div>
+  <div id="agentList"><div class="agent"><span class="dot dot-offline"></span><span class="name" style="color:var(--dim)">No agents</span></div></div>
 </div>
 
-<div class="main">
+<div class="canvas-area">
+  <canvas id="swarmCanvas"></canvas>
+</div>
+
+<div class="panel-right">
+  <h2>Quality Gate</h2>
+  <div id="qualityList">
+    <div class="quality-item"><div class="qi-top"><span class="qi-agent" style="color:var(--dim)">No evaluations</span><span>—</span></div></div>
+  </div>
+</div>
+
+<div class="bottom-bar">
   <div class="card">
     <h3>RED Metrics</h3>
     <div class="metrics">
@@ -64,64 +109,259 @@ header .stat{color:var(--dim);font-size:12px;margin-left:auto}
   <div class="card">
     <h3>Pheromone Signals</h3>
     <div id="phList">
-      <div class="ph-bar"><span class="type">trail</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
-      <div class="ph-bar"><span class="type">alarm</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
-      <div class="ph-bar"><span class="type">recruit</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
-      <div class="ph-bar"><span class="type">queen</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
-      <div class="ph-bar"><span class="type">dance</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">trail</span><div class="bar-track"><div class="bar-fill ph-trail" style="width:0%"></div></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">alarm</span><div class="bar-track"><div class="bar-fill ph-alarm" style="width:0%"></div></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">recruit</span><div class="bar-track"><div class="bar-fill ph-recruit" style="width:0%"></div></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">queen</span><div class="bar-track"><div class="bar-fill ph-queen" style="width:0%"></div></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">dance</span><div class="bar-track"><div class="bar-fill ph-dance" style="width:0%"></div></div><span class="val">0</span></div>
     </div>
   </div>
-  <div class="card">
+  <div class="card" style="position:relative">
     <h3>Swarm Stats</h3>
     <div class="metrics">
-      <div class="metric"><div class="val" id="mTasks">0</div><div class="label">Tasks Done</div></div>
-      <div class="metric"><div class="val" id="mPh">0</div><div class="label">Pheromones</div></div>
-      <div class="metric"><div class="val" id="mMem">0</div><div class="label">Memory Ops</div></div>
+      <div class="metric" id="statTasks" data-tooltip="tasks"><div class="val" id="mTasks">0</div><div class="label">Tasks Done</div></div>
+      <div class="metric" id="statPh" data-tooltip="pheromones"><div class="val" id="mPh">0</div><div class="label">Pheromones</div></div>
+      <div class="metric" id="statMem" data-tooltip="memory"><div class="val" id="mMem">0</div><div class="label">Memory Ops</div></div>
     </div>
-  </div>
-</div>
-
-<div class="panel-right">
-  <h2>Quality Gate</h2>
-  <div id="qualityList">
-    <div class="quality-item"><span>No evaluations</span><span class="pass">—</span></div>
+    <div class="tooltip-panel" id="tooltipPanel"></div>
   </div>
 </div>
 
 <div class="log">
   <div id="logEntries">
-    <div class="entry"><span class="ts">--:--:--</span>Waiting for events…</div>
+    <div class="entry"><span class="ts">--:--:--</span>Waiting for events&#x2026;</div>
   </div>
 </div>
 
 <script>
+// ============================================================================
+// State
+// ============================================================================
 const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
 const logEl=$('#logEntries');
 const statusEl=$('#status');
-let evtSource;
+const canvas=$('#swarmCanvas');
+const ctx=canvas.getContext('2d');
 
+const state={
+  agents:new Map(),        // id -> {id,persona,tier,status,x,y,vx,vy,radius,targetRadius,color,glow,lastActive,birthTime}
+  particles:[],            // task flow particles
+  trails:[],               // pheromone trails
+  popups:[],               // score popups (quality eval bubbles)
+  qualityEvals:[],         // quality evaluations list
+  pheromonesByType:{trail:0,alarm:0,recruit:0,queen:0,dance:0},
+  recentTasks:[],
+  recentMemoryOps:[],
+  swarm:{tasksCompleted:0,tasksFailed:0,pheromoneEvents:0,memoryEvents:0},
+};
+
+// Color palette for personas
+const PERSONA_COLORS={
+  'scout-bee':'#f0883e','worker-bee':'#58a6ff','guard-bee':'#f85149',
+  'queen-messenger':'#bc8cff',default:'#3fb950'
+};
+const PH_COLORS={trail:'#f0883e',alarm:'#f85149',recruit:'#58a6ff',queen:'#bc8cff',dance:'#3fb950'};
+
+// ============================================================================
+// SSE Connection
+// ============================================================================
+let evtSource;
 function connectSSE(){
   evtSource=new EventSource('/events');
   evtSource.onopen=()=>{statusEl.textContent='LIVE';statusEl.style.background='#3fb950'};
   evtSource.onerror=()=>{statusEl.textContent='RECONNECTING';statusEl.style.background='#f85149'};
-  evtSource.onmessage=e=>{try{addLog(JSON.parse(e.data))}catch{}};
-  evtSource.addEventListener('task.completed',e=>addLog(JSON.parse(e.data),'task'));
-  evtSource.addEventListener('agent.start',e=>addLog(JSON.parse(e.data),'agent'));
-  evtSource.addEventListener('pheromone.emitted',e=>addLog(JSON.parse(e.data),'pheromone'));
+  evtSource.onmessage=e=>{
+    try{
+      const msg=JSON.parse(e.data);
+      routeEvent(msg.topic||'',msg.data||msg,msg.timestamp||Date.now());
+    }catch{}
+  };
 }
 
-function addLog(data,type=''){
-  const d=new Date();
-  const ts=d.toTimeString().slice(0,8);
-  const text=typeof data==='string'?data:JSON.stringify(data).slice(0,120);
+function routeEvent(topic,data,ts){
+  const logType=topic.startsWith('task.')?'task':topic.startsWith('agent.')?'agent':
+    topic.startsWith('pheromone.')?'pheromone':topic.startsWith('quality.')?'quality':
+    topic.startsWith('memory.')?'memory':'';
+  addLog(data,logType,topic);
+
+  if(topic.startsWith('agent.')) handleAgentEvent(topic,data);
+  else if(topic.startsWith('task.')) handleTaskEvent(topic,data);
+  else if(topic.startsWith('pheromone.')) handlePheromoneEvent(topic,data);
+  else if(topic.startsWith('quality.')) handleQualityEvent(topic,data);
+  else if(topic.startsWith('memory.')) handleMemoryEvent(topic,data);
+}
+
+// ============================================================================
+// Event Handlers
+// ============================================================================
+function handleAgentEvent(topic,data){
+  const id=data.agentId||data.id||('agent-'+Math.random().toString(36).slice(2,6));
+  const isEnd=topic.includes('end')||topic.includes('deregister')||topic.includes('remove');
+
+  if(isEnd){
+    const a=state.agents.get(id);
+    if(a){a.status='offline';a.targetRadius=0;}
+  }else{
+    if(!state.agents.has(id)){
+      // New agent — spawn at random position
+      const cx=canvas.width/2, cy=canvas.height/2;
+      const angle=Math.random()*Math.PI*2;
+      const dist=80+Math.random()*120;
+      const persona=data.persona||data.role||'default';
+      state.agents.set(id,{
+        id,persona,tier:data.tier||'',status:'active',
+        x:cx+Math.cos(angle)*dist, y:cy+Math.sin(angle)*dist,
+        vx:0, vy:0, radius:0, targetRadius:18+Math.random()*8,
+        color:PERSONA_COLORS[persona]||PERSONA_COLORS.default,
+        glow:1, lastActive:Date.now(), birthTime:Date.now(),
+        zoneId:data.zoneId||null,
+      });
+    }else{
+      const a=state.agents.get(id);
+      a.status='active'; a.lastActive=Date.now(); a.glow=1;
+      if(data.persona)a.color=PERSONA_COLORS[data.persona]||a.color;
+    }
+  }
+  renderAgentList();
+}
+
+function handleTaskEvent(topic,data){
+  const isComplete=topic.includes('complete')||topic.includes('success');
+  const isFail=topic.includes('fail')||topic.includes('error');
+  if(isComplete)state.swarm.tasksCompleted++;
+  if(isFail)state.swarm.tasksFailed++;
+  state.recentTasks.push({topic,status:isComplete?'completed':isFail?'failed':'active',
+    taskId:data.taskId||data.id,description:data.description,agentId:data.agentId,ts:Date.now()});
+  if(state.recentTasks.length>30)state.recentTasks.shift();
+
+  // Spawn particle between random agents
+  const agents=[...state.agents.values()].filter(a=>a.status==='active');
+  if(agents.length>=2){
+    const from=agents[Math.floor(Math.random()*agents.length)];
+    let to=agents[Math.floor(Math.random()*agents.length)];
+    if(to===from)to=agents[(agents.indexOf(from)+1)%agents.length];
+    state.particles.push({
+      fx:from.x,fy:from.y,tx:to.x,ty:to.y,
+      progress:0,speed:0.3+Math.random()*0.4,
+      color:isComplete?'#3fb950':isFail?'#f85149':'#58a6ff',
+      size:3+Math.random()*2,trail:[],
+    });
+    from.glow=1; to.glow=0.7;
+  }
+}
+
+function handlePheromoneEvent(topic,data){
+  state.swarm.pheromoneEvents++;
+  const pType=data.type||data.pheromoneType||'trail';
+  state.pheromonesByType[pType]=(state.pheromonesByType[pType]||0)+1;
+  updatePheromoneUI();
+
+  // Draw trail between two random active agents
+  const agents=[...state.agents.values()].filter(a=>a.status==='active');
+  if(agents.length>=2){
+    const a=agents[Math.floor(Math.random()*agents.length)];
+    const b=agents[Math.floor(Math.random()*agents.length)];
+    state.trails.push({
+      fx:a.x,fy:a.y,tx:b.x,ty:b.y,
+      type:pType,intensity:0.8+Math.random()*0.2,
+      age:0,maxAge:180+Math.random()*120,
+    });
+  }
+}
+
+function handleQualityEvent(topic,data){
+  const eval_={
+    agentId:data.agentId||'unknown',score:data.score||0,
+    passed:data.passed!==undefined?data.passed:(data.score>=0.6),
+    ts:Date.now()
+  };
+  state.qualityEvals.unshift(eval_);
+  if(state.qualityEvals.length>30)state.qualityEvals.pop();
+  renderQualityList();
+
+  // Show popup on agent node
+  const agent=state.agents.get(eval_.agentId);
+  if(agent){
+    state.popups.push({
+      x:agent.x,y:agent.y-agent.radius-12,
+      text:eval_.passed?'\u2713':'\u2717',
+      color:eval_.passed?'#3fb950':'#f85149',
+      age:0,maxAge:90,
+    });
+  }
+}
+
+function handleMemoryEvent(topic,data){
+  state.swarm.memoryEvents++;
+  state.recentMemoryOps.push({topic,action:data.action,layer:data.layer||data.memoryType,agentId:data.agentId,ts:Date.now()});
+  if(state.recentMemoryOps.length>30)state.recentMemoryOps.shift();
+}
+
+// ============================================================================
+// UI Renderers
+// ============================================================================
+function renderAgentList(){
+  const el=$('#agentList');
+  const agents=[...state.agents.values()];
+  if(agents.length===0){
+    el.innerHTML='<div class="agent"><span class="dot dot-offline"></span><span class="name" style="color:var(--dim)">No agents</span></div>';
+    return;
+  }
+  el.innerHTML=agents.map(a=>{
+    const dotClass=a.status==='active'?'dot-active':a.status==='busy'?'dot-busy':'dot-offline';
+    const tierBadge=a.tier?`<span class="tier">${a.tier}</span>`:'';
+    return`<div class="agent"><span class="dot ${dotClass}" style="background:${a.color}"></span><span class="name">${a.id}</span>${tierBadge}</div>`;
+  }).join('');
+}
+
+function renderQualityList(){
+  const el=$('#qualityList');
+  if(state.qualityEvals.length===0){
+    el.innerHTML='<div class="quality-item"><div class="qi-top"><span class="qi-agent" style="color:var(--dim)">No evaluations</span><span>\u2014</span></div></div>';
+    return;
+  }
+  el.innerHTML=state.qualityEvals.slice(0,20).map(q=>{
+    const scorePercent=Math.round((q.score||0)*100);
+    const cls=q.passed?'qi-pass':'qi-fail';
+    const icon=q.passed?'\u2713':'\u2717';
+    const barColor=q.passed?'var(--green)':'var(--red)';
+    const time=new Date(q.ts).toTimeString().slice(0,8);
+    return`<div class="quality-item">
+      <div class="qi-top"><span class="qi-agent">${q.agentId}</span><span class="${cls}">${icon} ${scorePercent}%</span></div>
+      <div class="qi-bar"><div class="qi-bar-fill" style="width:${scorePercent}%;background:${barColor}"></div></div>
+      <span class="qi-time">${time}</span>
+    </div>`;
+  }).join('');
+}
+
+function updatePheromoneUI(){
+  const types=['trail','alarm','recruit','queen','dance'];
+  const max=Math.max(1,...types.map(t=>state.pheromonesByType[t]||0));
+  const bars=$('#phList').children;
+  types.forEach((t,i)=>{
+    const count=state.pheromonesByType[t]||0;
+    const pct=Math.round(count/max*100);
+    bars[i].querySelector('.bar-fill').style.width=pct+'%';
+    bars[i].querySelector('.val').textContent=count;
+  });
+}
+
+function addLog(data,type='',topic=''){
+  const ts=new Date().toTimeString().slice(0,8);
+  const text=topic?(topic+': '):'';
+  const detail=typeof data==='string'?data:JSON.stringify(data).slice(0,100);
   const div=document.createElement('div');
   div.className='entry '+(type||'');
-  div.innerHTML=`<span class="ts">${ts}</span>${text}`;
+  div.innerHTML=`<span class="ts">${ts}</span>${text}${detail}`;
   logEl.appendChild(div);
   if(logEl.children.length>200)logEl.removeChild(logEl.firstChild);
   logEl.parentElement.scrollTop=logEl.parentElement.scrollHeight;
 }
 
+// ============================================================================
+// Metrics Polling
+// ============================================================================
 async function pollMetrics(){
   try{
     const r=await fetch('/api/metrics');
@@ -132,17 +372,401 @@ async function pollMetrics(){
       $('#mDur').textContent=m.red.avgDuration+'ms';
     }
     if(m.swarm){
-      $('#mTasks').textContent=m.swarm.tasksCompleted||0;
-      $('#mPh').textContent=m.swarm.pheromoneEvents||0;
-      $('#mMem').textContent=m.swarm.memoryEvents||0;
+      state.swarm.tasksCompleted=m.swarm.tasksCompleted||0;
+      state.swarm.tasksFailed=m.swarm.tasksFailed||0;
+      state.swarm.pheromoneEvents=m.swarm.pheromoneEvents||0;
+      state.swarm.memoryEvents=m.swarm.memoryEvents||0;
+      $('#mTasks').textContent=state.swarm.tasksCompleted;
+      $('#mPh').textContent=state.swarm.pheromoneEvents;
+      $('#mMem').textContent=state.swarm.memoryEvents;
     }
-    $('#headerStats').textContent=`Agents: ${m.swarm?.agentEvents||0} | Tasks: ${m.swarm?.tasksCompleted||0}/${m.swarm?.tasksFailed||0}`;
+    // Sync agents from server state
+    if(m.agents&&m.agents.length){
+      for(const a of m.agents){
+        if(a.id&&!state.agents.has(a.id)){
+          handleAgentEvent('agent.synced',a);
+        }else if(a.id){
+          const existing=state.agents.get(a.id);
+          if(existing&&a.status==='offline')existing.targetRadius=0;
+          if(existing)existing.lastActive=Date.now();
+        }
+      }
+    }
+    // Sync quality evals
+    if(m.qualityEvals&&m.qualityEvals.length&&state.qualityEvals.length===0){
+      state.qualityEvals=m.qualityEvals.map(q=>({...q,ts:q.timestamp||Date.now()}));
+      renderQualityList();
+    }
+    // Sync pheromone types
+    if(m.pheromonesByType){
+      Object.assign(state.pheromonesByType,m.pheromonesByType);
+      updatePheromoneUI();
+    }
+    // Sync recent tasks/memory
+    if(m.recentTasks&&m.recentTasks.length)state.recentTasks=m.recentTasks;
+    if(m.recentMemoryOps&&m.recentMemoryOps.length)state.recentMemoryOps=m.recentMemoryOps;
+    // Header
+    const agentCount=[...state.agents.values()].filter(a=>a.status==='active').length;
+    $('#headerStats').textContent=`Agents: ${agentCount} | Tasks: ${state.swarm.tasksCompleted}/${state.swarm.tasksFailed}`;
   }catch{}
 }
 
+// ============================================================================
+// Hover Tooltip Panels
+// ============================================================================
+const tooltipEl=$('#tooltipPanel');
+let tooltipVisible=false;
+
+function showTooltip(type,rect){
+  let html='';
+  if(type==='tasks'){
+    const sr=state.swarm.tasksCompleted+state.swarm.tasksFailed;
+    const rate=sr>0?Math.round(state.swarm.tasksCompleted/sr*100):0;
+    html=`<h4>Task Details</h4>
+      <div class="tp-row"><span>Completed</span><span class="tp-val">${state.swarm.tasksCompleted}</span></div>
+      <div class="tp-row"><span>Failed</span><span class="tp-val" style="color:var(--red)">${state.swarm.tasksFailed}</span></div>
+      <div class="tp-row"><span>Success Rate</span><span class="tp-val">${rate}%</span></div>
+      <div class="tp-divider"></div>`;
+    const recent=state.recentTasks.slice(-5).reverse();
+    if(recent.length){
+      html+='<div style="color:var(--dim);font-size:10px;margin-bottom:2px">Recent:</div>';
+      for(const t of recent){
+        const icon=t.status==='completed'?'<span style="color:var(--green)">\u2713</span>':'<span style="color:var(--red)">\u2717</span>';
+        html+=`<div class="tp-item">${icon} ${t.description||t.taskId||t.topic}</div>`;
+      }
+    }
+  }else if(type==='pheromones'){
+    const types=['trail','alarm','recruit','queen','dance'];
+    const max=Math.max(1,...types.map(t=>state.pheromonesByType[t]||0));
+    html='<h4>Pheromone Breakdown</h4>';
+    for(const t of types){
+      const c=state.pheromonesByType[t]||0;
+      const w=Math.round(c/max*80);
+      html+=`<div class="tp-row"><span>${t}</span><span><span class="tp-mini-bar" style="width:${w}px;background:${PH_COLORS[t]}"></span><span class="tp-val">${c}</span></span></div>`;
+    }
+    html+=`<div class="tp-divider"></div>
+      <div class="tp-row"><span>Total</span><span class="tp-val">${state.swarm.pheromoneEvents}</span></div>`;
+  }else if(type==='memory'){
+    const ops={working:0,episodic:0,semantic:0};
+    for(const m of state.recentMemoryOps){
+      const l=(m.layer||'').toLowerCase();
+      if(l.includes('working'))ops.working++;
+      else if(l.includes('episodic'))ops.episodic++;
+      else if(l.includes('semantic'))ops.semantic++;
+    }
+    const max=Math.max(1,ops.working,ops.episodic,ops.semantic);
+    html=`<h4>Memory Breakdown</h4>
+      <div class="tp-row"><span>Working</span><span><span class="tp-mini-bar" style="width:${Math.round(ops.working/max*80)}px;background:#58a6ff"></span><span class="tp-val">${ops.working}</span></span></div>
+      <div class="tp-row"><span>Episodic</span><span><span class="tp-mini-bar" style="width:${Math.round(ops.episodic/max*80)}px;background:#3fb950"></span><span class="tp-val">${ops.episodic}</span></span></div>
+      <div class="tp-row"><span>Semantic</span><span><span class="tp-mini-bar" style="width:${Math.round(ops.semantic/max*80)}px;background:#bc8cff"></span><span class="tp-val">${ops.semantic}</span></span></div>
+      <div class="tp-divider"></div>`;
+    const recent=state.recentMemoryOps.slice(-5).reverse();
+    if(recent.length){
+      html+='<div style="color:var(--dim);font-size:10px;margin-bottom:2px">Recent:</div>';
+      for(const m of recent){
+        html+=`<div class="tp-item">\u2713 ${m.action||m.topic} (${m.layer||'?'})</div>`;
+      }
+    }
+    html+=`<div class="tp-row"><span>Total Ops</span><span class="tp-val">${state.swarm.memoryEvents}</span></div>`;
+  }
+  tooltipEl.innerHTML=html;
+  tooltipEl.style.bottom='100%';
+  tooltipEl.style.right='0';
+  tooltipEl.style.marginBottom='8px';
+  tooltipEl.classList.add('visible');
+  tooltipVisible=true;
+}
+function hideTooltip(){tooltipEl.classList.remove('visible');tooltipVisible=false;}
+
+// Attach hover events to stat cards
+for(const el of $$('[data-tooltip]')){
+  el.addEventListener('mouseenter',function(){showTooltip(this.dataset.tooltip,this.getBoundingClientRect())});
+  el.addEventListener('mouseleave',hideTooltip);
+}
+
+// ============================================================================
+// Canvas — Gource-style Swarm Visualization
+// ============================================================================
+let W,H,lastTime=0;
+const TWO_PI=Math.PI*2;
+
+function resizeCanvas(){
+  const rect=canvas.parentElement.getBoundingClientRect();
+  W=canvas.width=rect.width*devicePixelRatio;
+  H=canvas.height=rect.height*devicePixelRatio;
+  canvas.style.width=rect.width+'px';
+  canvas.style.height=rect.height+'px';
+  ctx.scale(devicePixelRatio,devicePixelRatio);
+}
+resizeCanvas();
+window.addEventListener('resize',resizeCanvas);
+
+function lerp(a,b,t){return a+(b-a)*t}
+function easeOut(t){return 1-(1-t)*(1-t)*(1-t)}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function quadBezier(p0,p1,p2,t){const u=1-t;return{x:u*u*p0.x+2*u*t*p1.x+t*t*p2.x,y:u*u*p0.y+2*u*t*p1.y+t*t*p2.y}}
+
+function updatePhysics(dt){
+  const cx=W/devicePixelRatio/2, cy=H/devicePixelRatio/2;
+  const agents=[...state.agents.values()];
+  const n=agents.length;
+
+  for(let i=0;i<n;i++){
+    const a=agents[i];
+    // Central gravity
+    const dx=cx-a.x, dy=cy-a.y;
+    const d=Math.hypot(dx,dy)||1;
+    a.vx+=dx/d*0.15*dt;
+    a.vy+=dy/d*0.15*dt;
+
+    // Repulsion from other nodes
+    for(let j=i+1;j<n;j++){
+      const b=agents[j];
+      const ddx=a.x-b.x, ddy=a.y-b.y;
+      const dd=Math.hypot(ddx,ddy)||1;
+      if(dd<200){
+        const force=800/(dd*dd)*dt;
+        const fx=ddx/dd*force, fy=ddy/dd*force;
+        a.vx+=fx; a.vy+=fy;
+        b.vx-=fx; b.vy-=fy;
+      }
+    }
+
+    // Spring force for same-zone agents
+    for(let j=i+1;j<n;j++){
+      const b=agents[j];
+      if(a.zoneId&&a.zoneId===b.zoneId){
+        const ddx=b.x-a.x, ddy=b.y-a.y;
+        const dd=Math.hypot(ddx,ddy)||1;
+        const force=(dd-100)*0.002*dt;
+        a.vx+=ddx/dd*force; a.vy+=ddy/dd*force;
+        b.vx-=ddx/dd*force; b.vy-=ddy/dd*force;
+      }
+    }
+
+    // Damping
+    a.vx*=0.92; a.vy*=0.92;
+    a.x+=a.vx; a.y+=a.vy;
+
+    // Keep in bounds
+    const margin=40;
+    const w=W/devicePixelRatio, h=H/devicePixelRatio;
+    if(a.x<margin){a.x=margin;a.vx*=-0.5}
+    if(a.x>w-margin){a.x=w-margin;a.vx*=-0.5}
+    if(a.y<margin){a.y=margin;a.vy*=-0.5}
+    if(a.y>h-margin){a.y=h-margin;a.vy*=-0.5}
+
+    // Animate radius (birth/death)
+    a.radius=lerp(a.radius,a.targetRadius,0.06);
+
+    // Decay glow
+    a.glow=lerp(a.glow,0.2,0.02);
+
+    // Remove dead agents after animation
+    if(a.status==='offline'&&a.radius<0.5){
+      state.agents.delete(a.id);
+    }
+  }
+}
+
+function updateParticles(dt){
+  for(let i=state.particles.length-1;i>=0;i--){
+    const p=state.particles[i];
+    p.progress+=p.speed*dt*0.016;
+    // Quadratic bezier with control point offset
+    const mx=(p.fx+p.tx)/2, my=(p.fy+p.ty)/2;
+    const cx_=mx+(p.fy-p.ty)*0.3, cy_=my+(p.tx-p.fx)*0.3;
+    const pos=quadBezier({x:p.fx,y:p.fy},{x:cx_,y:cy_},{x:p.tx,y:p.ty},Math.min(p.progress,1));
+    p.trail.push({x:pos.x,y:pos.y});
+    if(p.trail.length>12)p.trail.shift();
+    if(p.progress>=1)state.particles.splice(i,1);
+  }
+}
+
+function updateTrails(){
+  for(let i=state.trails.length-1;i>=0;i--){
+    state.trails[i].age++;
+    if(state.trails[i].age>=state.trails[i].maxAge)state.trails.splice(i,1);
+  }
+}
+
+function updatePopups(){
+  for(let i=state.popups.length-1;i>=0;i--){
+    state.popups[i].age++;
+    state.popups[i].y-=0.3;
+    if(state.popups[i].age>=state.popups[i].maxAge)state.popups.splice(i,1);
+  }
+}
+
+function render(){
+  const w=W/devicePixelRatio, h=H/devicePixelRatio;
+  ctx.save();
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+
+  // Semi-transparent overlay for trail afterimage
+  ctx.fillStyle='rgba(13,17,23,0.15)';
+  ctx.fillRect(0,0,w,h);
+
+  // Draw zone connections (dim lines between same-zone agents)
+  const agents=[...state.agents.values()];
+  ctx.strokeStyle='rgba(48,54,61,0.4)';
+  ctx.lineWidth=1;
+  for(let i=0;i<agents.length;i++){
+    for(let j=i+1;j<agents.length;j++){
+      if(agents[i].zoneId&&agents[i].zoneId===agents[j].zoneId){
+        ctx.beginPath();
+        ctx.moveTo(agents[i].x,agents[i].y);
+        ctx.lineTo(agents[j].x,agents[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw pheromone trails
+  for(const t of state.trails){
+    const alpha=t.intensity*(1-t.age/t.maxAge);
+    if(alpha<=0)continue;
+    ctx.strokeStyle=PH_COLORS[t.type]||'#f0883e';
+    ctx.globalAlpha=alpha*0.6;
+    ctx.lineWidth=2*alpha;
+    ctx.shadowColor=PH_COLORS[t.type]||'#f0883e';
+    ctx.shadowBlur=8*alpha;
+    ctx.beginPath();
+    ctx.moveTo(t.fx,t.fy);
+    ctx.lineTo(t.tx,t.ty);
+    ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.globalAlpha=1;
+  }
+
+  // Draw particles + trails
+  for(const p of state.particles){
+    // Trail
+    if(p.trail.length>1){
+      ctx.strokeStyle=p.color;
+      ctx.lineWidth=p.size*0.6;
+      for(let i=1;i<p.trail.length;i++){
+        ctx.globalAlpha=(i/p.trail.length)*0.5;
+        ctx.beginPath();
+        ctx.moveTo(p.trail[i-1].x,p.trail[i-1].y);
+        ctx.lineTo(p.trail[i].x,p.trail[i].y);
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    }
+    // Head
+    const head=p.trail[p.trail.length-1];
+    if(head){
+      ctx.fillStyle=p.color;
+      ctx.shadowColor=p.color;
+      ctx.shadowBlur=6;
+      ctx.beginPath();
+      ctx.arc(head.x,head.y,p.size,0,TWO_PI);
+      ctx.fill();
+      ctx.shadowBlur=0;
+    }
+  }
+
+  // Draw agent nodes
+  for(const a of agents){
+    if(a.radius<0.3)continue;
+    // Outer glow
+    const glowRadius=a.radius*1.8*a.glow;
+    if(glowRadius>1){
+      const grad=ctx.createRadialGradient(a.x,a.y,a.radius*0.5,a.x,a.y,glowRadius);
+      grad.addColorStop(0,a.color+'60');
+      grad.addColorStop(1,a.color+'00');
+      ctx.fillStyle=grad;
+      ctx.beginPath();
+      ctx.arc(a.x,a.y,glowRadius,0,TWO_PI);
+      ctx.fill();
+    }
+    // Core circle
+    ctx.fillStyle=a.color;
+    ctx.globalAlpha=a.status==='offline'?0.3:0.9;
+    ctx.beginPath();
+    ctx.arc(a.x,a.y,a.radius,0,TWO_PI);
+    ctx.fill();
+    ctx.globalAlpha=1;
+    // Border ring
+    ctx.strokeStyle=a.color;
+    ctx.lineWidth=1.5;
+    ctx.globalAlpha=0.5;
+    ctx.beginPath();
+    ctx.arc(a.x,a.y,a.radius+2,0,TWO_PI);
+    ctx.stroke();
+    ctx.globalAlpha=1;
+    // Label
+    if(a.radius>8){
+      ctx.fillStyle='#fff';
+      ctx.font='bold 9px system-ui';
+      ctx.textAlign='center';
+      ctx.fillText(a.id.slice(0,12),a.x,a.y+a.radius+12);
+    }
+  }
+
+  // Draw popups (quality eval results)
+  for(const p of state.popups){
+    const alpha=1-p.age/p.maxAge;
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=p.color;
+    ctx.font='bold 16px system-ui';
+    ctx.textAlign='center';
+    ctx.shadowColor=p.color;
+    ctx.shadowBlur=8;
+    ctx.fillText(p.text,p.x,p.y);
+    ctx.shadowBlur=0;
+    ctx.globalAlpha=1;
+  }
+
+  // Draw ambient particles (idle state)
+  if(agents.length===0){
+    ctx.fillStyle='var(--dim)';
+    ctx.font='14px system-ui';
+    ctx.textAlign='center';
+    ctx.globalAlpha=0.4;
+    ctx.fillText('Waiting for swarm activity\u2026',w/2,h/2);
+    ctx.globalAlpha=1;
+    // Ambient floating dots
+    const t=Date.now()*0.001;
+    for(let i=0;i<6;i++){
+      const ax=w/2+Math.cos(t+i*1.05)*80*Math.sin(t*0.3+i);
+      const ay=h/2+Math.sin(t+i*1.05)*60*Math.cos(t*0.2+i);
+      ctx.fillStyle='#f0883e';
+      ctx.globalAlpha=0.15+0.1*Math.sin(t*2+i);
+      ctx.beginPath();
+      ctx.arc(ax,ay,3,0,TWO_PI);
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+
+  ctx.restore();
+}
+
+function animate(time){
+  const dt=lastTime?Math.min((time-lastTime)/16.67,3):1;
+  lastTime=time;
+
+  updatePhysics(dt);
+  updateParticles(dt);
+  updateTrails();
+  updatePopups();
+  render();
+
+  requestAnimationFrame(animate);
+}
+
+// ============================================================================
+// Init
+// ============================================================================
 connectSSE();
 setInterval(pollMetrics,5000);
 pollMetrics();
+// Clear canvas fully on first frame
+ctx.fillStyle='#0d1117';
+ctx.fillRect(0,0,W,H);
+requestAnimationFrame(animate);
 </script>
 </body>
 </html>

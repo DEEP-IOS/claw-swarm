@@ -171,10 +171,16 @@ export class DashboardService {
       });
 
       // 注册 SSE 客户端 / Register SSE client
+      // 使用无名事件 (data-only), topic 嵌入 JSON, 让前端 onmessage 统一路由
+      // Use unnamed events (data-only), embed topic in JSON for frontend routing
       const client = {
         send(event) {
-          const line = `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`;
-          reply.raw.write(line);
+          const payload = JSON.stringify({
+            topic: event.event,
+            data: event.data,
+            timestamp: event.timestamp,
+          });
+          reply.raw.write(`data: ${payload}\n\n`);
         },
       };
 

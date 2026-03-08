@@ -19,6 +19,9 @@ const DEFAULT_WINDOW_MS = 5 * 60 * 1000;
 /** 指标桶间隔 (ms) / Metric bucket interval */
 const BUCKET_INTERVAL_MS = 5000;
 
+/** 最大保留条目数 / Max retained entries */
+const MAX_DETAIL_ENTRIES = 50;
+
 // ============================================================================
 // MetricsCollector 类 / MetricsCollector Class
 // ============================================================================
@@ -62,6 +65,18 @@ export class MetricsCollector {
     this._memoryEvents = 0;
     /** @type {number} 质量事件 / Quality events */
     this._qualityEvents = 0;
+
+    // ── 状态跟踪 / State tracking ──────────────────────
+    /** @type {Map<string, Object>} 活跃 Agent 状态 / Active agent states */
+    this._activeAgents = new Map();
+    /** @type {Array<Object>} 最近质量评估 / Recent quality evaluations */
+    this._qualityEvals = [];
+    /** @type {Map<string, number>} 信息素类型计数 / Pheromone counts by type */
+    this._pheromonesByType = new Map();
+    /** @type {Array<Object>} 最近任务 / Recent tasks */
+    this._recentTasks = [];
+    /** @type {Array<Object>} 最近记忆操作 / Recent memory operations */
+    this._recentMemoryOps = [];
 
     // ── 时间序列 / Time series ──────────────────────────
     /** @type {Map<string, Array<{ timestamp: number, value: number }>>} */
@@ -169,6 +184,11 @@ export class MetricsCollector {
         memoryEvents: this._memoryEvents,
         qualityEvents: this._qualityEvents,
       },
+      agents: [...this._activeAgents.values()],
+      qualityEvals: this._qualityEvals.slice(-20),
+      pheromonesByType: Object.fromEntries(this._pheromonesByType),
+      recentTasks: this._recentTasks.slice(-20),
+      recentMemoryOps: this._recentMemoryOps.slice(-20),
     };
   }
 
@@ -202,6 +222,11 @@ export class MetricsCollector {
     this._pheromoneEvents = 0;
     this._memoryEvents = 0;
     this._qualityEvents = 0;
+    this._activeAgents.clear();
+    this._qualityEvals = [];
+    this._pheromonesByType.clear();
+    this._recentTasks = [];
+    this._recentMemoryOps = [];
     this._timeSeries.clear();
     this._logger.debug?.('[MetricsCollector] 已重置 / Reset');
   }
@@ -236,21 +261,53 @@ export class MetricsCollector {
     this._totalRequests++;
     const topic = msg.topic || topicPattern;
 
+    const data = msg.data || {};
+
     if (topic.startsWith('task.')) {
-      if (topic.includes('complete') || topic.includes('success')) this._tasksCompleted++;
-      if (topic.includes('fail') || topic.includes('error')) { this._tasksFailed++; this._totalErrors++; }
+      const isComplete = topic.includes('complete') || topic.includes('success');
+      const isFail = topic.includes('fail') || topic.includes('error');
+      if (isComplete) this._tasksCompleted++;
+      if (isFail) { this._tasksFailed++; this._totalErrors++; }
+      this._pushCapped(this._recentTasks, {
+        topic, status: isComplete ? 'completed' : isFail ? 'failed' : 'active',
+        taskId: data.taskId || data.id, description: data.description,
+        duration: data.duration, agentId: data.agentId, timestamp: Date.now(),
+      });
       this._appendTimeSeries('tasks', 1);
     } else if (topic.startsWith('agent.')) {
       this._agentEvents++;
+      const agentId = data.agentId || data.id;
+      if (agentId) {
+        if (topic.includes('end') || topic.includes('deregister') || topic.includes('remove')) {
+          const existing = this._activeAgents.get(agentId);
+          if (existing) existing.status = 'offline';
+        } else {
+          this._activeAgents.set(agentId, {
+            id: agentId, persona: data.persona || data.role || null,
+            tier: data.tier || null, status: 'active',
+            zoneId: data.zoneId || null, lastSeen: Date.now(),
+          });
+        }
+      }
       this._appendTimeSeries('agents', 1);
     } else if (topic.startsWith('pheromone.')) {
       this._pheromoneEvents++;
+      const pType = data.type || data.pheromoneType || 'unknown';
+      this._pheromonesByType.set(pType, (this._pheromonesByType.get(pType) || 0) + 1);
       this._appendTimeSeries('pheromones', 1);
     } else if (topic.startsWith('quality.')) {
       this._qualityEvents++;
+      this._pushCapped(this._qualityEvals, {
+        topic, agentId: data.agentId, score: data.score, passed: data.passed,
+        dimensions: data.dimensions, timestamp: Date.now(),
+      });
       this._appendTimeSeries('quality', 1);
     } else if (topic.startsWith('memory.')) {
       this._memoryEvents++;
+      this._pushCapped(this._recentMemoryOps, {
+        topic, agentId: data.agentId, action: data.action,
+        layer: data.layer || data.memoryType, timestamp: Date.now(),
+      });
       this._appendTimeSeries('memory', 1);
     }
 
@@ -258,6 +315,19 @@ export class MetricsCollector {
     if (msg.data?.duration) {
       this._durations.push(msg.data.duration);
     }
+  }
+
+  /**
+   * 向数组推入元素, 超出上限则移除最旧的
+   * Push to capped array
+   *
+   * @param {Array} arr
+   * @param {Object} item
+   * @private
+   */
+  _pushCapped(arr, item) {
+    arr.push(item);
+    if (arr.length > MAX_DETAIL_ENTRIES) arr.shift();
   }
 
   /**

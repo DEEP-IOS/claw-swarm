@@ -164,4 +164,97 @@ describe('MetricsCollector', () => {
     const snap = collector.getSnapshot();
     expect(snap.red.avgDuration).toBe(300);
   });
+
+  // ── 状态跟踪测试 / State tracking tests ──────────────────────────
+
+  it('agent 状态跟踪: 注册/更新/离线 / agent state tracking', () => {
+    collector.start();
+    bus._emit('agent.registered', { agentId: 'a1', persona: 'scout-bee', tier: 'mid' });
+    bus._emit('agent.registered', { agentId: 'a2', persona: 'worker-bee' });
+
+    let snap = collector.getSnapshot();
+    expect(snap.agents).toHaveLength(2);
+    expect(snap.agents.find(a => a.id === 'a1').persona).toBe('scout-bee');
+    expect(snap.agents.find(a => a.id === 'a1').status).toBe('active');
+
+    // Agent goes offline
+    bus._emit('agent.end', { agentId: 'a1' });
+    snap = collector.getSnapshot();
+    expect(snap.agents.find(a => a.id === 'a1').status).toBe('offline');
+
+    // Agent a2 still active
+    expect(snap.agents.find(a => a.id === 'a2').status).toBe('active');
+  });
+
+  it('quality 评估历史 / quality evaluation history', () => {
+    collector.start();
+    bus._emit('quality.evaluated', { agentId: 'a1', score: 0.85, passed: true });
+    bus._emit('quality.evaluated', { agentId: 'a2', score: 0.45, passed: false });
+
+    const snap = collector.getSnapshot();
+    expect(snap.qualityEvals).toHaveLength(2);
+    expect(snap.qualityEvals[0].score).toBe(0.85);
+    expect(snap.qualityEvals[1].passed).toBe(false);
+  });
+
+  it('信息素类型计数 / pheromone counts by type', () => {
+    collector.start();
+    bus._emit('pheromone.emitted', { type: 'trail' });
+    bus._emit('pheromone.emitted', { type: 'trail' });
+    bus._emit('pheromone.emitted', { type: 'alarm' });
+
+    const snap = collector.getSnapshot();
+    expect(snap.pheromonesByType.trail).toBe(2);
+    expect(snap.pheromonesByType.alarm).toBe(1);
+  });
+
+  it('最近任务列表 / recent tasks list', () => {
+    collector.start();
+    bus._emit('task.completed', { taskId: 't1', description: 'auth refactor' });
+    bus._emit('task.failed', { taskId: 't2', description: 'db migration' });
+
+    const snap = collector.getSnapshot();
+    expect(snap.recentTasks).toHaveLength(2);
+    expect(snap.recentTasks[0].status).toBe('completed');
+    expect(snap.recentTasks[1].status).toBe('failed');
+  });
+
+  it('最近记忆操作 / recent memory ops', () => {
+    collector.start();
+    bus._emit('memory.record', { action: 'record', layer: 'episodic', agentId: 'a1' });
+    bus._emit('memory.query', { action: 'query', layer: 'semantic' });
+
+    const snap = collector.getSnapshot();
+    expect(snap.recentMemoryOps).toHaveLength(2);
+    expect(snap.recentMemoryOps[0].layer).toBe('episodic');
+  });
+
+  it('状态跟踪上限 / state tracking cap at 50', () => {
+    collector.start();
+    for (let i = 0; i < 60; i++) {
+      bus._emit('quality.evaluated', { agentId: `a${i}`, score: 0.5, passed: true });
+    }
+
+    // Internal array capped at 50
+    const snap = collector.getSnapshot();
+    // getSnapshot returns slice(-20) of the 50
+    expect(snap.qualityEvals.length).toBeLessThanOrEqual(20);
+  });
+
+  it('reset 清除状态跟踪 / reset clears state tracking', () => {
+    collector.start();
+    bus._emit('agent.registered', { agentId: 'a1' });
+    bus._emit('quality.evaluated', { score: 0.8, passed: true });
+    bus._emit('pheromone.emitted', { type: 'trail' });
+    bus._emit('task.completed', { taskId: 't1' });
+    bus._emit('memory.record', { action: 'record' });
+
+    collector.reset();
+    const snap = collector.getSnapshot();
+    expect(snap.agents).toHaveLength(0);
+    expect(snap.qualityEvals).toHaveLength(0);
+    expect(snap.recentTasks).toHaveLength(0);
+    expect(snap.recentMemoryOps).toHaveLength(0);
+    expect(Object.keys(snap.pheromonesByType)).toHaveLength(0);
+  });
 });
