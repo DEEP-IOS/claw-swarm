@@ -453,7 +453,8 @@ export class PluginAdapter {
 
       // ── 2. onAgentEnd: 保存状态, 清理 / Save state, cleanup ──────
       onAgentEnd: async (event) => {
-        logger.info?.(`[Hook:onAgentEnd] Agent 结束 / Agent ending: ${event.agentId}`);
+        const traceId = event.traceId || null;
+        logger.info?.(`[Hook:onAgentEnd]${traceId ? ` [trace:${traceId}]` : ''} Agent 结束 / Agent ending: ${event.agentId}`);
 
         // 固化工作记忆到情景记忆 / Consolidate working memory to episodic
         try {
@@ -522,7 +523,8 @@ export class PluginAdapter {
       // ── 4. onSubAgentComplete: 质量门控 + 信息素强化 ──────────────
       //    Quality gate check + pheromone reinforcement
       onSubAgentComplete: async (event) => {
-        logger.info?.(`[Hook:onSubAgentComplete] 子代理完成 / SubAgent completed: ${event.subAgentId}`);
+        const traceId = event.traceId || null;
+        logger.info?.(`[Hook:onSubAgentComplete]${traceId ? ` [trace:${traceId}]` : ''} 子代理完成 / SubAgent completed: ${event.subAgentId}`);
 
         // 质量门控检查 / Quality gate check
         let qualityResult = null;
@@ -544,7 +546,7 @@ export class PluginAdapter {
             sourceId: event.subAgentId,
             targetScope: event.taskScope || `/task/${event.taskId}`,
             intensity: passed ? 0.8 : 0.6,
-            payload: { taskId: event.taskId, verdict: qualityResult?.verdict },
+            payload: { taskId: event.taskId, verdict: qualityResult?.verdict, traceId },
           });
         } catch (err) {
           logger.warn?.(`[Hook:onSubAgentComplete] 信息素发射失败 / Pheromone emit failed: ${err.message}`);
@@ -561,13 +563,14 @@ export class PluginAdapter {
           logger.warn?.(`[Hook:onSubAgentComplete] 声誉更新失败 / Reputation update failed: ${err.message}`);
         }
 
-        return { qualityResult };
+        return { qualityResult, traceId };
       },
 
       // ── 5. onSubAgentAbort: 管道中断 + ALARM 信息素 ──────────────
       //    Pipeline breaker + alarm pheromone
       onSubAgentAbort: async (event) => {
-        logger.warn?.(`[Hook:onSubAgentAbort] 子代理中止 / SubAgent aborted: ${event.subAgentId}`);
+        const traceId = event.traceId || null;
+        logger.warn?.(`[Hook:onSubAgentAbort]${traceId ? ` [trace:${traceId}]` : ''} 子代理中止 / SubAgent aborted: ${event.subAgentId}`);
 
         // 管道中断器处理 / Pipeline breaker handling
         try {
@@ -586,7 +589,7 @@ export class PluginAdapter {
             sourceId: event.subAgentId,
             targetScope: event.taskScope || `/task/${event.taskId}`,
             intensity: 1.0,
-            payload: { reason: event.reason, taskId: event.taskId },
+            payload: { reason: event.reason, taskId: event.taskId, traceId },
           });
         } catch (err) {
           logger.warn?.(`[Hook:onSubAgentAbort] ALARM 发射失败 / ALARM emit failed: ${err.message}`);
