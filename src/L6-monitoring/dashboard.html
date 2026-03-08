@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claw-Swarm V5.0 Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--dim:#8b949e;--accent:#f0883e;--green:#3fb950;--red:#f85149;--blue:#58a6ff}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:grid;grid-template-rows:48px 1fr 200px;grid-template-columns:240px 1fr 280px}
+header{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:12px}
+header h1{font-size:16px;color:var(--accent)}
+header .badge{background:var(--green);color:#000;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+header .stat{color:var(--dim);font-size:12px;margin-left:auto}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:8px}
+.sidebar h2{font-size:12px;color:var(--dim);padding:8px;text-transform:uppercase;letter-spacing:1px}
+.agent{padding:6px 10px;border-radius:6px;margin:2px 0;font-size:13px;cursor:default}
+.agent:hover{background:var(--border)}
+.agent .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot.active{background:var(--green)}.dot.busy{background:var(--accent)}.dot.offline{background:var(--dim)}
+.main{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}
+.card h3{font-size:13px;color:var(--accent);margin-bottom:8px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.metric{text-align:center;padding:12px;background:var(--bg);border-radius:6px}
+.metric .val{font-size:24px;font-weight:700;color:var(--blue)}
+.metric .label{font-size:11px;color:var(--dim);margin-top:4px}
+.ph-bar{display:flex;align-items:center;gap:6px;margin:3px 0;font-size:12px}
+.ph-bar .bar{height:6px;border-radius:3px;background:var(--accent);transition:width .3s}
+.ph-bar .type{width:60px;color:var(--dim)}
+.ph-bar .val{width:40px;text-align:right;color:var(--text);font-size:11px}
+.panel-right{background:var(--surface);border-left:1px solid var(--border);overflow-y:auto;padding:8px}
+.panel-right h2{font-size:12px;color:var(--dim);padding:8px;text-transform:uppercase;letter-spacing:1px}
+.quality-item{padding:6px 10px;font-size:12px;display:flex;justify-content:space-between;border-bottom:1px solid var(--border)}
+.quality-item .pass{color:var(--green)}.quality-item .fail{color:var(--red)}
+.log{grid-column:1/-1;background:var(--surface);border-top:1px solid var(--border);overflow-y:auto;padding:8px;font-family:'Cascadia Code',monospace;font-size:12px;line-height:1.6}
+.log .entry{padding:1px 8px;border-left:3px solid var(--border)}
+.log .entry.task{border-color:var(--blue)}.log .entry.agent{border-color:var(--green)}
+.log .entry.pheromone{border-color:var(--accent)}.log .entry.error{border-color:var(--red)}
+.log .ts{color:var(--dim);margin-right:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🐝 Claw-Swarm V5.0</h1>
+  <span class="badge" id="status">CONNECTING</span>
+  <span class="stat" id="headerStats">—</span>
+</header>
+
+<div class="sidebar">
+  <h2>Agents</h2>
+  <div id="agentList"><div class="agent"><span class="dot offline"></span>No agents</div></div>
+</div>
+
+<div class="main">
+  <div class="card">
+    <h3>RED Metrics</h3>
+    <div class="metrics">
+      <div class="metric"><div class="val" id="mRate">0</div><div class="label">Requests</div></div>
+      <div class="metric"><div class="val" id="mError">0%</div><div class="label">Error Rate</div></div>
+      <div class="metric"><div class="val" id="mDur">0ms</div><div class="label">Avg Duration</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Pheromone Signals</h3>
+    <div id="phList">
+      <div class="ph-bar"><span class="type">trail</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">alarm</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">recruit</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">queen</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+      <div class="ph-bar"><span class="type">dance</span><div class="bar" style="width:0%"></div><span class="val">0</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Swarm Stats</h3>
+    <div class="metrics">
+      <div class="metric"><div class="val" id="mTasks">0</div><div class="label">Tasks Done</div></div>
+      <div class="metric"><div class="val" id="mPh">0</div><div class="label">Pheromones</div></div>
+      <div class="metric"><div class="val" id="mMem">0</div><div class="label">Memory Ops</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel-right">
+  <h2>Quality Gate</h2>
+  <div id="qualityList">
+    <div class="quality-item"><span>No evaluations</span><span class="pass">—</span></div>
+  </div>
+</div>
+
+<div class="log">
+  <div id="logEntries">
+    <div class="entry"><span class="ts">--:--:--</span>Waiting for events…</div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const logEl=$('#logEntries');
+const statusEl=$('#status');
+let evtSource;
+
+function connectSSE(){
+  evtSource=new EventSource('/events');
+  evtSource.onopen=()=>{statusEl.textContent='LIVE';statusEl.style.background='#3fb950'};
+  evtSource.onerror=()=>{statusEl.textContent='RECONNECTING';statusEl.style.background='#f85149'};
+  evtSource.onmessage=e=>{try{addLog(JSON.parse(e.data))}catch{}};
+  evtSource.addEventListener('task.completed',e=>addLog(JSON.parse(e.data),'task'));
+  evtSource.addEventListener('agent.start',e=>addLog(JSON.parse(e.data),'agent'));
+  evtSource.addEventListener('pheromone.emitted',e=>addLog(JSON.parse(e.data),'pheromone'));
+}
+
+function addLog(data,type=''){
+  const d=new Date();
+  const ts=d.toTimeString().slice(0,8);
+  const text=typeof data==='string'?data:JSON.stringify(data).slice(0,120);
+  const div=document.createElement('div');
+  div.className='entry '+(type||'');
+  div.innerHTML=`<span class="ts">${ts}</span>${text}`;
+  logEl.appendChild(div);
+  if(logEl.children.length>200)logEl.removeChild(logEl.firstChild);
+  logEl.parentElement.scrollTop=logEl.parentElement.scrollHeight;
+}
+
+async function pollMetrics(){
+  try{
+    const r=await fetch('/api/metrics');
+    const m=await r.json();
+    if(m.red){
+      $('#mRate').textContent=m.red.rate;
+      $('#mError').textContent=(m.red.errorRate*100).toFixed(1)+'%';
+      $('#mDur').textContent=m.red.avgDuration+'ms';
+    }
+    if(m.swarm){
+      $('#mTasks').textContent=m.swarm.tasksCompleted||0;
+      $('#mPh').textContent=m.swarm.pheromoneEvents||0;
+      $('#mMem').textContent=m.swarm.memoryEvents||0;
+    }
+    $('#headerStats').textContent=`Agents: ${m.swarm?.agentEvents||0} | Tasks: ${m.swarm?.tasksCompleted||0}/${m.swarm?.tasksFailed||0}`;
+  }catch{}
+}
+
+connectSSE();
+setInterval(pollMetrics,5000);
+pollMetrics();
+</script>
+</body>
+</html>

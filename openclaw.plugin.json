@@ -1,0 +1,55 @@
+{
+  "id": "claw-swarm",
+  "name": "Claw-Swarm V5.0",
+  "description": "蜂群智能协作引擎 — Swarm intelligence engine with 6-layer architecture: bio-inspired multi-agent orchestration, pheromone communication, memory systems, quality governance, and real-time monitoring dashboard",
+  "version": "5.0.0",
+  "kind": "orchestration",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Path to the SQLite database file. If omitted, defaults to <dataDir>/claw-swarm.db"
+      },
+      "pheromone": {
+        "type": "object",
+        "description": "Pheromone engine settings (MMAS bounds, decay rate, etc.)",
+        "properties": {
+          "decayIntervalMs": { "type": "number", "default": 60000 },
+          "decayRate": { "type": "number", "default": 0.05 }
+        }
+      },
+      "memory": {
+        "type": "object",
+        "description": "Memory system settings (working memory buffer sizes, etc.)",
+        "properties": {
+          "inMemory": { "type": "boolean", "default": false },
+          "maxFocus": { "type": "number", "default": 5 },
+          "maxContext": { "type": "number", "default": 15 },
+          "maxScratch": { "type": "number", "default": 30 }
+        }
+      },
+      "orchestration": {
+        "type": "object",
+        "description": "Orchestration layer settings (quality gates, pipeline breaker, etc.)"
+      },
+      "gossip": {
+        "type": "object",
+        "description": "Gossip protocol settings",
+        "properties": {
+          "fanout": { "type": "number", "default": 3 },
+          "heartbeatMs": { "type": "number", "default": 5000 }
+        }
+      },
+      "dashboard": {
+        "type": "object",
+        "description": "Dashboard service settings",
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "port": { "type": "number", "default": 19100 }
+        }
+      }
+    }
+  }
+}

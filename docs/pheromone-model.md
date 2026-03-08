@@ -27,7 +27,7 @@ Pheromones are **time-decaying environmental signals** inspired by ant colony co
 
 **Biological analogy / 生物学类比：** Trail pheromone that ants leave when returning from a food source. Other ants follow the trail.
 
-**In Swarm / 蜂群中：** When an agent completes work on a scope (file, feature, module), it emits a `trail` pheromone. Other agents see this and can coordinate their work to avoid duplication or build upon it.
+**In Claw-Swarm / 蜂群中：** When an agent completes work on a scope (file, feature, module), it emits a `trail` pheromone. Other agents see this and can coordinate their work to avoid duplication or build upon it.
 
 | Property | Value |
 |----------|-------|
@@ -42,7 +42,7 @@ Pheromones are **time-decaying environmental signals** inspired by ant colony co
 
 **Biological analogy / 生物学类比：** Alarm pheromone that triggers defensive behavior in the colony.
 
-**In Swarm / 蜂群中：** Emitted when repeated failures occur. Fast decay (30 min) because problems are either fixed quickly or escalated. Used by the struggle detector to distinguish individual vs systemic failures.
+**In Claw-Swarm / 蜂群中：** Emitted when repeated failures occur. Fast decay (30 min) because problems are either fixed quickly or escalated. Used by the struggle detector to distinguish individual vs systemic failures.
 
 | Property | Value |
 |----------|-------|
@@ -57,7 +57,7 @@ Pheromones are **time-decaying environmental signals** inspired by ant colony co
 
 **Biological analogy / 生物学类比：** Recruitment pheromone that attracts nestmates to a task.
 
-**In Swarm / 蜂群中：** Emitted when the struggle detector determines an agent needs help (and the problem is individual, not systemic). Medium decay — stays active long enough for another agent to respond.
+**In Claw-Swarm / 蜂群中：** Emitted when the struggle detector determines an agent needs help (and the problem is individual, not systemic). Medium decay — stays active long enough for another agent to respond.
 
 | Property | Value |
 |----------|-------|
@@ -72,7 +72,7 @@ Pheromones are **time-decaying environmental signals** inspired by ant colony co
 
 **Biological analogy / 生物学类比：** Queen mandibular pheromone that influences colony behavior and worker activity.
 
-**In Swarm / 蜂群中：** Slowest decay rate — persists for hours. Used for strategic directives that should influence all agents in a scope over an extended period.
+**In Claw-Swarm / 蜂群中：** Slowest decay rate — persists for hours. Used for strategic directives that should influence all agents in a scope over an extended period.
 
 | Property | Value |
 |----------|-------|
@@ -87,7 +87,7 @@ Pheromones are **time-decaying environmental signals** inspired by ant colony co
 
 **Biological analogy / 生物学类比：** Waggle dance in honeybees that communicates the location of food sources.
 
-**In Swarm / 蜂群中：** Emitted when an agent discovers useful information (API endpoint, documentation, solution pattern). Medium decay — stays relevant for about 90 minutes.
+**In Claw-Swarm / 蜂群中：** Emitted when an agent discovers useful information (API endpoint, documentation, solution pattern). Medium decay — stays relevant for about 90 minutes.
 
 | Property | Value |
 |----------|-------|

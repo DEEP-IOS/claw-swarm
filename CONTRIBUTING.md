@@ -1,4 +1,4 @@
-# Contributing to Claw-Swarm v4.0 / 贡献指南
+# Contributing to Claw-Swarm V5.0 / 贡献指南
 
 Thank you for your interest in contributing to Claw-Swarm!
 感谢你有兴趣为蜂群项目做贡献！
@@ -10,37 +10,46 @@ Thank you for your interest in contributing to Claw-Swarm!
 ### Prerequisites / 前置条件
 
 - **Node.js >= 22.0.0** (requires built-in `node:sqlite`)
-- **Zero external dependencies** — no `npm install` needed for the plugin itself
+- **npm** (for dependency installation)
+
+```bash
+git clone https://github.com/DEEP-IOS/claw-swarm.git
+cd claw-swarm
+npm install
+npm test
+```
 
 ### Project Structure / 项目结构
 
 ```
 src/
-├── layer1-core/          # Core infrastructure (DB, config, types, errors)
-├── layer2-engines/       # Domain engines (memory, pheromone, governance)
-├── layer3-intelligence/  # Swarm intelligence (soul, collaboration, orchestration)
-└── layer4-adapter/       # OpenClaw plugin adapter (hooks, tools, services)
+├── L1-infrastructure/    # 基础设施: 数据库, 配置, 类型, 日志
+├── L2-communication/     # 通信: 消息总线, 信息素引擎, Gossip
+├── L3-agent/             # Agent: 记忆系统, 能力引擎, 人格进化
+├── L4-orchestration/     # 编排: DAG 调度, 质量门控, CNP, ABC
+├── L5-application/       # 应用: OpenClaw 插件适配, 工具
+├── L6-monitoring/        # 监控: 仪表盘, 指标, SSE 广播
+└── index.js              # 插件入口 / Plugin entry point
 ```
 
-**Dependency rule:** Layers depend strictly downward (4 → 3 → 2 → 1). Never import upward.
+**Dependency rule / 依赖规则:** Layers depend strictly downward (L6 -> L5 -> ... -> L1). Never import upward.
+层级严格向下依赖，禁止向上导入。
 
 ### Running Tests / 运行测试
 
 ```bash
-# All tests (unit + integration)
-npm test
+npm test                  # All tests / 全部测试
+npm run test:unit         # Unit tests / 单元测试
+npm run test:integration  # Integration tests / 集成测试
+npm run test:stress       # Stress tests / 压力测试
 
-# Unit tests only
-npm run test:unit
-
-# Integration tests only
-npm run test:integration
-
-# Stress tests
-npm run test:stress
-
-# Migration tests (critical path)
-npm run test:migration
+# Per-layer / 按层级
+npm run test:L1           # Infrastructure
+npm run test:L2           # Communication
+npm run test:L3           # Agent
+npm run test:L4           # Orchestration
+npm run test:L5           # Application
+npm run test:L6           # Monitoring
 ```
 
 ---
@@ -50,18 +59,18 @@ npm run test:migration
 ### Reporting Bugs / 报告 Bug
 
 1. Search existing issues to avoid duplicates / 搜索已有 issue 避免重复
-2. Include:
+2. Include / 请提供:
    - Node.js version (`node -v`)
-   - OpenClaw version
+   - OpenClaw version (if applicable)
    - Minimal reproduction steps / 最小复现步骤
    - Expected vs actual behavior / 期望行为 vs 实际行为
 
 ### Suggesting Features / 建议新功能
 
-Open an issue with the `[Feature]` prefix. Please describe:
+Open an issue with the `feature` label. Describe / 用 `feature` 标签提交 issue，描述:
 - The problem you're solving / 你要解决的问题
 - Your proposed solution / 你建议的方案
-- Which subsystem it affects (memory, pheromone, governance, soul, collaboration, orchestration)
+- Which layer it affects (L1-L6) / 涉及哪个层级
 
 ### Submitting Code / 提交代码
 
@@ -79,8 +88,8 @@ Open an issue with the `[Feature]` prefix. Please describe:
 ### Language / 语言
 
 - **Code**: JavaScript (ES modules, `import`/`export`)
-- **Comments**: Bilingual (中英文双语). Module-level overview + key function why/how comments.
-- **Documentation**: Bilingual Markdown files
+- **Comments**: Bilingual (中英文双语). Module-level JSDoc + key function comments.
+- **Documentation**: Bilingual Markdown
 
 ### Style / 风格
 
@@ -91,43 +100,35 @@ Open an issue with the `[Feature]` prefix. Please describe:
 
 ### Module Comments / 模块注释
 
-Every file should have a module-level JSDoc comment explaining:
-- **What** the module does (1-2 sentences)
-- **Why** it exists (design rationale)
-- Which layer it belongs to
+Every source file should have a module-level JSDoc header:
 
 ```javascript
 /**
  * PheromoneEngine — 信息素引擎 / Pheromone Engine
  *
- * 负责信息素的发射、读取、衰减和快照构建。
- * Handles pheromone emission, reading, decay, and snapshot building.
+ * 负责信息素的发射、读取和衰减。
+ * Handles pheromone emission, reading, and decay.
  *
- * [WHY] 信息素提供间接通信机制，与直接消息传递（collaborate-tool）互补。
- * Pheromones provide indirect communication, complementing direct messaging.
- *
- * @module pheromone-engine
+ * @module L2-communication/pheromone-engine
  * @author DEEP-IOS
  */
 ```
 
 ### Testing / 测试
 
-- Use Node.js built-in test runner (`node:test`)
-- Use `node:assert/strict` for assertions
-- Test files go in `tests/unit/` or `tests/integration/`
-- Name pattern: `<module>.test.js`
-- Each test should be independent (create/destroy DB per test file)
+- Use **Vitest** (`import { describe, it, expect } from 'vitest'`)
+- Test files: `tests/unit/L{n}/<module>.test.js`
+- Each test should be independent (create/destroy DB per suite)
+- Use `beforeEach` + `afterEach` for setup/teardown
 
 ### Architecture Rules / 架构规则
 
-| Rule | Description |
+| Rule / 规则 | Description / 说明 |
 |------|-------------|
-| **No upward imports** | Layer 2 cannot import from Layer 3 or 4 |
-| **No cross-engine imports** | `memory/` cannot import from `pheromone/` |
-| **Only Layer 4 touches OpenClaw API** | Layer 1-3 are framework-agnostic |
-| **Zero external deps** | Only `node:*` built-in modules allowed |
-| **Subsystem independence** | Each subsystem must work when others are disabled |
+| **No upward imports / 禁止向上导入** | L2 cannot import from L3+ |
+| **Only L5 touches OpenClaw API** | L1-L4, L6 are framework-agnostic / 框架无关 |
+| **Dependency injection / 依赖注入** | All engines receive deps via constructor |
+| **Subsystem independence / 子系统独立** | Each module must work when others are absent |
 
 ---
 
@@ -135,39 +136,34 @@ Every file should have a module-level JSDoc comment explaining:
 
 ### Adding a New Pheromone Type / 添加新信息素类型
 
-1. Add the type to `src/layer2-engines/pheromone/pheromone-types.js`
-2. Define default decay rate and max TTL
-3. Add tests in `tests/unit/pheromone-engine.test.js`
-4. Update `docs/pheromone-model.md`
-
-### Adding a New Persona Template / 添加新人格模板
-
-1. Add to `src/layer3-intelligence/soul/persona-templates.js`
-2. Or provide via config: `config.soul.personas['my-bee'] = { ... }`
-3. Add tests in `tests/unit/soul-designer.test.js`
-4. Update `docs/soul-designer.md`
-
-### Adding a New Collaboration Strategy / 添加新协作策略
-
-1. Add to `src/layer3-intelligence/collaboration/strategies.js`
-2. Add tests in `tests/unit/collaboration-strategies.test.js`
+1. Register via `PheromoneTypeRegistry` or add to `BUILTIN_DEFAULTS` in `L2-communication/pheromone-engine.js`
+2. Define `decayRate`, `maxTTLMin`, `mmasMin`, `mmasMax`
+3. Add tests in `tests/unit/L2/pheromone-engine.test.js`
 
 ### Adding a New Tool / 添加新工具
 
-1. Create `src/layer4-adapter/tools/my-tool.js`
-2. Export `{ myToolDefinition, createMyToolHandler }`
-3. Register in `plugin-adapter.js` under the appropriate subsystem guard
-4. Add tests in `tests/unit/tools.test.js`
+1. Create `src/L5-application/tools/swarm-<name>-tool.js`
+2. Export a factory function: `export function createSwarmNameTool(engines) { ... }`
+3. Register in `plugin-adapter.js` `getTools()` method
+4. Add tests in `tests/unit/L5/tools.test.js`
+
+### Adding a New Repository / 添加新仓储
+
+1. Create `src/L1-infrastructure/database/repositories/<name>-repo.js`
+2. Add table DDL in `schemas/database-schemas.js`
+3. Wire into `DatabaseManager` and `PluginAdapter.init()`
+4. Add tests in `tests/unit/L1/repositories.test.js`
 
 ---
 
 ## Release Process / 发布流程
 
-1. Update version in `package.json`
-2. Update `CHANGELOG.md` with release notes
-3. Run full test suite: `npm test && npm run test:stress`
-4. Tag: `git tag v<version>`
-5. Push: `git push origin main --tags`
+1. Update version in `package.json` and `openclaw.plugin.json`
+2. Update `CHANGELOG.md` with release notes (bilingual)
+3. Run full test suite: `npm test`
+4. Commit: `git commit -m "release: vX.Y.Z"`
+5. Tag: `git tag vX.Y.Z`
+6. Push: `git push origin main --tags`
 
 ---
 

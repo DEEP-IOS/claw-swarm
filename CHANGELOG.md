@@ -4,6 +4,169 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.0.0] - 2026-03-08
+
+### Major: Complete Ground-Up Rewrite / 重大变更：完全重写
+
+Claw-Swarm V5.0 is a complete ground-up rewrite with a new 6-layer architecture, replacing the old 4-layer structure. 471 tests across 30 test files.
+
+Claw-Swarm V5.0 是一次从零开始的完全重写，采用全新6层架构替代旧的4层结构。30个测试文件共471个测试。
+
+### Architecture / 架构
+- Complete rewrite from 4-layer (layer1-core → layer4-adapter) to 6-layer architecture (L1-infrastructure → L2-communication → L3-agent → L4-orchestration → L5-application → L6-monitoring)
+  从4层架构（layer1-core → layer4-adapter）完全重写为6层架构（L1-基础设施 → L2-通信 → L3-代理 → L4-编排 → L5-应用 → L6-监控）
+- 55+ V5.0 source files, 34 database tables (up from 25)
+  55+ 源文件，34张数据库表（原25张）
+- Dependency injection throughout all layers
+  全层依赖注入
+- Repository pattern for all database access (8 repositories)
+  仓库模式统一数据库访问（8个仓库）
+
+### New in V5.0 / V5.0 新增
+
+#### L1 Infrastructure / L1 基础设施层
+- **DatabaseManager** with SQLite WAL mode via `node:sqlite` DatabaseSync
+  基于 `node:sqlite` DatabaseSync 的 SQLite WAL 模式数据库管理器
+- **MigrationRunner** with versioned schema migrations
+  版本化模式迁移运行器
+- **ConfigManager** with Zod validation + runtime hot-reload
+  Zod 验证 + 运行时热重载的配置管理器
+- 8 typed repositories (Agent, Task, Pheromone, Knowledge, Episodic, Zone, Plan, PheromoneType)
+  8个类型化仓库（Agent、Task、Pheromone、Knowledge、Episodic、Zone、Plan、PheromoneType）
+- Comprehensive schema definitions (database, config, message)
+  全面的模式定义（数据库、配置、消息）
+
+#### L2 Communication / L2 通信层
+- **MessageBus**: pub/sub with topic wildcards (`topic.*`), Dead Letter Queue, message history
+  发布/订阅，支持主题通配符（`topic.*`）、死信队列、消息历史
+- **PheromoneEngine**: MMAS (Max-Min Ant System) bounds, exponential decay, batch operations
+  MMAS（最大-最小蚁群系统）边界、指数衰减、批量操作
+- **GossipProtocol**: epidemic broadcast with configurable fanout + heartbeat
+  流行病广播，可配置扇出 + 心跳
+- **PheromoneTypeRegistry**: extensible custom pheromone type support
+  可扩展的自定义信息素类型支持
+
+#### L3 Agent / L3 代理层
+- **WorkingMemory**: 3-tier buffer (focus/context/scratchpad) with priority eviction
+  三层缓冲区（焦点/上下文/草稿板），优先级淘汰
+- **EpisodicMemory**: Ebbinghaus forgetting curve for automatic memory pruning
+  艾宾浩斯遗忘曲线自动记忆修剪
+- **SemanticMemory**: BFS knowledge graph with N-hop traversal, path finding, node merging
+  BFS 知识图谱，N跳遍历、路径查找、节点合并
+- **ContextCompressor**: LLM context window optimization
+  LLM 上下文窗口优化
+- **CapabilityEngine**: 4D capability scoring (technical/delivery/collaboration/innovation)
+  四维能力评分（技术/交付/协作/创新）
+- **PersonaEvolution**: PARL A/B testing for persona optimization
+  PARL A/B 测试人格优化
+- **ReputationLedger**: contribution tracking with multi-factor scoring
+  贡献追踪，多因子评分
+- **SoulDesigner**: 4 bee personas (scout/worker/guard/queen-messenger) with keyword selection
+  4个蜜蜂人格（侦察蜂/工蜂/守卫蜂/女王信使），关键词选择
+
+#### L4 Orchestration / L4 编排层
+- **Orchestrator**: DAG-based task decomposition with dependency tracking
+  基于DAG的任务分解，依赖追踪
+- **CriticalPathAnalyzer**: CPM (Critical Path Method) for schedule optimization
+  CPM（关键路径法）进度优化
+- **QualityController**: multi-rubric evaluation (structural + completion + semantic)
+  多维评估（结构 + 完成度 + 语义）
+- **PipelineBreaker**: state machine (running/paused/failed/completed)
+  状态机（运行中/暂停/失败/完成）
+- **ResultSynthesizer**: Jaccard similarity deduplication + conflict detection
+  Jaccard 相似度去重 + 冲突检测
+- **ExecutionPlanner**: GEP (Gene Expression Programming) inspired plan generation
+  GEP（基因表达式编程）启发式计划生成
+- **ContractNet**: FIPA Contract Net Protocol for task allocation
+  FIPA 合同网协议任务分配
+- **ReplanEngine**: pheromone-triggered automatic replanning
+  信息素触发自动重规划
+- **ABCScheduler**: Artificial Bee Colony algorithm for resource scheduling
+  ABC（人工蜂群）算法资源调度
+- **RoleDiscovery**: k-means++ clustering for automatic role identification
+  k-means++ 聚类自动角色发现
+- **RoleManager**: MoE (Mixture of Experts) routing for role-task matching
+  MoE（混合专家）路由角色-任务匹配
+- **ZoneManager**: Jaccard auto-assign for zone membership
+  Jaccard 自动分配区域成员
+
+#### L5 Application / L5 应用层
+- **PluginAdapter**: unified engine lifecycle manager (init → getHooks → getTools → close)
+  统一引擎生命周期管理器（init → getHooks → getTools → close）
+- **ContextService**: rich LLM context builder (memory + knowledge + pheromone + gossip)
+  丰富的 LLM 上下文构建器（记忆 + 知识 + 信息素 + 八卦协议）
+- **CircuitBreaker**: 3-state fault tolerance (CLOSED → OPEN → HALF_OPEN)
+  三态容错（关闭 → 打开 → 半开）
+- 7 tool factories: `swarm_spawn`, `swarm_query`, `swarm_pheromone`, `swarm_gate`, `swarm_memory`, `swarm_plan`, `swarm_zone`
+  7个工具工厂：`swarm_spawn`、`swarm_query`、`swarm_pheromone`、`swarm_gate`、`swarm_memory`、`swarm_plan`、`swarm_zone`
+
+#### L6 Monitoring / L6 监控层 (NEW / 新增)
+- **StateBroadcaster**: SSE push for real-time state changes
+  SSE 推送实时状态变更
+- **MetricsCollector**: RED metrics (Rate, Error, Duration) + swarm-specific counters
+  RED 指标（速率、错误、持续时间）+ 蜂群专用计数器
+- **DashboardService**: Fastify HTTP server with API endpoints
+  Fastify HTTP 服务器，提供 API 端点
+- **dashboard.html**: dark theme real-time monitoring UI
+  暗色主题实时监控界面
+
+### OpenClaw Integration / OpenClaw 集成
+- Rewrote `src/index.js` to use real OpenClaw `register(api)` pattern
+  重写入口文件使用真实 OpenClaw `register(api)` 模式
+- Created `openclaw.plugin.json` manifest
+  创建 OpenClaw 插件清单
+- 8 hook mappings / 8个钩子映射:
+  - `before_agent_start` → `onAgentStart` + `onPrependContext`
+  - `agent_end` → `onAgentEnd`
+  - `after_tool_call` → `onToolCall` + `onToolResult`
+  - `subagent_spawning` → `onSubAgentSpawn`
+  - `subagent_ended` → `onSubAgentComplete` / `onSubAgentAbort`
+  - `before_reset` → `onMemoryConsolidate`
+  - `gateway_stop` → `close()`
+  - `message_sending` → `onSubAgentMessage`
+- 7 tools registered via `api.registerTool()`
+  7个工具通过 `api.registerTool()` 注册
+- Uses `api.pluginConfig`, `api.logger`, `api.dataDir`
+  使用 `api.pluginConfig`、`api.logger`、`api.dataDir`
+
+### 12 Bio-Inspired Algorithms / 12个仿生算法
+1. **MMAS** (Max-Min Ant System) — pheromone intensity bounds / 信息素强度边界
+2. **ACO Roulette Selection** — probabilistic task assignment / 概率任务分配
+3. **Ebbinghaus Forgetting Curve** — memory pruning / 记忆修剪
+4. **BFS Graph Traversal** — knowledge graph queries / 知识图谱查询
+5. **PARL** (Persona A/B Reinforcement Learning) — persona evolution / 人格进化
+6. **GEP** (Gene Expression Programming) — execution planning / 执行计划
+7. **CPM** (Critical Path Method) — schedule optimization / 进度优化
+8. **Jaccard Similarity** — dedup + zone auto-assign / 去重 + 区域自动分配
+9. **MoE** (Mixture of Experts) — role routing / 角色路由
+10. **FIPA CNP** (Contract Net Protocol) — task allocation / 任务分配
+11. **ABC** (Artificial Bee Colony) — resource scheduling / 资源调度
+12. **k-means++** — role discovery clustering / 角色发现聚类
+
+### Breaking Changes / 破坏性变更
+- Complete architecture rewrite (layer1-4 → L1-L6)
+  架构完全重写（layer1-4 → L1-L6）
+- Old layer1-core/layer2-engines/layer3-intelligence/layer4-adapter code is legacy (still present but unused by V5.0)
+  旧 layer1-core/layer2-engines/layer3-intelligence/layer4-adapter 代码为遗留代码（仍存在但 V5.0 不再使用）
+- Entry point changed from `createPlugin()` function to `{ id, register(api) }` object
+  入口点从 `createPlugin()` 函数改为 `{ id, register(api) }` 对象
+- Database schema now has 34 tables (was 25)
+  数据库模式现有34张表（原25张）
+- Test framework changed from `node:test` to `vitest`
+  测试框架从 `node:test` 改为 `vitest`
+
+### Test Coverage / 测试覆盖
+- 471 tests across 30 files / 30个文件共471个测试
+- **L1**: 93 tests (4 files) / 93个测试（4个文件）
+- **L2**: 52 tests (3 files) / 52个测试（3个文件）
+- **L3**: 76 tests (5 files) / 76个测试（5个文件）
+- **L4**: 137 tests (11 files) / 137个测试（11个文件）
+- **L5**: 70 tests (3 files) / 70个测试（3个文件）
+- **L6**: 32 tests (3 files) / 32个测试（3个文件）
+- **Integration**: 11 tests (1 file) / 11个测试（1个文件）
+
+---
+
 ## [4.0.0] - 2026-03-06
 
 ### Major: Unified Plugin / 重大变更：统一插件

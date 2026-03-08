@@ -4,9 +4,9 @@
 
 ### Overview / 概述
 
-Claw-Swarm v4.0 **replaces** OME. The memory engine is fully incorporated into Swarm's Layer 2. Your existing memory data is preserved through automatic import.
+Claw-Swarm v4.0 **replaces** OME. The memory engine is fully incorporated into Claw-Swarm's Layer 2. Your existing memory data is preserved through automatic import.
 
-Claw-Swarm v4.0 **替代** OME。记忆引擎完全并入 Swarm 的 Layer 2。现有记忆数据通过自动导入保留。
+Claw-Swarm v4.0 **替代** OME。记忆引擎完全并入 Claw-Swarm 的 Layer 2。现有记忆数据通过自动导入保留。
 
 > **Important / 重要：** Do not run OME and Claw-Swarm v4.0 simultaneously. Both register `before_agent_start` at priority 50, which will cause conflicts.
 >
@@ -45,7 +45,7 @@ On first run, Claw-Swarm v4.0 automatically detects and imports your existing OM
 }
 ```
 
-**After (Swarm config):**
+**After (Claw-Swarm config):**
 ```json
 {
   "memory": {
