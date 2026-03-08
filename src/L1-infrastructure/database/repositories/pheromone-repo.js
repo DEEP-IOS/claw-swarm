@@ -222,8 +222,14 @@ export class PheromoneRepository {
   }
 
   /**
-   * 删除最旧的信息素 (超出限制时)
-   * Delete oldest pheromones (when exceeding limit)
+   * 删除最弱的信息素 (超出限制时, 按衰减后真实强度排序)
+   * Delete weakest pheromones (when exceeding limit, sorted by decayed real intensity)
+   *
+   * 使用 SQLite 内联计算衰减后强度: I₀ × exp(-decayRate × ageMinutes)
+   * 避免保留"原始强度高但已实质蒸发"的僵尸信息素。
+   *
+   * Uses SQLite inline computation of decayed intensity: I₀ × exp(-decayRate × ageMinutes)
+   * Prevents keeping "high original but effectively evaporated" zombie pheromones.
    *
    * @param {number} maxCount
    * @returns {number} 删除数量 / Deleted count
@@ -233,12 +239,16 @@ export class PheromoneRepository {
     if (currentCount <= maxCount) return 0;
 
     const toDelete = currentCount - maxCount;
-    const stmt = this.db.prepare('pheromone_trimOldest', `
+    const now = Date.now();
+    const stmt = this.db.prepare('pheromone_trimWeakest', `
       DELETE FROM pheromones WHERE id IN (
-        SELECT id FROM pheromones ORDER BY intensity ASC, updated_at ASC LIMIT ?
+        SELECT id FROM pheromones
+        ORDER BY (intensity * EXP(-decay_rate * (? - updated_at) / 60000.0)) ASC,
+                 updated_at ASC
+        LIMIT ?
       )
     `);
-    const result = stmt.run(toDelete);
+    const result = stmt.run(now, toDelete);
     return result.changes;
   }
 

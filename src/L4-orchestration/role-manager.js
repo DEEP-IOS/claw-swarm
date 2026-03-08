@@ -315,7 +315,34 @@ export class RoleManager {
     this._validateTemplate(template);
 
     const name = template.name;
-    this._templates.set(name, this._deepClone(template));
+
+    // 检查是否有高度相似的已存在角色 (余弦相似度 > 0.95)
+    // Check for highly similar existing role (cosine similarity > 0.95)
+    const similar = this._findSimilarRole(template.capabilities);
+    if (similar && similar.name !== name) {
+      this._logger.debug?.(
+        `[RoleManager] 合并相似角色 / Merging similar role: "${name}" → "${similar.name}"`
+      );
+      // 合并: 更新描述和 systemPrompt, 合并关键词
+      // Merge: update description and systemPrompt, merge keywords
+      const merged = this._deepClone(similar);
+      merged.keywords = [...new Set([...(merged.keywords || []), ...(template.keywords || [])])];
+      if (template.systemPrompt) merged.systemPrompt = template.systemPrompt;
+      merged._meta = similar._meta || { createdAt: Date.now(), lastUsedAt: Date.now(), usageCount: 0 };
+      merged._meta.lastUsedAt = Date.now();
+      this._templates.set(similar.name, merged);
+      return similar.name;
+    }
+
+    const clone = this._deepClone(template);
+    // 添加生命周期元数据 / Add lifecycle metadata
+    clone._meta = {
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      usageCount: 0,
+      isBuiltin: !!BUILTIN_TEMPLATES[name],
+    };
+    this._templates.set(name, clone);
 
     // 发布事件 / Publish event
     if (this._messageBus) {
@@ -371,6 +398,51 @@ export class RoleManager {
     }
 
     return existed;
+  }
+
+  // =========================================================================
+  // 角色生命周期 / Role Lifecycle
+  // =========================================================================
+
+  /**
+   * 清理僵尸角色: 超过 maxAgeDays 未使用且使用次数 < minUsage 的非内置角色
+   * Prune stale roles: non-builtin roles unused for maxAgeDays with usageCount < minUsage
+   *
+   * @param {Object} [options]
+   * @param {number} [options.maxAgeDays=30] - 最大未使用天数 / Max unused days
+   * @param {number} [options.minUsage=3] - 最小使用次数 / Min usage count to keep
+   * @returns {string[]} 被删除的角色名 / Names of pruned roles
+   */
+  pruneStaleRoles({ maxAgeDays = 30, minUsage = 3 } = {}) {
+    const now = Date.now();
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+    const pruned = [];
+
+    for (const [name, template] of this._templates) {
+      // 永远不清理内置模板 / Never prune built-in templates
+      if (BUILTIN_TEMPLATES[name]) continue;
+      if (template._meta?.isBuiltin) continue;
+
+      const meta = template._meta;
+      if (!meta) continue;
+
+      const unused = now - (meta.lastUsedAt || meta.createdAt) > maxAgeMs;
+      const lowUsage = (meta.usageCount || 0) < minUsage;
+
+      if (unused && lowUsage) {
+        this._templates.delete(name);
+        pruned.push(name);
+        this._logger.debug?.(
+          `[RoleManager] 清理僵尸角色 / Pruned stale role: "${name}" (age=${Math.round((now - meta.createdAt) / 86400000)}d, usage=${meta.usageCount})`
+        );
+      }
+    }
+
+    if (pruned.length > 0 && this._messageBus) {
+      this._messageBus.publish('role.templates_pruned', { pruned, count: pruned.length });
+    }
+
+    return pruned;
   }
 
   // =========================================================================
@@ -471,6 +543,13 @@ export class RoleManager {
 
     stats.executions++;
     stats.lastExecutedAt = Date.now();
+
+    // 更新角色生命周期元数据 / Update role lifecycle metadata
+    const template = this._templates.get(roleName);
+    if (template?._meta) {
+      template._meta.lastUsedAt = Date.now();
+      template._meta.usageCount = (template._meta.usageCount || 0) + 1;
+    }
 
     if (success) {
       stats.successes++;
@@ -654,6 +733,31 @@ export class RoleManager {
 
     if (normA === 0 || normB === 0) return 0;
     return dotProduct / (normA * normB);
+  }
+
+  /**
+   * 查找与给定能力向量高度相似的已有角色 (余弦相似度 > 0.95)
+   * Find existing role highly similar to given capabilities (cosine similarity > 0.95)
+   *
+   * @private
+   * @param {Record<string, number>} capabilities
+   * @returns {Object|null} 最相似的模板或 null / Most similar template or null
+   */
+  _findSimilarRole(capabilities) {
+    if (!capabilities || Object.keys(capabilities).length === 0) return null;
+
+    let bestTemplate = null;
+    let bestSimilarity = 0;
+
+    for (const template of this._templates.values()) {
+      const similarity = this._computeCapabilityMatch(template.capabilities || {}, capabilities);
+      if (similarity > 0.95 && similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestTemplate = template;
+      }
+    }
+
+    return bestTemplate;
   }
 
   /**

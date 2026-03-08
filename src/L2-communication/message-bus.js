@@ -74,6 +74,8 @@ export class MessageBus {
    * @param {Object} [options]
    * @param {string} [options.senderId] - 发送者 ID
    * @param {string} [options.correlationId] - 关联 ID
+   * @param {string} [options.traceId] - 分布式追踪 ID / Distributed trace ID
+   * @param {string} [options.parentSpanId] - 父 Span ID
    * @returns {string} messageId
    */
   publish(topic, data, options = {}) {
@@ -83,6 +85,8 @@ export class MessageBus {
       data,
       senderId: options.senderId || null,
       correlationId: options.correlationId || null,
+      traceId: options.traceId || null,
+      parentSpanId: options.parentSpanId || null,
       timestamp: Date.now(),
     };
 

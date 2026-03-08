@@ -476,9 +476,12 @@ export class PluginAdapter {
         engines.contextService?.invalidateCache?.(event.agentId);
       },
 
-      // ── 3. onSubAgentSpawn: 注入 SOUL 片段 / Inject SOUL snippet ──
+      // ── 3. onSubAgentSpawn: 注入 SOUL 片段 + Trace 传播 / Inject SOUL snippet + Trace propagation ──
       onSubAgentSpawn: async (event) => {
-        logger.info?.(`[Hook:onSubAgentSpawn] 子代理生成 / SubAgent spawning: ${event.subAgentId}`);
+        // 生成 Trace Context / Generate Trace Context
+        const traceId = event.traceId || `tr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const spanId = `sp_${Math.random().toString(36).slice(2, 10)}`;
+        logger.info?.(`[Hook:onSubAgentSpawn] [trace:${traceId}] 子代理生成 / SubAgent spawning: ${event.subAgentId}`);
 
         // 通过 SoulDesigner 生成 SOUL 片段 / Generate SOUL snippet via SoulDesigner
         let soulSnippet = '';
@@ -513,7 +516,7 @@ export class PluginAdapter {
           spawnedAt: Date.now(),
         });
 
-        return { soulSnippet };
+        return { soulSnippet, traceId, spanId };
       },
 
       // ── 4. onSubAgentComplete: 质量门控 + 信息素强化 ──────────────

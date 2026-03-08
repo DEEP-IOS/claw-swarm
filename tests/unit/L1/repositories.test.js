@@ -94,6 +94,23 @@ describe('PheromoneRepository', () => {
     expect(repo.count()).toBe(3);
   });
 
+  it('should trim by decayed intensity — preferring stale high-intensity over fresh low-intensity', () => {
+    const now = Date.now();
+    // Stale pheromone: high original intensity (1.0) but created 100 min ago with fast decay
+    // Decayed value ≈ 1.0 * exp(-0.15 * 100) ≈ 0.0000003 (effectively dead)
+    repo.insert({ id: 'stale', type: 'alarm', sourceId: 'a1', targetScope: '/t/1', intensity: 1.0, decayRate: 0.15, updatedAt: now - 100 * 60000 });
+    // Fresh pheromone: lower original intensity (0.3) but just created
+    // Decayed value ≈ 0.3 (still alive)
+    repo.insert({ id: 'fresh', type: 'trail', sourceId: 'a1', targetScope: '/t/1', intensity: 0.3, decayRate: 0.05, updatedAt: now });
+
+    const deleted = repo.trimToLimit(1);
+    expect(deleted).toBe(1);
+    // The stale pheromone should be deleted (lower decayed value), keeping the fresh one
+    const remaining = repo.getAll();
+    expect(remaining.length).toBe(1);
+    expect(remaining[0].id).toBe('fresh');
+  });
+
   it('should parse payload JSON', () => {
     repo.insert({ id: 'p1', type: 'trail', sourceId: 'a1', targetScope: '/t/1', payload: { key: 'val' } });
     const results = repo.query('/t/1');
