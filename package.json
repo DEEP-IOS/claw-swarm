@@ -7,6 +7,9 @@
     "node": ">=22.0.0"
   },
   "main": "src/index.js",
+  "openclaw": {
+    "extensions": ["./src/index.js"]
+  },
   "exports": {
     ".": "./src/index.js",
     "./infrastructure/*": "./src/L1-infrastructure/*",
