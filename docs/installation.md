@@ -90,9 +90,9 @@ OpenClaw 按以下顺序扫描插件（首次匹配生效）：
 
 ## 3. Configuration / 配置
 
-Configure in `~/.openclaw/openclaw.json` under `plugins.entries`:
+Configure in `~/.openclaw/openclaw.json` under `plugins.entries`. Plugin-specific settings go inside the `config` key — `api.pluginConfig` receives this object directly.
 
-在 `~/.openclaw/openclaw.json` 的 `plugins.entries` 中配置：
+在 `~/.openclaw/openclaw.json` 的 `plugins.entries` 中配置。插件配置必须嵌套在 `config` 键内 — 插件通过 `api.pluginConfig` 直接接收此对象。
 
 ```json
 {
@@ -100,13 +100,15 @@ Configure in `~/.openclaw/openclaw.json` under `plugins.entries`:
     "entries": {
       "claw-swarm": {
         "enabled": true,
-        "dbPath": "~/.openclaw/claw-swarm/claw-swarm.db",
-        "memory": { "inMemory": false, "maxFocus": 5, "maxContext": 15, "maxScratch": 30 },
-        "pheromone": { "decayIntervalMs": 60000, "decayRate": 0.05 },
-        "gossip": { "fanout": 3, "heartbeatMs": 5000 },
-        "orchestration": { "qualityGates": true, "pipelineBreaker": true },
-        "dashboard": { "enabled": false, "port": 19100 },
-        "circuitBreaker": { "failureThreshold": 5, "successThreshold": 3, "resetTimeoutMs": 30000 }
+        "config": {
+          "dbPath": "~/.openclaw/claw-swarm/claw-swarm.db",
+          "memory": { "inMemory": false, "maxFocus": 5, "maxContext": 15, "maxScratch": 30 },
+          "pheromone": { "decayIntervalMs": 60000, "decayRate": 0.05 },
+          "gossip": { "fanout": 3, "heartbeatMs": 5000 },
+          "orchestration": { "qualityGates": true, "pipelineBreaker": true },
+          "dashboard": { "enabled": false, "port": 19100 },
+          "circuitBreaker": { "failureThreshold": 5, "successThreshold": 3, "resetTimeoutMs": 30000 }
+        }
       }
     }
   }

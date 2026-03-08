@@ -103,18 +103,29 @@ openclaw gateway restart
 
 ### Configuration / 配置
 
-Claw-Swarm uses Zod-validated configuration via `ConfigManager`. All subsystems are independently toggleable.
+Plugin-specific settings must be nested under the `config` key in `~/.openclaw/openclaw.json`. The `api.pluginConfig` receives this object directly.
 
-Claw-Swarm 通过 `ConfigManager` 使用 Zod 验证配置，各子系统可独立开关。
+插件配置必须嵌套在 `~/.openclaw/openclaw.json` 的 `config` 键内。`api.pluginConfig` 直接接收此对象。
 
 ```json
 {
-  "memory": { "enabled": true, "maxPrependChars": 4000 },
-  "pheromone": { "enabled": true, "decayIntervalMs": 60000 },
-  "orchestration": { "enabled": true, "maxWorkers": 16 },
-  "monitoring": { "enabled": true, "dashboardPort": 19100 }
+  "plugins": {
+    "entries": {
+      "claw-swarm": {
+        "enabled": true,
+        "config": {
+          "memory": { "enabled": true, "maxPrependChars": 4000 },
+          "pheromone": { "enabled": true, "decayIntervalMs": 60000 },
+          "orchestration": { "enabled": true, "maxWorkers": 16 },
+          "dashboard": { "enabled": false, "port": 19100 }
+        }
+      }
+    }
+  }
 }
 ```
+
+See [docs/installation.md](docs/installation.md) for full option reference. / 完整配置参考见安装文档。
 
 ---
 

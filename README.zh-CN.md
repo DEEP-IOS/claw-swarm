@@ -176,30 +176,39 @@ openclaw gateway restart
 
 ### 完整配置示例
 
-配置通过 OpenClaw 的 `pluginConfig` 传入，全部字段均可选（有 Zod 默认值）：
+插件配置必须嵌套在 `~/.openclaw/openclaw.json` 的 `config` 键内。`api.pluginConfig` 直接接收此对象，全部字段均可选（有 Zod 默认值）：
 
 ```json
 {
-  "dbPath": null,
-  "memory": {
-    "enabled": true,
-    "maxPrependChars": 4000,
-    "workingMemory": { "focusSlots": 5, "contextSlots": 15, "scratchpadMaxChars": 2000 },
-    "episodicMemory": { "maxEvents": 1000, "importanceThreshold": 0.3, "decayLambdaDays": 30 },
-    "knowledgeGraph": { "maxTraversalDepth": 3, "minImportance": 0.3 }
-  },
-  "pheromone": { "enabled": true, "decayIntervalMs": 60000 },
-  "governance": { "enabled": true },
-  "soul": { "enabled": true },
-  "orchestration": {
-    "enabled": true, "maxWorkers": 16, "defaultStrategy": "simulated",
-    "executionMode": "dependency", "maxRoles": 8,
-    "moeRouting": { "enabled": true, "topK": 3, "minConfidence": 0.3, "fallbackRegex": true },
-    "abcScheduler": { "enabled": false, "employedRatio": 0.5, "onlookerRatio": 0.45, "scoutRatio": 0.05 },
-    "contractNet": { "enabled": false, "bidTimeoutMs": 5000 },
-    "replanCooldownMs": 30000
-  },
-  "dashboard": { "enabled": false, "port": 19100 }
+  "plugins": {
+    "entries": {
+      "claw-swarm": {
+        "enabled": true,
+        "config": {
+          "dbPath": null,
+          "memory": {
+            "enabled": true,
+            "maxPrependChars": 4000,
+            "workingMemory": { "focusSlots": 5, "contextSlots": 15, "scratchpadMaxChars": 2000 },
+            "episodicMemory": { "maxEvents": 1000, "importanceThreshold": 0.3, "decayLambdaDays": 30 },
+            "knowledgeGraph": { "maxTraversalDepth": 3, "minImportance": 0.3 }
+          },
+          "pheromone": { "enabled": true, "decayIntervalMs": 60000 },
+          "governance": { "enabled": true },
+          "soul": { "enabled": true },
+          "orchestration": {
+            "enabled": true, "maxWorkers": 16, "defaultStrategy": "simulated",
+            "executionMode": "dependency", "maxRoles": 8,
+            "moeRouting": { "enabled": true, "topK": 3, "minConfidence": 0.3, "fallbackRegex": true },
+            "abcScheduler": { "enabled": false, "employedRatio": 0.5, "onlookerRatio": 0.45, "scoutRatio": 0.05 },
+            "contractNet": { "enabled": false, "bidTimeoutMs": 5000 },
+            "replanCooldownMs": 30000
+          },
+          "dashboard": { "enabled": false, "port": 19100 }
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -447,7 +456,7 @@ tests/unit/L1~L6/ + integration/ + stress/    # 471 tests across 30 files
 ### 破坏性变更
 
 - 插件入口仍为 `src/index.js`，导出格式不变 (`{ id, register(api) }`)
-- v4.0 旧目录 (`layer1-core/` 等) 源文件保留但已弃用
+- v4.0 旧目录 (`layer1-core/`、`layer2-engines/`、`layer3-intelligence/`、`layer4-adapter/`) 已移除，代码完全迁移至新的 L1-L6 层级
 - 工具名统一为 `swarm_` 前缀（v4.0 的 `collaborate-tool`、`swarm-manage-tool`、`swarm-design-tool` 已重命名）
 
 ---
