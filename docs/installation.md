@@ -71,9 +71,9 @@ openclaw gateway restart
 openclaw plugins list    # should show claw-swarm as enabled
 ```
 
-After installation, the plugin registers 8 OpenClaw hooks and 7 agent tools.
+After installation, the plugin registers 6 OpenClaw hooks and 7 agent tools.
 
-安装完成后，插件自动注册 8 个 OpenClaw 钩子和 7 个 Agent 工具。
+安装完成后，插件自动注册 6 个 OpenClaw 钩子和 7 个 Agent 工具。
 
 ### Plugin Discovery Order / 插件发现顺序
 

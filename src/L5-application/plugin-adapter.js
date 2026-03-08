@@ -9,11 +9,13 @@
  * - 注册 14 个 V5.0 内部钩子, 将生命周期事件路由到内部引擎
  * - 注册 7 个 OpenClaw 工具, 向 Agent 暴露蜂群能力
  * - 提供 getHooks() / getTools() 供 src/index.js 的 register(api) 桥接使用
+ * - 提供 findAgentRecord() / findTaskForAgent() 供工具驱动的子 Agent 生命周期使用
  *
  * - Manages engine lifecycle (init, close, cleanup)
  * - Registers 14 internal V5.0 hooks, routing lifecycle events to internal engines
  * - Registers 7 OpenClaw tools, exposing swarm capabilities to agents
  * - Provides getHooks() / getTools() for src/index.js register(api) bridge
+ * - Provides findAgentRecord() / findTaskForAgent() for tool-driven sub-agent lifecycle
  *
  * 架构原则 / Architecture principle:
  * - L5 是唯一与 OpenClaw API 耦合的层
@@ -814,6 +816,55 @@ export class PluginAdapter {
       // 7. swarm_zone: Zone 管理 / Zone management
       createZoneTool(toolDeps),
     ];
+  }
+
+  // ━━━ 子 Agent 生命周期辅助 / Sub-Agent Lifecycle Helpers ━━━
+
+  /**
+   * 查找 Agent 记录 (由 swarm_spawn 工具创建)
+   * Find agent record (created by swarm_spawn tool)
+   *
+   * 用于 before_agent_start 中判断是否需要注入 SOUL 片段。
+   * Used in before_agent_start to determine if SOUL snippet injection is needed.
+   *
+   * @param {string} agentId - Agent ID
+   * @returns {Object | null} Agent 记录, 包含 role/tier/persona 等 / Agent record with role/tier/persona etc.
+   */
+  findAgentRecord(agentId) {
+    try {
+      return this._engines.repos?.agentRepo?.getAgent?.(agentId) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 查找 Agent 关联的任务 (由 swarm_spawn 工具创建)
+   * Find task associated with an agent (created by swarm_spawn tool)
+   *
+   * 用于 agent_end 中判断是否需要触发质量门控。
+   * Used in agent_end to determine if quality gate should be triggered.
+   *
+   * @param {string} agentId - Agent ID
+   * @returns {Object | null} 任务记录 / Task record, or null
+   */
+  findTaskForAgent(agentId) {
+    try {
+      const taskRepo = this._engines.repos?.taskRepo;
+      if (!taskRepo) return null;
+
+      // 查找分配给此 Agent 的运行中任务
+      // Find running tasks assigned to this agent
+      const tasks = taskRepo.listTasks?.('running') || [];
+      for (const task of tasks) {
+        if (task.config?.assignedAgent === agentId) {
+          return task;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   // ━━━ 内部方法 / Internal Methods ━━━

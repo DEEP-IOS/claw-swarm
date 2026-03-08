@@ -409,4 +409,59 @@ describe('PluginAdapter', () => {
       expect(state.reason).toBe('test abort');
     });
   });
+
+  // --------------------------------------------------------------------------
+  // 11. 子 Agent 生命周期辅助方法 / Sub-Agent Lifecycle Helper Methods
+  // --------------------------------------------------------------------------
+  describe('findAgentRecord / findTaskForAgent', () => {
+    let adapter;
+
+    beforeEach(() => {
+      adapter = new PluginAdapter({ config: createTestConfig(), logger: silentLogger });
+      adapter.init({});
+    });
+
+    afterEach(() => {
+      try { adapter?.close(); } catch { /* ignore */ }
+    });
+
+    it('findAgentRecord should return null for unknown agent / 未知 Agent 返回 null', () => {
+      const result = adapter.findAgentRecord('nonexistent-agent');
+      expect(result).toBeNull();
+    });
+
+    it('findAgentRecord should return agent record after creation / 创建后返回 Agent 记录', () => {
+      const agentRepo = adapter._engines.repos.agentRepo;
+      const agentId = agentRepo.createAgent({
+        name: 'test-sub',
+        role: 'developer',
+        tier: 'trainee',
+        status: 'active',
+      });
+
+      const result = adapter.findAgentRecord(agentId);
+      expect(result).toBeDefined();
+      expect(result.role).toBe('developer');
+    });
+
+    it('findTaskForAgent should return null when no tasks / 无任务时返回 null', () => {
+      const result = adapter.findTaskForAgent('no-task-agent');
+      expect(result).toBeNull();
+    });
+
+    it('findTaskForAgent should return task assigned to agent / 返回分配给 Agent 的任务', () => {
+      const taskRepo = adapter._engines.repos.taskRepo;
+      const taskId = 'test-task-1';
+
+      taskRepo.createTask(taskId, {
+        description: 'test task',
+        assignedAgent: 'my-agent-id',
+      }, 'live');
+      taskRepo.updateTaskStatus(taskId, 'running');
+
+      const result = adapter.findTaskForAgent('my-agent-id');
+      expect(result).toBeDefined();
+      expect(result.id).toBe(taskId);
+    });
+  });
 });

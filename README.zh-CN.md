@@ -2,7 +2,7 @@
 
 **6 层仿生蜂群智能插件 | OpenClaw 多智能体协作基础设施**
 
-> Node.js >= 22.0.0 | 55+ 源文件 | 471 测试 | 12 仿生算法 | 7 工具 | 8 钩子
+> Node.js >= 22.0.0 | 55+ 源文件 | 475 测试 | 12 仿生算法 | 7 工具 | 6 钩子
 
 [English](README.md) | **中文**
 
@@ -354,16 +354,18 @@ V5.0 通过 OpenClaw Plugin SDK 的 `{ id, register(api) }` 模式注册。
 
 ### OpenClaw 事件 -> V5.0 映射
 
+通过 Plugin SDK 注册 6 个钩子：
+
 | OpenClaw 事件 | V5.0 内部处理器 | 执行动作 |
 |---------------|-----------------|----------|
-| `before_agent_start` | `onAgentStart` + `onPrependContext` | Gossip 注册 + 上下文注入（记忆/知识图谱/信息素） |
-| `agent_end` | `onAgentEnd` | 记忆固化 + Gossip 更新 + 缓存清理 |
+| `before_agent_start` | `onAgentStart` + `onSubAgentSpawn` + `onPrependContext` | 注册 + SOUL 注入 + 上下文注入（记忆/知识图谱/信息素） |
+| `agent_end` | `onSubAgentComplete`/`onSubAgentAbort` + `onAgentEnd` | 质量门控 + 信息素强化 + 记忆固化 + Gossip 更新 |
 | `after_tool_call` | `onToolCall` + `onToolResult` | 工作记忆记录 + 能力维度更新 |
-| `subagent_spawning` | `onSubAgentSpawn` | SOUL 注入 + 治理门控 |
-| `subagent_ended` | `onSubAgentComplete` / `onSubAgentAbort` | 成功: 质量门控+TRAIL+声誉; 失败: 熔断+ALARM |
 | `before_reset` | `onMemoryConsolidate` | 工作记忆 -> 情景记忆固化 |
 | `gateway_stop` | `close()` | 定时器停止 + 引擎销毁 + 数据库关闭 |
 | `message_sending` | `onSubAgentMessage` | 消息路由（点对点/广播） |
+
+子 Agent 生命周期由 `swarm_spawn` 工具驱动：SOUL 片段通过工具结果返回，Agent 结束时自动触发质量门控和信息素更新。
 
 ### V5.0 内部钩子 (通过 L2 MessageBus 触发)
 

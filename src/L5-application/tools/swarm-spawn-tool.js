@@ -254,7 +254,7 @@ export function createSpawnTool({ engines, logger }) {
       roleScores: roleScores.slice(0, 3),
       fallbackUsed,
       pheromoneId,
-      soulSnippet: soulSnippet ? '(generated)' : null,
+      soulSnippet: soulSnippet || null,
       message: `子代理已创建: ${bestRole.name} / Sub-agent spawned: ${bestRole.name}`,
     };
   }

@@ -7,14 +7,18 @@
  * OpenClaw 事件 → V5.0 内部映射:
  * OpenClaw Event → V5.0 Internal Mapping:
  *
- *   before_agent_start  → onAgentStart + onPrependContext (上下文注入)
- *   agent_end           → onAgentEnd (记忆固化, Gossip 更新)
- *   after_tool_call     → onToolCall + onToolResult (工具监控)
- *   subagent_spawning   → onSubAgentSpawn (SOUL 注入, 治理门控)
- *   subagent_ended      → onSubAgentComplete / onSubAgentAbort (质量门控, 信息素)
+ *   before_agent_start  → onAgentStart + onSubAgentSpawn (SOUL) + onPrependContext
+ *   agent_end           → onSubAgentComplete/Abort (质量门控) + onAgentEnd (记忆固化)
+ *   after_tool_call     → onToolCall + onToolResult (工具监控, 能力更新)
  *   before_reset        → onMemoryConsolidate (记忆固化)
  *   gateway_stop        → close() (引擎关闭)
  *   message_sending     → onSubAgentMessage (消息路由)
+ *
+ * 子 Agent 生命周期通过工具驱动模式实现:
+ * Sub-agent lifecycle is implemented via tool-driven mode:
+ *   - SOUL 注入: swarm_spawn 工具返回 SOUL 片段 + before_agent_start 注入上下文
+ *   - 质量门控: agent_end 时检测已注册 Agent, 触发 onSubAgentComplete/Abort
+ *   - 信息素:   质量门控结果驱动 TRAIL/ALARM 信息素发射
  *
  * V5.0 内部钩子 (无直接 OpenClaw 事件, 通过 MessageBus 内部触发):
  * V5.0 Internal-only hooks (triggered via MessageBus, no direct OpenClaw event):
@@ -37,6 +41,9 @@ const VERSION = '5.0.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 
+/** 默认数据目录 (api.dataDir 不存在时的回退) / Default data dir fallback */
+const DEFAULT_DATA_DIR = join(homedir(), '.openclaw', 'claw-swarm');
+
 // ============================================================================
 // 辅助函数 / Helpers
 // ============================================================================
@@ -44,8 +51,8 @@ const DB_FILENAME = 'claw-swarm.db';
 /**
  * 解析数据库路径 / Resolve database path
  *
- * 优先使用用户配置的 dbPath, 否则使用 dataDir 下的默认文件名。
- * Prefers user-configured dbPath, else uses default filename under dataDir.
+ * 优先级: 用户配置 dbPath > api.dataDir > 默认 ~/.openclaw/claw-swarm/
+ * Priority: user-configured dbPath > api.dataDir > default ~/.openclaw/claw-swarm/
  *
  * @param {string} [configDbPath] - 用户配置 / User-configured path
  * @param {string} [dataDir] - OpenClaw 提供的数据目录 / OpenClaw data directory
@@ -59,8 +66,9 @@ function resolveDbPath(configDbPath, dataDir) {
     }
     return configDbPath;
   }
-  if (dataDir) return join(dataDir, DB_FILENAME);
-  return null; // 使用内存模式 / Use in-memory mode
+  // 使用 api.dataDir 或默认路径 / Use api.dataDir or default path
+  const dir = dataDir || DEFAULT_DATA_DIR;
+  return join(dir, DB_FILENAME);
 }
 
 /**
@@ -90,16 +98,18 @@ export default {
    * @param {Object} api - OpenClaw Plugin API
    * @param {Object} [api.pluginConfig] - 用户配置 / User configuration
    * @param {Object} [api.logger] - 日志器 / Logger instance
-   * @param {string} [api.dataDir] - 数据目录 / Data directory path
+   * @param {Function} [api.resolvePath] - 路径解析 / Path resolver
    * @param {Function} api.on - 钩子注册 / Hook registration
    * @param {Function} api.registerTool - 工具注册 / Tool registration
    */
   register(api) {
     const config = api.pluginConfig || {};
     const logger = api.logger || console;
-    const dataDir = api.dataDir || '';
 
     // ── 1. 解析数据库路径 / Resolve DB path ─────────────────────────────
+    // api.dataDir 不在 Plugin SDK 类型定义中, 使用防御性回退
+    // api.dataDir is not in Plugin SDK type definitions, use defensive fallback
+    const dataDir = api.dataDir || '';
     const dbPath = resolveDbPath(config.dbPath, dataDir);
 
     // ── 2. 创建并初始化适配器 (L1→L5 引擎组装) ──────────────────────────
@@ -115,49 +125,114 @@ export default {
     const hooks = adapter.getHooks();
     const tools = adapter.getTools();
 
-    // ── 3. 注册 OpenClaw 钩子 / Register OpenClaw Hooks ─────────────────
+    // ── 3. 注册 OpenClaw 钩子 (6 个) / Register OpenClaw Hooks (6) ──────
 
     // ━━━ before_agent_start ━━━
-    // V5.0: onAgentStart (Agent 注册, Gossip 状态) + onPrependContext (上下文注入)
-    // V5.0: onAgentStart (agent registration, gossip state) + onPrependContext (context injection)
+    // V5.0: onAgentStart (注册) + onSubAgentSpawn (SOUL) + onPrependContext (上下文)
+    // V5.0: onAgentStart (register) + onSubAgentSpawn (SOUL) + onPrependContext (context)
+    //
+    // 工具驱动 SOUL 注入: 检查 Agent 是否有 swarm_spawn 创建的记录,
+    // 如果有则生成 SOUL 片段并注入上下文。
+    // Tool-driven SOUL injection: check if agent has a swarm_spawn record,
+    // if so generate SOUL snippet and inject into context.
     api.on('before_agent_start', async (event, ctx) => {
       const agentId = resolveAgentId(event, ctx);
+      const taskDesc = event.prompt || event.taskDescription || null;
 
-      // 调用 onAgentStart: 注册到 Gossip + AgentRepo
-      // Call onAgentStart: register in Gossip + AgentRepo
+      // 1. 注册 Agent / Register agent
       try {
         await hooks.onAgentStart({
           agentId,
-          taskDescription: event.prompt || event.taskDescription || null,
+          taskDescription: taskDesc,
           tier: event.tier || 'trainee',
         });
       } catch (err) {
         logger.warn?.(`[Claw-Swarm] onAgentStart failed: ${err.message}`);
       }
 
-      // 调用 onPrependContext: 构建上下文 (记忆 + 知识图谱 + 信息素)
-      // Call onPrependContext: build context (memory + knowledge graph + pheromone)
+      // 2. SOUL 注入: 检查是否有已注册的 Agent 记录 (由 swarm_spawn 创建)
+      //    SOUL injection: check for registered agent record (created by swarm_spawn)
+      let soulSnippet = '';
       try {
-        const result = await hooks.onPrependContext({
-          agentId,
-          taskDescription: event.prompt || event.taskDescription || null,
-        });
-        if (result?.prependText) {
-          return { prependContext: result.prependText };
+        const agentRecord = adapter.findAgentRecord(agentId);
+        if (agentRecord?.role) {
+          const spawnResult = await hooks.onSubAgentSpawn({
+            subAgentId: agentId,
+            parentAgentId: agentRecord.parentId || 'main',
+            subAgentName: agentRecord.name || agentId,
+            tier: agentRecord.tier || 'trainee',
+            persona: agentRecord.persona || 'worker-bee',
+            behavior: agentRecord.behavior || 'adaptive',
+            capabilities: null,
+            taskDescription: taskDesc,
+            role: agentRecord.role,
+            roleTemplate: null,
+            zoneId: null,
+            zoneName: null,
+          });
+          soulSnippet = spawnResult?.soulSnippet || '';
+        }
+      } catch {
+        // SOUL 注入为可选, 静默失败 / SOUL injection is optional, silent failure
+      }
+
+      // 3. 构建上下文 (记忆 + 知识图谱 + 信息素)
+      //    Build context (memory + knowledge graph + pheromone)
+      try {
+        const result = await hooks.onPrependContext({ agentId, taskDescription: taskDesc });
+        const parts = [soulSnippet, result?.prependText].filter(Boolean);
+        if (parts.length > 0) {
+          return { prependContext: parts.join('\n\n') };
         }
       } catch (err) {
         logger.warn?.(`[Claw-Swarm] onPrependContext failed: ${err.message}`);
+        // 如果上下文构建失败, 仍尝试注入 SOUL / If context fails, still try SOUL
+        if (soulSnippet) {
+          return { prependContext: soulSnippet };
+        }
       }
 
       return undefined;
     }, { priority: 60 });
 
     // ━━━ agent_end ━━━
-    // V5.0: onAgentEnd (记忆固化, Gossip 更新, 缓存清理)
-    // V5.0: onAgentEnd (memory consolidation, gossip update, cache invalidation)
+    // V5.0: 子 Agent 生命周期完成 + onAgentEnd (记忆固化, Gossip 更新)
+    // V5.0: Sub-agent lifecycle completion + onAgentEnd (memory, gossip, cleanup)
+    //
+    // 工具驱动质量门控: 检查 Agent 是否有关联任务记录,
+    // 如果有则触发 onSubAgentComplete 或 onSubAgentAbort。
+    // Tool-driven quality gate: check if agent has associated task records,
+    // if so trigger onSubAgentComplete or onSubAgentAbort.
     api.on('agent_end', async (event, ctx) => {
       const agentId = resolveAgentId(event, ctx);
+      const isSuccess = !event.error;
 
+      // 1. 子 Agent 生命周期: 检查关联任务并触发质量门控
+      //    Sub-agent lifecycle: check associated tasks and trigger quality gate
+      try {
+        const taskInfo = adapter.findTaskForAgent(agentId);
+        if (taskInfo) {
+          if (isSuccess) {
+            await hooks.onSubAgentComplete({
+              subAgentId: agentId,
+              taskId: taskInfo.id,
+              result: event.result || null,
+              taskScope: `/task/${taskInfo.id}`,
+            });
+          } else {
+            await hooks.onSubAgentAbort({
+              subAgentId: agentId,
+              taskId: taskInfo.id,
+              reason: event.error?.message || event.error || 'Agent ended with error',
+              taskScope: `/task/${taskInfo.id}`,
+            });
+          }
+        }
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] Sub-agent lifecycle handling failed: ${err.message}`);
+      }
+
+      // 2. 标准 Agent 结束处理 / Standard agent end handling
       try {
         await hooks.onAgentEnd({ agentId, ...event });
       } catch (err) {
@@ -188,72 +263,6 @@ export default {
           dimension: _inferDimension(toolName),
         });
       } catch { /* 静默 / silent */ }
-    });
-
-    // ━━━ subagent_spawning ━━━
-    // V5.0: onSubAgentSpawn (SOUL 注入 + 治理门控)
-    // V5.0: onSubAgentSpawn (SOUL injection + governance gate)
-    api.on('subagent_spawning', async (event, ctx) => {
-      const parentId = resolveAgentId(event, ctx);
-      const subAgentId = event.subagentId || event.agentId || `sub-${Date.now()}`;
-
-      try {
-        const result = await hooks.onSubAgentSpawn({
-          subAgentId,
-          parentAgentId: parentId,
-          subAgentName: event.name || event.label || subAgentId,
-          tier: event.tier || 'trainee',
-          persona: event.persona || 'worker-bee',
-          behavior: event.behavior || 'adaptive',
-          capabilities: event.capabilities || null,
-          taskDescription: event.taskDescription || event.prompt || null,
-          role: event.role || null,
-          roleTemplate: event.roleTemplate || null,
-          zoneId: event.zoneId || null,
-          zoneName: event.zoneName || null,
-        });
-
-        // SOUL 片段注入: 通过 customPrompt 返回给 OpenClaw
-        // SOUL snippet injection: return via customPrompt to OpenClaw
-        if (result?.soulSnippet) {
-          return { customPrompt: result.soulSnippet };
-        }
-      } catch (err) {
-        logger.warn?.(`[Claw-Swarm] onSubAgentSpawn failed: ${err.message}`);
-      }
-
-      return undefined;
-    });
-
-    // ━━━ subagent_ended ━━━
-    // V5.0: onSubAgentComplete (成功: 质量门控 + TRAIL 信息素 + 声誉)
-    //        onSubAgentAbort (失败: PipelineBreaker + ALARM 信息素)
-    // V5.0: onSubAgentComplete (success: quality gate + TRAIL pheromone + reputation)
-    //        onSubAgentAbort (failure: pipeline breaker + ALARM pheromone)
-    api.on('subagent_ended', async (event, ctx) => {
-      const subAgentId = event.subagentId || event.agentId || 'unknown';
-      const outcome = event.outcome || 'ok';
-      const isSuccess = outcome === 'ok' || outcome === 'success';
-
-      try {
-        if (isSuccess) {
-          await hooks.onSubAgentComplete({
-            subAgentId,
-            taskId: event.taskId || `task-${subAgentId}`,
-            result: event.result || null,
-            taskScope: event.taskScope || `/task/${event.taskId || subAgentId}`,
-          });
-        } else {
-          await hooks.onSubAgentAbort({
-            subAgentId,
-            taskId: event.taskId || `task-${subAgentId}`,
-            reason: event.reason || outcome,
-            taskScope: event.taskScope || `/task/${event.taskId || subAgentId}`,
-          });
-        }
-      } catch (err) {
-        logger.warn?.(`[Claw-Swarm] subagent_ended handling failed: ${err.message}`);
-      }
     });
 
     // ━━━ before_reset ━━━
@@ -315,7 +324,7 @@ export default {
       });
     }
 
-    logger.info?.(`[Claw-Swarm] V${VERSION} plugin registered — 8 hooks + ${tools.length} tools`);
+    logger.info?.(`[Claw-Swarm] V${VERSION} plugin registered — 6 hooks + ${tools.length} tools`);
   },
 };
 

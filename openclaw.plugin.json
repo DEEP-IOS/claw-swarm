@@ -3,7 +3,6 @@
   "name": "Claw-Swarm V5.0",
   "description": "蜂群智能协作引擎 — Swarm intelligence engine with 6-layer architecture: bio-inspired multi-agent orchestration, pheromone communication, memory systems, quality governance, and real-time monitoring dashboard",
   "version": "5.0.0",
-  "kind": "orchestration",
   "configSchema": {
     "type": "object",
     "additionalProperties": true,
