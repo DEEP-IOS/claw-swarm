@@ -9,7 +9,7 @@
 | Requirement / 要求 | Version / 版本 | Notes / 说明 |
 |---|---|---|
 | **Node.js** | >= 22.0.0 | Required for built-in `node:sqlite` (DatabaseSync). / 需要内置 `node:sqlite`。 |
-| **OpenClaw CLI** | Latest | `openclaw` command must be in PATH. / `openclaw` 命令需在 PATH 中可用。 |
+| **OpenClaw** | Latest | Gateway must be installed and running. / 网关需已安装并运行。 |
 | **npm** | >= 10.0.0 | Ships with Node.js 22+. / 随 Node.js 22+ 附带。 |
 
 ```bash
@@ -20,47 +20,94 @@ node -v   # Must show v22.x.x or higher / 必须为 v22.x.x 或更高
 
 ## 2. Installation Steps / 安装步骤
 
+OpenClaw discovers plugins from the `~/.openclaw/extensions/` directory. Each subdirectory with an `openclaw.plugin.json` manifest is auto-detected.
+
+OpenClaw 从 `~/.openclaw/extensions/` 目录发现插件。每个包含 `openclaw.plugin.json` 清单的子目录会被自动检测。
+
+### Method A: Clone + Symlink (Recommended for development) / 克隆 + 符号链接（推荐开发方式）
+
 ```bash
-# Step 1: Install dependencies / 安装依赖
-cd E:\OpenClaw\data\swarm
+# Step 1: Clone and install dependencies / 克隆并安装依赖
+git clone https://github.com/DEEP-IOS/claw-swarm.git
+cd claw-swarm
 npm install
 
-# Step 2: Link-install to OpenClaw / 链接安装到 OpenClaw
-openclaw plugins install -l E:\OpenClaw\data\swarm
+# Step 2: Link into OpenClaw extensions / 链接到 OpenClaw 扩展目录
+# Linux / macOS:
+ln -s "$(pwd)" ~/.openclaw/extensions/claw-swarm
 
-# Step 3: Enable the plugin / 启用插件
+# Windows (run CMD as Administrator / 以管理员身份运行 CMD):
+mklink /J "%USERPROFILE%\.openclaw\extensions\claw-swarm" "%cd%"
+```
+
+### Method B: Direct clone into extensions / 直接克隆到扩展目录
+
+```bash
+cd ~/.openclaw/extensions
+git clone https://github.com/DEEP-IOS/claw-swarm.git
+cd claw-swarm && npm install
+```
+
+### Method C: CLI install / CLI 安装
+
+```bash
+openclaw plugins install --link /path/to/claw-swarm
 openclaw plugins enable claw-swarm
+```
+
+### Enable and Verify / 启用并验证
+
+```bash
+# Step 3: Enable in config / 在配置中启用
+# Edit ~/.openclaw/openclaw.json, add under "plugins.entries":
+# 编辑 ~/.openclaw/openclaw.json，在 "plugins.entries" 下添加:
+#
+#   "claw-swarm": { "enabled": true }
 
 # Step 4: Restart gateway / 重启网关
 openclaw gateway restart
 
 # Verify / 验证
 openclaw plugins list    # should show claw-swarm as enabled
-openclaw hooks list      # should show 8 registered hooks
 ```
 
 After installation, the plugin registers 8 OpenClaw hooks and 7 agent tools.
 
 安装完成后，插件自动注册 8 个 OpenClaw 钩子和 7 个 Agent 工具。
 
+### Plugin Discovery Order / 插件发现顺序
+
+OpenClaw scans for plugins in this order (first match wins):
+
+OpenClaw 按以下顺序扫描插件（首次匹配生效）：
+
+1. `plugins.load.paths` in `openclaw.json` (custom paths / 自定义路径)
+2. `<workspace>/.openclaw/extensions/` (workspace-level / 工作区级)
+3. `~/.openclaw/extensions/` (user-level / 用户级)
+4. `<openclaw-install>/extensions/` (bundled / 内置)
+
 ---
 
 ## 3. Configuration / 配置
 
-Configure via your OpenClaw configuration file / 通过 OpenClaw 配置文件进行配置：
+Configure in `~/.openclaw/openclaw.json` under `plugins.entries`:
+
+在 `~/.openclaw/openclaw.json` 的 `plugins.entries` 中配置：
 
 ```json
 {
   "plugins": {
-    "claw-swarm": {
-      "dbPath": "path/to/claw-swarm.db",
-      "memory": { "inMemory": false, "maxFocus": 5, "maxContext": 15, "maxScratch": 30 },
-      "pheromone": { "decayIntervalMs": 60000, "decayRate": 0.05 },
-      "gossip": { "fanout": 3, "heartbeatMs": 5000 },
-      "orchestration": {},
-      "quality": {},
-      "dashboard": { "enabled": false, "port": 19100 },
-      "circuitBreaker": { "failureThreshold": 5, "successThreshold": 3, "resetTimeoutMs": 30000 }
+    "entries": {
+      "claw-swarm": {
+        "enabled": true,
+        "dbPath": "~/.openclaw/claw-swarm/claw-swarm.db",
+        "memory": { "inMemory": false, "maxFocus": 5, "maxContext": 15, "maxScratch": 30 },
+        "pheromone": { "decayIntervalMs": 60000, "decayRate": 0.05 },
+        "gossip": { "fanout": 3, "heartbeatMs": 5000 },
+        "orchestration": { "qualityGates": true, "pipelineBreaker": true },
+        "dashboard": { "enabled": false, "port": 19100 },
+        "circuitBreaker": { "failureThreshold": 5, "successThreshold": 3, "resetTimeoutMs": 30000 }
+      }
     }
   }
 }
@@ -70,7 +117,7 @@ Configure via your OpenClaw configuration file / 通过 OpenClaw 配置文件进
 
 | Option / 选项 | Type | Default | Description / 说明 |
 |---|---|---|---|
-| `dbPath` | `string` | `<dataDir>/claw-swarm.db` | SQLite database path. `null` for in-memory. / 数据库路径，`null` 为内存模式。 |
+| `dbPath` | `string` | `<dataDir>/claw-swarm.db` | SQLite database path. Supports `~/`. `null` for in-memory. / 数据库路径，支持 `~/`。`null` 为内存模式。 |
 | `memory.inMemory` | `boolean` | `false` | In-memory DB (data lost on restart). / 内存数据库（重启丢失）。 |
 | `memory.maxFocus` | `number` | `5` | Working memory focus buffer size. / 工作记忆焦点缓冲区大小。 |
 | `memory.maxContext` | `number` | `15` | Working memory context buffer size. / 工作记忆上下文缓冲区大小。 |
@@ -111,11 +158,39 @@ Powered by `StateBroadcaster`, `MetricsCollector`, and `DashboardService` (Fasti
 
 ---
 
-## 5. Upgrading from v4.0 / 从 v4.0 升级
+## 5. Replacing OME / 替代 OME
 
-### Directory Structure / 目录结构
+Claw-Swarm V5.0's L3 memory system fully replaces OME (OpenClaw Memory Engine). If you have OME installed:
 
-V5.0 uses **L1-L6 directories**. Legacy `layer1-4` directories remain but are unused.
+V5.0 的 L3 记忆系统完全替代 OME。如果你安装了 OME：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "ome": { "enabled": false },
+      "claw-swarm": { "enabled": true }
+    }
+  }
+}
+```
+
+| OME Feature / OME 功能 | V5.0 Replacement / V5.0 替代 |
+|---|---|
+| Session checkpoints | WorkingMemory (3-tier: Focus/Context/Scratch) |
+| prependContext injection | ContextService (memory + knowledge graph + pheromone) |
+| D1/D5/D6 memory layers | EpisodicMemory (Ebbinghaus) + SemanticMemory (BFS) |
+| File modification tracking | after_tool_call hook + capability dimension scoring |
+
+---
+
+## 6. Upgrading from v4.0 / 从 v4.0 升级
+
+### Architecture Changes / 架构变更
+
+V5.0 replaced the v4.0 4-layer architecture with a new 6-layer architecture:
+
+V5.0 用全新的 6 层架构替代了 v4.0 的 4 层架构：
 
 | v4.0 | v5.0 | Content |
 |---|---|---|
@@ -131,16 +206,22 @@ V5.0 uses **L1-L6 directories**. Legacy `layer1-4` directories remain but are un
 - **Database**: Expanded from 25 to 34 tables (9 new: knowledge graphs, zones, plans, stats).
 - **Tests**: `node:test` replaced by **vitest** (`npm test` runs `vitest run`).
 - **Manifest**: `openclaw.plugin.json` added at project root.
-
-入口点、数据库架构、测试框架和插件清单均有变更，详见上方。
+- **Dependencies**: 5 npm runtime dependencies added (eventemitter3, fastify, nanoid, pino, zod).
 
 ---
 
-## 6. Uninstall / 卸载
+## 7. Uninstall / 卸载
 
 ```bash
-openclaw plugins disable claw-swarm
-openclaw plugins uninstall claw-swarm
+# Remove the symlink/directory from extensions / 从扩展目录移除符号链接
+rm ~/.openclaw/extensions/claw-swarm    # Linux/macOS
+rmdir "%USERPROFILE%\.openclaw\extensions\claw-swarm"  # Windows (junction)
+
+# Remove from config / 从配置中移除
+# Delete the "claw-swarm" entry from plugins.entries in ~/.openclaw/openclaw.json
+
+# Restart / 重启
+openclaw gateway restart
 ```
 
 The database file (`claw-swarm.db`) is not auto-deleted. Remove manually if needed.
@@ -149,13 +230,14 @@ The database file (`claw-swarm.db`) is not auto-deleted. Remove manually if need
 
 ---
 
-## 7. Troubleshooting / 故障排除
+## 8. Troubleshooting / 故障排除
 
 | Issue / 问题 | Cause / 原因 | Fix / 解决 |
 |---|---|---|
 | `Cannot find module 'node:sqlite'` | Node.js < 22.0.0 | Upgrade to Node.js >= 22.0.0 / 升级 Node.js |
-| Plugin shows as "disabled" | Enable step missed | `openclaw plugins enable claw-swarm && openclaw gateway restart` |
-| Hook conflict at priority 50 | OME v1.1.0 running simultaneously | Disable OME. Claw-Swarm replaces it. / 禁用 OME |
+| Plugin not discovered | Not in extensions dir | Verify symlink: `ls ~/.openclaw/extensions/claw-swarm/openclaw.plugin.json` |
+| Plugin shows as "disabled" | Not enabled in config | Add `"claw-swarm": { "enabled": true }` to `plugins.entries` |
+| Hook conflict at priority 60 | Other plugin at same priority | Adjust priority in `src/index.js` / 调整优先级 |
 | Dashboard port in use | Port 19100 occupied | Change `dashboard.port` in config / 更改端口 |
 | Database locked errors | Concurrent access | DB uses WAL mode + `busy_timeout=5000ms`. Check no external locks. / 检查外部锁 |
 | Tests failing after upgrade | Stale deps | `rm -rf node_modules && npm install && npm test` |
