@@ -27,10 +27,12 @@ const CONFIG_DIR = join(homedir(), '.openclaw');
 const CONFIG_FILE = join(CONFIG_DIR, 'openclaw.json');
 const EXTENSIONS_DIR = join(CONFIG_DIR, 'extensions');
 
-const log = (msg) => console.log(`\x1b[36m[claw-swarm]\x1b[0m ${msg}`);
-const warn = (msg) => console.log(`\x1b[33m[claw-swarm]\x1b[0m ${msg}`);
-const error = (msg) => console.log(`\x1b[31m[claw-swarm]\x1b[0m ${msg}`);
-const ok = (msg) => console.log(`\x1b[32m[claw-swarm]\x1b[0m ${msg}`);
+const color = process.stdout.isTTY || process.env.FORCE_COLOR;
+const c = (code, msg) => color ? `\x1b[${code}m${msg}\x1b[0m` : msg;
+const log = (msg) => console.log(`${c(36, '[claw-swarm]')} ${msg}`);
+const warn = (msg) => console.log(`${c(33, '[claw-swarm]')} ${msg}`);
+const error = (msg) => console.log(`${c(31, '[claw-swarm]')} ${msg}`);
+const ok = (msg) => console.log(`${c(32, '[claw-swarm]')} ${msg}`);
 
 function run(cmd, opts = {}) {
   try {
@@ -75,7 +77,7 @@ function checkOpenClaw() {
 function installDeps() {
   if (!existsSync(join(PLUGIN_DIR, 'node_modules'))) {
     log('Installing dependencies... / 安装依赖...');
-    run('npm install --production', { cwd: PLUGIN_DIR });
+    run('npm install --omit=dev', { cwd: PLUGIN_DIR });
   } else {
     log('Dependencies already installed ✓ / 依赖已安装 ✓');
   }
