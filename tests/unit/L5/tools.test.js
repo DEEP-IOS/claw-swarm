@@ -220,7 +220,7 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
   // 11. 工具元数据通用测试 / Tool Metadata Tests
   // --------------------------------------------------------------------------
   describe('Tool metadata / 工具元数据', () => {
-    it('all 7 tools should have name, description, inputSchema, handler / 所有 7 个工具应具有完整元数据', () => {
+    it('all 7 tools should have name, description, parameters, execute / 所有 7 个工具应具有完整元数据', () => {
       const deps = { engines, logger: silentLogger };
 
       const tools = [
@@ -249,12 +249,14 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
         expect(typeof tool.description).toBe('string');
         expect(tool.description.length).toBeGreaterThan(0);
 
-        // 输入 Schema / Input schema
-        expect(tool.inputSchema).toBeDefined();
-        expect(tool.inputSchema.type).toBe('object');
-        expect(tool.inputSchema.properties).toBeDefined();
+        // 输入 Schema / Input schema (OpenClaw uses 'parameters')
+        expect(tool.parameters).toBeDefined();
+        expect(tool.parameters.type).toBe('object');
+        expect(tool.parameters.properties).toBeDefined();
 
-        // 处理函数 / Handler function
+        // OpenClaw execute 接口 / OpenClaw execute interface
+        expect(typeof tool.execute).toBe('function');
+        // 内部 handler (供测试直接调用) / Internal handler (for direct test calls)
         expect(typeof tool.handler).toBe('function');
       });
     });

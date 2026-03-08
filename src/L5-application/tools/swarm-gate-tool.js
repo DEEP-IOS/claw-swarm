@@ -45,6 +45,7 @@ const inputSchema = {
     },
     output: {
       type: 'object',
+      additionalProperties: true,
       description: '任务输出结果 / Task output result (required for evaluate)',
     },
     agentId: {
@@ -315,7 +316,11 @@ export function createGateTool({ engines, logger }) {
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
-    inputSchema,
+    parameters: inputSchema,
     handler,
+    execute: async (toolCallId, params) => {
+      const result = await handler(params);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
   };
 }

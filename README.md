@@ -1,8 +1,8 @@
+[**中文**](README.zh-CN.md) | English
+
 # Claw-Swarm V5.0
 
 **Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 12 algorithms, and real-time monitoring.**
-
-仿生蜂群智能插件：6 层架构、12 种仿生算法、实时监控仪表盘，为 OpenClaw 多智能体系统提供完整的协调基础设施。
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
 ![Version](https://img.shields.io/badge/version-5.0.0-blue)

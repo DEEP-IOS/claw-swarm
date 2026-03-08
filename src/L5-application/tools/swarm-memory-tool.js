@@ -51,7 +51,7 @@ const inputSchema = {
     },
     agentId: {
       type: 'string',
-      description: '代理 ID / Agent ID',
+      description: '代理 ID (默认 "main") / Agent ID (defaults to "main")',
     },
     // record 参数 / record params
     eventType: {
@@ -104,10 +104,11 @@ const inputSchema = {
     },
     label: {
       type: 'string',
-      description: '节点标签 (add 子操作) / Node label (for add sub-action)',
+      description: '节点标签 (add 子操作创建节点, query 子操作按标签搜索) / Node label (add: create node, query: search by label)',
     },
     properties: {
       type: 'object',
+      additionalProperties: true,
       description: '节点属性 (add 子操作) / Node properties (for add sub-action)',
     },
     sourceId: {
@@ -174,9 +175,7 @@ export function createMemoryTool({ engines, logger }) {
    * @returns {Object}
    */
   async function handleRecord(input) {
-    const { agentId, eventType, subject, predicate, object, importance = 0.5 } = input;
-
-    if (!agentId) return { success: false, error: 'agentId 不能为空 / agentId is required' };
+    const { agentId = 'main', eventType, subject, predicate, object, importance = 0.5 } = input;
     if (!eventType) return { success: false, error: 'eventType 不能为空 / eventType is required' };
     if (!subject) return { success: false, error: 'subject 不能为空 / subject is required' };
     if (!predicate) return { success: false, error: 'predicate 不能为空 / predicate is required' };
@@ -216,9 +215,7 @@ export function createMemoryTool({ engines, logger }) {
    * @returns {Object}
    */
   async function handleRecall(input) {
-    const { agentId, keyword, limit = DEFAULT_RECALL_LIMIT } = input;
-
-    if (!agentId) return { success: false, error: 'agentId 不能为空 / agentId is required' };
+    const { agentId = 'main', keyword, limit = DEFAULT_RECALL_LIMIT } = input;
 
     if (!episodicMemory) {
       return { success: false, error: 'episodicMemory 不可用 / episodicMemory not available' };
@@ -271,25 +268,43 @@ export function createMemoryTool({ engines, logger }) {
     try {
       switch (subaction) {
         case 'query': {
-          // BFS 发现 / BFS discovery
-          const { startNodeId, hops = DEFAULT_BFS_HOPS } = input;
-          if (!startNodeId) {
-            return { success: false, error: 'startNodeId 不能为空 / startNodeId is required for query' };
+          const { startNodeId, label: queryLabel, hops = DEFAULT_BFS_HOPS, limit: queryLimit = 20 } = input;
+
+          // 支持两种查询模式 / Support two query modes:
+          // 1. startNodeId → BFS 遍历 / BFS traversal
+          // 2. label → 按标签搜索 / Search by label (LIKE)
+          if (startNodeId) {
+            // BFS 发现 / BFS discovery
+            const related = semanticMemory.getRelated(startNodeId, { maxHops: hops });
+            return {
+              success: true,
+              data: related.map(r => ({
+                nodeId: r.node.id,
+                label: r.node.label,
+                nodeType: r.node.nodeType || r.node.node_type,
+                depth: r.depth,
+                path: r.path,
+              })),
+              count: related.length,
+            };
           }
 
-          const related = semanticMemory.getRelated(startNodeId, { maxHops: hops });
+          if (queryLabel) {
+            // 按标签搜索 / Search by label
+            const nodes = semanticMemory.query(queryLabel, { limit: queryLimit });
+            return {
+              success: true,
+              data: nodes.map(n => ({
+                nodeId: n.id,
+                label: n.label,
+                nodeType: n.nodeType || n.node_type,
+                importance: n.importance,
+              })),
+              count: nodes.length,
+            };
+          }
 
-          return {
-            success: true,
-            data: related.map(r => ({
-              nodeId: r.node.id,
-              label: r.node.label,
-              nodeType: r.node.nodeType || r.node.node_type,
-              depth: r.depth,
-              path: r.path,
-            })),
-            count: related.length,
-          };
+          return { success: false, error: 'startNodeId 或 label 不能同时为空 / Either startNodeId or label is required for query' };
         }
 
         case 'add': {
@@ -501,7 +516,11 @@ export function createMemoryTool({ engines, logger }) {
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
-    inputSchema,
+    parameters: inputSchema,
     handler,
+    execute: async (toolCallId, params) => {
+      const result = await handler(params);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
   };
 }

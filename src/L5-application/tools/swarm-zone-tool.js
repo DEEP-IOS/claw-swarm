@@ -65,6 +65,11 @@ const inputSchema = {
       type: 'string',
       description: 'Zone ID (assign 可选, 不提供则自动匹配) / Zone ID (optional for assign, auto-match if omitted)',
     },
+    skills: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Agent 技能列表 (assign 自动匹配时使用) / Agent skills for auto-matching (optional)',
+    },
   },
   required: ['action'],
 };
@@ -141,7 +146,7 @@ export function createZoneTool({ engines, logger }) {
    * @returns {Object}
    */
   async function handleAssign(input) {
-    const { agentId, zoneId } = input;
+    const { agentId, zoneId, skills } = input;
 
     if (!agentId) {
       return { success: false, error: 'agentId 不能为空 / agentId is required' };
@@ -165,7 +170,7 @@ export function createZoneTool({ engines, logger }) {
         };
       } else {
         // Jaccard 自动匹配模式 / Jaccard auto-matching mode
-        const result = zoneManager.autoAssignAgent(agentId);
+        const result = zoneManager.autoAssignAgent(agentId, skills || null);
 
         if (!result) {
           return {
@@ -344,7 +349,11 @@ export function createZoneTool({ engines, logger }) {
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
-    inputSchema,
+    parameters: inputSchema,
     handler,
+    execute: async (toolCallId, params) => {
+      const result = await handler(params);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
   };
 }

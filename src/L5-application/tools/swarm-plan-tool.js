@@ -54,6 +54,7 @@ const inputSchema = {
     },
     constraints: {
       type: 'object',
+      additionalProperties: true,
       description: '约束条件 / Constraints (optional)',
     },
     maxRoles: {
@@ -380,7 +381,11 @@ export function createPlanTool({ engines, logger }) {
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
-    inputSchema,
+    parameters: inputSchema,
     handler,
+    execute: async (toolCallId, params) => {
+      const result = await handler(params);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
   };
 }

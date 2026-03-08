@@ -232,9 +232,12 @@ export class ZoneManager {
    * @param {string} agentId - Agent ID
    * @returns {AutoAssignResult | null} 分配结果, 若无匹配返回 null / Assignment result, null if no match
    */
-  autoAssignAgent(agentId) {
-    // 获取 Agent 技能 / Get agent skills
-    const agentSkills = this._getAgentSkillSet(agentId);
+  autoAssignAgent(agentId, skills = null) {
+    // 获取 Agent 技能: 优先使用传入的 skills, 回退到 AgentRepository 查询
+    // Get agent skills: prefer passed-in skills, fallback to AgentRepository lookup
+    const agentSkills = skills && skills.length > 0
+      ? new Set(skills)
+      : this._getAgentSkillSet(agentId);
     if (agentSkills.size === 0) {
       this._logger.warn?.(
         `[ZoneManager] Agent ${agentId} 无技能数据, 无法自动分配 / No skills data, cannot auto-assign`,

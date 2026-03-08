@@ -789,10 +789,15 @@ export class PluginAdapter {
    * 每个工具由工厂函数创建, 接收 { engines, logger }。
    * Each tool is created by a factory function receiving { engines, logger }.
    *
-   * @returns {Array<{ name: string, description: string, inputSchema: Object, handler: Function }>}
+   * @returns {Array<{ name: string, description: string, parameters: Object, execute: Function }>}
    */
   getTools() {
-    const toolDeps = { engines: this._engines, logger: this._logger };
+    // 展平 repos 到 engines 顶层, 工具可直接解构 agentRepo/taskRepo 等
+    // Flatten repos onto engines top-level so tools can destructure directly
+    const toolDeps = {
+      engines: { ...this._engines, ...this._engines.repos },
+      logger: this._logger,
+    };
 
     return [
       // 1. swarm_spawn: 蜂群生成 / Swarm spawning

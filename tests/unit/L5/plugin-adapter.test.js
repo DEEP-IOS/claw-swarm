@@ -208,8 +208,8 @@ describe('PluginAdapter', () => {
       for (const tool of tools) {
         expect(tool.name).toBeDefined();
         expect(tool.description).toBeDefined();
-        expect(tool.inputSchema).toBeDefined();
-        expect(typeof tool.handler).toBe('function');
+        expect(tool.parameters).toBeDefined();
+        expect(typeof tool.execute).toBe('function');
       }
 
       // 验证工具名称完整性 / Verify tool name completeness

@@ -62,6 +62,7 @@ const inputSchema = {
     },
     metadata: {
       type: 'object',
+      additionalProperties: true,
       description: '附加元数据 / Additional metadata (optional)',
     },
     intensity: {
@@ -293,7 +294,11 @@ export function createPheromoneTool({ engines, logger }) {
   return {
     name: TOOL_NAME,
     description: TOOL_DESCRIPTION,
-    inputSchema,
+    parameters: inputSchema,
     handler,
+    execute: async (toolCallId, params) => {
+      const result = await handler(params);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
   };
 }
