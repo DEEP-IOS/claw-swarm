@@ -304,7 +304,10 @@ export class MessageBus {
         failedAt: Date.now(),
       });
       if (this._dlq.length > MAX_DLQ_SIZE) {
-        this._dlq.shift();
+        const discarded = this._dlq.shift();
+        this._logger.warn?.(
+          `[MessageBus] DLQ full (${MAX_DLQ_SIZE}), discarded oldest: topic='${discarded.topic}', id='${discarded.id}'`
+        );
       }
       this._stats.dlqSize = this._dlq.length;
     }

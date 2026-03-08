@@ -87,6 +87,13 @@ const DEFAULT_WEIGHTS = {
 const DEFAULT_MAX_RETRIES = 3;
 
 /**
+ * 评估历史最大任务数 (LRU) / Max tasks tracked in evaluation history (LRU)
+ * 超出时驱逐最早的任务条目, 防止内存无限增长。
+ * When exceeded, evict oldest task entries to prevent unbounded memory growth.
+ */
+const MAX_HISTORY_TASKS = 500;
+
+/**
  * 有条件通过的分数下界 / Conditional pass lower bound
  * 分数 >= threshold * conditionalRatio 且 < threshold 时为有条件通过
  */
@@ -862,6 +869,14 @@ export class QualityController {
       this._evaluationHistory.set(taskId, []);
     }
     this._evaluationHistory.get(taskId).push(evaluation);
+
+    // LRU 驱逐: 超出最大跟踪任务数时, 删除最早的任务条目
+    // LRU eviction: when exceeding max tracked tasks, remove oldest task entries
+    if (this._evaluationHistory.size > MAX_HISTORY_TASKS) {
+      const oldestKey = this._evaluationHistory.keys().next().value;
+      this._evaluationHistory.delete(oldestKey);
+      this._failCounts.delete(oldestKey);
+    }
 
     // 数据库持久化 (通过 checkpoint) / DB persistence (via checkpoint)
     try {
