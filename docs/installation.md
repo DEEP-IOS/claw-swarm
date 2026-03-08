@@ -24,7 +24,7 @@ OpenClaw discovers plugins from the `~/.openclaw/extensions/` directory. Each su
 
 OpenClaw 从 `~/.openclaw/extensions/` 目录发现插件。每个包含 `openclaw.plugin.json` 清单的子目录会被自动检测。
 
-### Method A: Clone + Symlink (Recommended for development) / 克隆 + 符号链接（推荐开发方式）
+### Method A: Clone + Load Path (Recommended / 推荐)
 
 ```bash
 # Step 1: Clone and install dependencies / 克隆并安装依赖
@@ -32,13 +32,30 @@ git clone https://github.com/DEEP-IOS/claw-swarm.git
 cd claw-swarm
 npm install
 
-# Step 2: Link into OpenClaw extensions / 链接到 OpenClaw 扩展目录
-# Linux / macOS:
-ln -s "$(pwd)" ~/.openclaw/extensions/claw-swarm
-
-# Windows (run CMD as Administrator / 以管理员身份运行 CMD):
-mklink /J "%USERPROFILE%\.openclaw\extensions\claw-swarm" "%cd%"
+# Step 2: Register the plugin path in OpenClaw config
+# 在 OpenClaw 配置中注册插件路径
+# Edit ~/.openclaw/openclaw.json, add plugins.load.paths:
+# 编辑 ~/.openclaw/openclaw.json，添加 plugins.load.paths:
 ```
+
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": ["/absolute/path/to/claw-swarm"]
+    },
+    "entries": {
+      "claw-swarm": { "enabled": true }
+    }
+  }
+}
+```
+
+> **Windows example / Windows 示例**: `"paths": ["E:\\OpenClaw\\data\\swarm"]`
+>
+> **Why `load.paths` instead of symlink?** On Windows, `mklink /J` creates a junction that Node.js `readdirSync` reports as a symlink (not a directory), causing OpenClaw's plugin scanner to skip it. Using `plugins.load.paths` bypasses this issue entirely — it uses `fs.statSync` which correctly follows junctions.
+>
+> **为什么用 `load.paths` 而不是符号链接？** 在 Windows 上，`mklink /J` 创建的 junction 会被 Node.js 的 `readdirSync` 识别为符号链接而非目录，导致 OpenClaw 的插件扫描器跳过它。使用 `plugins.load.paths` 完全绕过此问题。
 
 ### Method B: Direct clone into extensions / 直接克隆到扩展目录
 
@@ -47,6 +64,10 @@ cd ~/.openclaw/extensions
 git clone https://github.com/DEEP-IOS/claw-swarm.git
 cd claw-swarm && npm install
 ```
+
+> This places the plugin directly in the extensions directory (no symlink). Works on all platforms.
+>
+> 直接将插件放入扩展目录（无符号链接），所有平台通用。
 
 ### Method C: CLI install / CLI 安装
 
@@ -58,13 +79,13 @@ openclaw plugins enable claw-swarm
 ### Enable and Verify / 启用并验证
 
 ```bash
-# Step 3: Enable in config / 在配置中启用
+# Enable in config (if not already done) / 在配置中启用（如未配置）
 # Edit ~/.openclaw/openclaw.json, add under "plugins.entries":
 # 编辑 ~/.openclaw/openclaw.json，在 "plugins.entries" 下添加:
 #
 #   "claw-swarm": { "enabled": true }
 
-# Step 4: Restart gateway / 重启网关
+# Restart gateway / 重启网关
 openclaw gateway restart
 
 # Verify / 验证
@@ -237,7 +258,7 @@ The database file (`claw-swarm.db`) is not auto-deleted. Remove manually if need
 | Issue / 问题 | Cause / 原因 | Fix / 解决 |
 |---|---|---|
 | `Cannot find module 'node:sqlite'` | Node.js < 22.0.0 | Upgrade to Node.js >= 22.0.0 / 升级 Node.js |
-| Plugin not discovered | Not in extensions dir | Verify symlink: `ls ~/.openclaw/extensions/claw-swarm/openclaw.plugin.json` |
+| Plugin not discovered | Not in extensions dir or junction issue | Use `plugins.load.paths` in config (see Method A above). On Windows, junctions in extensions dir are not detected. / Windows 上 junction 不被识别，请使用 `load.paths`。 |
 | Plugin shows as "disabled" | Not enabled in config | Add `"claw-swarm": { "enabled": true }` to `plugins.entries` |
 | Hook conflict at priority 60 | Other plugin at same priority | Adjust priority in `src/index.js` / 调整优先级 |
 | Dashboard port in use | Port 19100 occupied | Change `dashboard.port` in config / 更改端口 |
