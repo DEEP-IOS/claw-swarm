@@ -202,8 +202,23 @@ Sub-agent lifecycle is driven by the `swarm_spawn` tool: SOUL snippets are retur
 
 ### Testing / 测试
 
+Claw-Swarm maintains a rigorous multi-level testing strategy to ensure production readiness:
+
+Claw-Swarm 采用多层次测试策略确保生产可用性：
+
+| Level | Type | Coverage | 覆盖范围 |
+|-------|------|----------|----------|
+| Unit | 475 tests across 30 files (vitest) | All 6 layers, every module | 6 层全覆盖 |
+| Integration | End-to-end pipeline | Multi-tool workflows, memory persistence, zone governance | 跨工具流程、记忆持久化、Zone 治理 |
+| Stress | High-frequency & boundary | 20+ rapid calls, WAL concurrency, edge cases | 高频调用、并发写入、边界值 |
+| **Production** | **20 tests in live OpenClaw Gateway** | **Plugin load, tool invocation, MMAS, memory, quality gate, MoE, integration scenarios, stress** | **真实 Gateway 环境全链路验证** |
+
+The production test suite validates the plugin end-to-end in a live OpenClaw Gateway environment — not mocked, not simulated. All 20 production tests passed with 7 bugs discovered and fixed during testing. See the full report: **[Production Test Report](docs/production-test-report.md)**
+
+生产测试套件在真实 OpenClaw Gateway 环境中端到端验证插件 — 非 mock、非模拟。20 项生产测试全部通过，测试过程中发现并修复了 7 个 bug。完整报告见：**[生产测试报告](docs/production-test-report.md)**
+
 ```bash
-# All tests (471 tests, 30 files) / 全部测试
+# All tests (475 tests, 30 files) / 全部测试
 npm test
 
 # By category / 按类别

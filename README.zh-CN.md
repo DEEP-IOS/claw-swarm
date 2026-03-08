@@ -412,8 +412,19 @@ SSE 端点 `/events` 提供实时数据流，前端无需轮询。
 
 ### 测试
 
+Claw-Swarm 采用多层次测试策略确保生产可用性：
+
+| 层级 | 类型 | 数量 | 覆盖范围 |
+|------|------|------|----------|
+| 单元测试 | vitest | 475 tests / 30 files | 6 层全覆盖，每个模块独立验证 |
+| 集成测试 | 端到端流水线 | 多场景 | 跨工具协作流程、记忆持久化、Zone 治理 |
+| 压力测试 | 高频 & 边界值 | 多场景 | 20+ 连续调用、WAL 并发写入、极端输入 |
+| **生产测试** | **真实 OpenClaw Gateway** | **20 项** | **插件加载、工具调用、MMAS、记忆、质量门控、MoE、集成场景、压力边界** |
+
+生产测试在真实 OpenClaw Gateway 环境中端到端验证 — 非 mock、非模拟。20 项测试全部通过，测试过程中发现并修复了 7 个 bug。完整报告见：**[生产测试报告](docs/production-test-report.md)**
+
 ```bash
-npm test                    # 全部 (471 tests, 30 files)
+npm test                    # 全部 (475 tests, 30 files)
 npm run test:L1~L6          # 按层级运行 (test:L1, test:L2, ..., test:L6)
 npm run test:unit           # 单元测试
 npm run test:integration    # 集成测试
