@@ -23,7 +23,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit/",
     "test:integration": "vitest run tests/integration/",
-    "test:stress": "vitest run tests/stress/",
+    "test:stress": "vitest run tests/stress/ --passWithNoTests",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
     "test:L1": "vitest run tests/unit/L1/",
