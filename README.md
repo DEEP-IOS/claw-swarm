@@ -89,6 +89,17 @@ Only L5 couples to OpenClaw via Plugin SDK. Layers L1--L4 and L6 are reusable in
 
 ### Installation / 安装
 
+**npm (Recommended / 推荐):**
+
+```bash
+npm install openclaw-swarm
+cd node_modules/openclaw-swarm
+node install.js          # Register plugin in OpenClaw config / 注册插件到 OpenClaw 配置
+openclaw gateway restart # Load the plugin / 加载插件
+```
+
+**Git clone:**
+
 ```bash
 git clone https://github.com/DEEP-IOS/claw-swarm.git
 cd claw-swarm

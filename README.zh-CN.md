@@ -169,6 +169,17 @@ Claw-Swarm 要求模型具备强工具调用能力（7 个工具，复杂 JSON s
 
 ### 安装步骤
 
+**npm 安装（推荐）：**
+
+```bash
+npm install openclaw-swarm
+cd node_modules/openclaw-swarm
+node install.js          # 注册插件到 OpenClaw 配置
+openclaw gateway restart # 加载插件
+```
+
+**Git clone 安装：**
+
 ```bash
 git clone https://github.com/DEEP-IOS/claw-swarm.git
 cd claw-swarm

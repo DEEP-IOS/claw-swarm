@@ -24,7 +24,20 @@ OpenClaw discovers plugins from the `~/.openclaw/extensions/` directory. Each su
 
 OpenClaw 从 `~/.openclaw/extensions/` 目录发现插件。每个包含 `openclaw.plugin.json` 清单的子目录会被自动检测。
 
-### Method A: Clone + Load Path (Recommended / 推荐)
+### Method A: npm install (Recommended / 推荐)
+
+```bash
+npm install openclaw-swarm
+cd node_modules/openclaw-swarm
+node install.js          # Register plugin path + enable in config / 注册路径 + 启用插件
+openclaw gateway restart # Load the plugin / 加载插件
+```
+
+> The `install.js` script registers the package path in `~/.openclaw/openclaw.json`, installs dependencies (if needed), and enables the plugin with default configuration. Works on all platforms.
+>
+> `install.js` 脚本自动注册包路径到 `~/.openclaw/openclaw.json`，安装依赖（如需），并启用默认配置。所有平台通用。
+
+### Method B: Clone + Load Path / 克隆 + 路径注册
 
 ```bash
 # Step 1: Clone and install dependencies / 克隆并安装依赖
@@ -57,7 +70,7 @@ npm install
 >
 > **为什么用 `load.paths` 而不是符号链接？** 在 Windows 上，`mklink /J` 创建的 junction 会被 Node.js 的 `readdirSync` 识别为符号链接而非目录，导致 OpenClaw 的插件扫描器跳过它。使用 `plugins.load.paths` 完全绕过此问题。
 
-### Method B: Direct clone into extensions / 直接克隆到扩展目录
+### Method C: Direct clone into extensions / 直接克隆到扩展目录
 
 ```bash
 cd ~/.openclaw/extensions
@@ -69,7 +82,7 @@ cd claw-swarm && npm install
 >
 > 直接将插件放入扩展目录（无符号链接），所有平台通用。
 
-### Method C: CLI install / CLI 安装
+### Method D: CLI install / CLI 安装
 
 ```bash
 openclaw plugins install --link /path/to/claw-swarm
