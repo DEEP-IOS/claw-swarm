@@ -218,10 +218,15 @@ Claw-Swarm 采用多层次测试策略确保生产可用性：
 | Integration | End-to-end pipeline | Multi-tool workflows, memory persistence, zone governance | 跨工具流程、记忆持久化、Zone 治理 |
 | Stress | High-frequency & boundary | 20+ rapid calls, WAL concurrency, edge cases | 高频调用、并发写入、边界值 |
 | **Production** | **20 tests in live OpenClaw Gateway** | **Plugin load, tool invocation, MMAS, memory, quality gate, MoE, integration scenarios, stress** | **真实 Gateway 环境全链路验证** |
+| **Install** | **Clean-environment install test** | **Clone → install.js → gateway restart → tool invocation on Linux** | **干净 Linux 环境一键安装全流程验证** |
 
 The production test suite validates the plugin end-to-end in a live OpenClaw Gateway environment — not mocked, not simulated. All 20 production tests passed with 7 bugs discovered and fixed during testing. See the full report: **[Production Test Report](docs/production-test-report.md)**
 
+The install test was independently conducted on a clean Linux (Node.js v22, OpenClaw 2026.2.13) environment — from `git clone` to `swarm_query` in under 3 minutes, 100% pass rate with 0 blocking issues. See: **[Install Test Report](docs/install-test-report.md)**
+
 生产测试套件在真实 OpenClaw Gateway 环境中端到端验证插件 — 非 mock、非模拟。20 项生产测试全部通过，测试过程中发现并修复了 7 个 bug。完整报告见：**[生产测试报告](docs/production-test-report.md)**
+
+安装测试在干净 Linux 环境（Node.js v22, OpenClaw 2026.2.13）中独立执行 — 从 `git clone` 到 `swarm_query` 调用成功仅需 3 分钟，100% 通过率，零阻断性问题。报告见：**[安装测试报告](docs/install-test-report.md)**
 
 ```bash
 # All tests (475 tests, 30 files) / 全部测试

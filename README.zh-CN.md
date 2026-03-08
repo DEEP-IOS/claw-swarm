@@ -426,8 +426,11 @@ Claw-Swarm 采用多层次测试策略确保生产可用性：
 | 集成测试 | 端到端流水线 | 多场景 | 跨工具协作流程、记忆持久化、Zone 治理 |
 | 压力测试 | 高频 & 边界值 | 多场景 | 20+ 连续调用、WAL 并发写入、极端输入 |
 | **生产测试** | **真实 OpenClaw Gateway** | **20 项** | **插件加载、工具调用、MMAS、记忆、质量门控、MoE、集成场景、压力边界** |
+| **安装测试** | **干净 Linux 环境** | **6 项** | **克隆 → install.js → Gateway 重启 → 工具调用全流程** |
 
 生产测试在真实 OpenClaw Gateway 环境中端到端验证 — 非 mock、非模拟。20 项测试全部通过，测试过程中发现并修复了 7 个 bug。完整报告见：**[生产测试报告](docs/production-test-report.md)**
+
+安装测试在干净 Linux 环境（Node.js v22, OpenClaw 2026.2.13）中独立执行 — 从 `git clone` 到 `swarm_query` 调用成功仅需 3 分钟，100% 通过率，零阻断性问题。报告见：**[安装测试报告](docs/install-test-report.md)**
 
 ```bash
 npm test                    # 全部 (475 tests, 30 files)
