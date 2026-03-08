@@ -122,6 +122,18 @@ Plugin-specific settings must be nested under the `config` key in `~/.openclaw/o
 
 See [docs/installation.md](docs/installation.md) for full option reference. / 完整配置参考见安装文档。
 
+### Model Compatibility / 模型兼容性
+
+Claw-Swarm requires models with strong tool-calling capabilities. See [docs/model-compatibility.md](docs/model-compatibility.md) for the full guide.
+
+Claw-Swarm 要求模型具备强工具调用能力。完整指南见 [docs/model-compatibility.md](docs/model-compatibility.md)。
+
+| Tier | Models / 模型 | Notes / 说明 |
+|---|---|---|
+| **S** | Claude Opus 4, Claude Sonnet 4.5, GPT-4.1, GPT-4o, Gemini 2.5 Pro | Best tool calling + reasoning / 最佳工具调用 + 推理 |
+| **A** | Kimi K2.5, Qwen3.5-Plus/Max, DeepSeek-V3, Gemini 2.5 Flash, Claude Haiku 4.5 | Strong with minor trade-offs / 强，少量取舍 |
+| **B** | DeepSeek-R1, GLM-5, Qwen3-Coder, Mistral Large, Llama 4 Maverick | Usable for specific roles / 特定角色可用 |
+
 ---
 
 ## Bio-Inspired Algorithms / 仿生算法
