@@ -84,22 +84,17 @@ Only L5 couples to OpenClaw via Plugin SDK. Layers L1--L4 and L6 are reusable in
 ### Installation / 安装
 
 ```bash
-# Clone the repo / 克隆仓库
 git clone https://github.com/DEEP-IOS/claw-swarm.git
-cd claw-swarm && npm install
-
-# Link into OpenClaw extensions / 链接到 OpenClaw 扩展目录
-# Linux/macOS:
-ln -s "$(pwd)" ~/.openclaw/extensions/claw-swarm
-# Windows (Admin CMD):
-mklink /J "%USERPROFILE%\.openclaw\extensions\claw-swarm" "%cd%"
-
-# Enable in ~/.openclaw/openclaw.json / 在配置中启用:
-# "plugins": { "entries": { "claw-swarm": { "enabled": true } } }
-
-# Restart gateway / 重启网关
-openclaw gateway restart
+cd claw-swarm
+node install.js          # One-click setup / 一键安装
+openclaw gateway restart # Load the plugin / 加载插件
 ```
+
+The installer automatically registers the plugin path in `~/.openclaw/openclaw.json` and enables it with default configuration.
+
+安装脚本自动在 `~/.openclaw/openclaw.json` 中注册插件路径并启用默认配置。
+
+See [docs/installation.md](docs/installation.md) for manual installation and advanced options. / 手动安装和高级选项见安装文档。
 
 ### Configuration / 配置
 
