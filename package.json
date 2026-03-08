@@ -1,5 +1,5 @@
 {
-  "name": "@deep-ios/claw-swarm",
+  "name": "openclaw-swarm",
   "version": "5.0.0",
   "description": "Claw-Swarm V5.0 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
   "type": "module",
