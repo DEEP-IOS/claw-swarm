@@ -74,6 +74,14 @@ export class HealthChecker {
 
     /** @type {boolean} 是否已启动 */
     this._started = false;
+
+    // V5.2: Agent 空闲检测 / Agent idle detection
+    /** @type {Map<string, number>} agent 最后活动时间 / Agent last activity time */
+    this._lastActivity = new Map();
+    /** @type {number} 空闲阈值 (ms, 默认 5 分钟) / Idle threshold (ms, default 5 min) */
+    this._idleThresholdMs = 5 * 60 * 1000;
+    /** @type {NodeJS.Timeout|null} 空闲检测定时器 / Idle detection timer */
+    this._idleTimer = null;
   }
 
   /**
@@ -110,10 +118,27 @@ export class HealthChecker {
       }
     });
 
+    // V5.2: Agent 活动追踪 / Agent activity tracking
+    this._messageBus.subscribe?.('task.completed', (event) => {
+      const agentId = event?.payload?.agentId || event?.agentId;
+      if (agentId) this._lastActivity.set(agentId, Date.now());
+    });
+
+    this._messageBus.subscribe?.('task.assigned', (event) => {
+      const agentId = event?.payload?.agentId || event?.agentId;
+      if (agentId) this._lastActivity.set(agentId, Date.now());
+    });
+
+    // V5.2: 空闲检测定时器 / Idle detection timer
+    this._idleTimer = setInterval(() => {
+      this._detectIdleAgents();
+    }, 60000);
+    if (this._idleTimer.unref) this._idleTimer.unref();
+
     // ── 轮询（辅模式） / Polling (secondary mode) ──
     this._schedulePoll();
 
-    this._logger.info?.('[HealthChecker] Started — event-driven + adaptive polling');
+    this._logger.info?.('[HealthChecker] Started — event-driven + adaptive polling + idle detection');
   }
 
   /**
@@ -127,6 +152,12 @@ export class HealthChecker {
     if (this._pollTimer) {
       clearTimeout(this._pollTimer);
       this._pollTimer = null;
+    }
+
+    // V5.2: 停止空闲检测 / Stop idle detection
+    if (this._idleTimer) {
+      clearInterval(this._idleTimer);
+      this._idleTimer = null;
     }
 
     this._logger.info?.('[HealthChecker] Stopped');
@@ -252,5 +283,72 @@ export class HealthChecker {
     }, interval);
 
     if (this._pollTimer.unref) this._pollTimer.unref();
+  }
+
+  /**
+   * V5.2: 检测空闲 Agent 并发出 recruit 信号
+   * Detect idle agents and emit recruit pheromone signals
+   * @private
+   */
+  _detectIdleAgents() {
+    const now = Date.now();
+    const idleAgents = [];
+
+    for (const [agentId, status] of this._connectionStatus) {
+      if (status !== 'online') continue;
+
+      const lastActive = this._lastActivity.get(agentId) || 0;
+      if (lastActive > 0 && (now - lastActive) > this._idleThresholdMs) {
+        idleAgents.push(agentId);
+      }
+    }
+
+    if (idleAgents.length > 0) {
+      // 发布 recruit 信号给空闲 agent / Emit recruit signal for idle agents
+      this._messageBus.publish?.(
+        EventTopics.PHEROMONE_DEPOSITED || 'pheromone.deposited',
+        wrapEvent(EventTopics.PHEROMONE_DEPOSITED || 'pheromone.deposited', {
+          type: 'recruit',
+          targetAgents: idleAgents,
+          reason: 'idle_detection',
+          idleCount: idleAgents.length,
+        }, SOURCE)
+      );
+
+      this._logger.info?.(
+        `[HealthChecker] Idle detection: ${idleAgents.length} agent(s) idle > ${this._idleThresholdMs / 1000}s`
+      );
+    }
+  }
+
+  /**
+   * V5.2: 记录 Agent 活动
+   * Record agent activity timestamp
+   *
+   * @param {string} agentId
+   */
+  recordActivity(agentId) {
+    if (agentId) {
+      this._lastActivity.set(agentId, Date.now());
+    }
+  }
+
+  /**
+   * V5.2: 获取空闲 Agent 列表
+   * Get list of idle agents
+   *
+   * @returns {string[]}
+   */
+  getIdleAgents() {
+    const now = Date.now();
+    const idle = [];
+    for (const [agentId, status] of this._connectionStatus) {
+      if (status !== 'online') continue;
+      const lastActive = this._lastActivity.get(agentId) || 0;
+      if (lastActive > 0 && (now - lastActive) > this._idleThresholdMs) {
+        idle.push(agentId);
+      }
+    }
+    return idle;
   }
 }

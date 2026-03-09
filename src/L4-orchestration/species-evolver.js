@@ -13,13 +13,12 @@
  * - 进化淘汰（底部 20% 使用率种群退役）/ Evolution culling
  * - 种群上限保护（同时活跃 ≤ 10）/ Active species cap
  *
- * ⚠️ V5.2 延期项（保留接口，不激活）:
- * - ABC 三阶段进化
- * - Lotka-Volterra 种群竞争动力学
- * - 多类型信息素生态
+ * V5.2 激活:
+ * - Lotka-Volterra 种群竞争动力学 (config.lotkaVolterra)
+ * - ABC 三阶段进化 (config.abc)
  *
  * @module L4-orchestration/species-evolver
- * @version 5.1.0
+ * @version 5.2.0
  */
 
 import { EventTopics, wrapEvent } from '../event-catalog.js';
@@ -128,6 +127,35 @@ export class SpeciesEvolver {
       mutationRate: config.mutationRate ?? 0.1,
       rollbackThreshold: 3, // 连续 N 次下降则回滚 / Rollback after N consecutive declines
     };
+
+    /**
+     * V5.2: Lotka-Volterra 种群动力学配置 / LV population dynamics config
+     * @private
+     */
+    this._lvConfig = {
+      enabled: config.lotkaVolterra ?? false,
+      growthRate: config.lvGrowthRate ?? 0.1,        // r: 内禀增长率 / intrinsic growth rate
+      carryingCapacity: config.lvCarryingCapacity ?? 20,  // K: 环境容量 / env carrying capacity
+      predationRate: config.lvPredationRate ?? 0.05, // α: 捕食系数 / predation coefficient
+      dt: config.lvDt ?? 1.0,                        // 时间步长 / time step
+    };
+
+    /**
+     * V5.2: ABC 三阶段进化配置 / ABC three-stage evolution config
+     * @private
+     */
+    this._abcConfig = {
+      enabled: config.abc ?? false,
+      scoutLimit: config.abcScoutLimit ?? 5,    // scout 随机探索次数上限 / scout random search limit
+      abandonLimit: config.abcAbandonLimit ?? 3, // 连续未改进则放弃 / consecutive no-improve abandon limit
+    };
+
+    /**
+     * V5.2: ABC 食物源状态 / ABC food source states
+     * Map<speciesName, { trial: number, fitness: number }>
+     * @private
+     */
+    this._abcFoodSources = new Map();
 
     /**
      * 上次淘汰时间 / Last culling time
@@ -535,6 +563,9 @@ export class SpeciesEvolver {
       lastCullingAt: this._lastCullingAt,
       gepEnabled: this._gepConfig.enabled,
       clusteringEnabled: this._clusteringConfig.enabled,
+      // V5.2
+      lvEnabled: this._lvConfig.enabled,
+      abcEnabled: this._abcConfig.enabled,
     };
   }
 
@@ -549,6 +580,191 @@ export class SpeciesEvolver {
   }
 
   // --------------------------------------------------------------------------
+  // V5.2: Lotka-Volterra 种群动力学 / Population Dynamics
+  // --------------------------------------------------------------------------
+
+  /**
+   * 执行 Lotka-Volterra 种群竞争模拟步
+   * Execute one Lotka-Volterra population dynamics step
+   *
+   * 经典方程: dN/dt = rN(1 - N/K) - αNP
+   * - N: 种群数量（assignments 代理）/ Population (proxied by assignments)
+   * - r: 内禀增长率 / Intrinsic growth rate
+   * - K: 环境容量 / Carrying capacity
+   * - α: 捕食系数 / Predation coefficient
+   * - P: 捕食者数量（竞争种群总量）/ Predator count (competing populations total)
+   *
+   * @returns {{ adjustments: Array<{ name: string, oldScore: number, newScore: number }>, culled: string[] }}
+   */
+  performLVDynamics() {
+    if (!this._enabled || !this._lvConfig.enabled) {
+      return { adjustments: [], culled: [] };
+    }
+
+    const { growthRate: r, carryingCapacity: K, predationRate: alpha, dt } = this._lvConfig;
+    const activeSpecies = [...this._species.entries()]
+      .filter(([, s]) => s.status === 'active' || s.status === 'trial');
+
+    if (activeSpecies.length < 2) {
+      return { adjustments: [], culled: [] };
+    }
+
+    // 计算总种群大小（以 assignments 近似）/ Total population (proxied by assignments)
+    const totalPop = activeSpecies.reduce((sum, [, s]) => sum + Math.max(1, s.assignments), 0);
+
+    const adjustments = [];
+    const culled = [];
+
+    for (const [name, species] of activeSpecies) {
+      const N = Math.max(1, species.assignments);
+      // 竞争压力来自其他种群 / Competition pressure from other species
+      const P = totalPop - N;
+
+      // Lotka-Volterra: dN/dt = rN(1 - N/K) - αNP
+      const logisticGrowth = r * N * (1 - N / K);
+      const predation = alpha * N * P;
+      const dN = (logisticGrowth - predation) * dt;
+
+      // 将 dN 转换为适应度调整 / Convert dN to fitness adjustment
+      const fitnessChange = dN / K; // 归一化到 [0,1] 范围 / Normalize to [0,1]
+      const oldScore = species.assignments > 0
+        ? species.successes / species.assignments
+        : 0;
+      const newScore = Math.max(0, Math.min(1, oldScore + fitnessChange));
+
+      adjustments.push({ name, oldScore, newScore, dN, N, P });
+
+      // 如果适应度降至极低，标记为需要淘汰 / If fitness drops very low, mark for culling
+      if (newScore < 0.05 && species.assignments >= TRIAL_MIN_ASSIGNMENTS && species.status === 'active') {
+        species.status = 'retired';
+        culled.push(name);
+        this._logEvolution('lv_culled', name, { oldScore, newScore, dN });
+      }
+    }
+
+    if (culled.length > 0) {
+      this._messageBus.publish?.(
+        EventTopics.SPECIES_RETIRED || 'species.retired',
+        wrapEvent(EventTopics.SPECIES_RETIRED || 'species.retired', {
+          culledSpecies: culled,
+          mechanism: 'lotka-volterra',
+        }),
+      );
+      this._logger.info?.(`[SpeciesEvolver] LV dynamics culled ${culled.length} species: ${culled.join(', ')}`);
+    }
+
+    return { adjustments, culled };
+  }
+
+  // --------------------------------------------------------------------------
+  // V5.2: ABC 三阶段进化 / Artificial Bee Colony Evolution
+  // --------------------------------------------------------------------------
+
+  /**
+   * 执行 ABC 三阶段进化
+   * Perform ABC (Artificial Bee Colony) three-stage evolution
+   *
+   * 三阶段:
+   * 1. Employed bees — 在已知食物源（现有种群参数）附近搜索
+   * 2. Onlooker bees — 根据适应度选择食物源，局部搜索
+   * 3. Scout bees — 放弃耗尽的食物源，随机探索新区域
+   *
+   * @param {Object} personaEvolution - PersonaEvolution 实例
+   * @param {string[]} agentIds - 参与进化的 Agent ID 列表
+   * @returns {{ employed: number, onlooker: number, scouted: number }}
+   */
+  performABCEvolution(personaEvolution, agentIds) {
+    if (!this._enabled || !this._abcConfig.enabled) {
+      return { employed: 0, onlooker: 0, scouted: 0 };
+    }
+
+    if (!agentIds || agentIds.length < 2) {
+      return { employed: 0, onlooker: 0, scouted: 0 };
+    }
+
+    let employed = 0;
+    let onlooker = 0;
+    let scouted = 0;
+
+    // 获取所有 agent 的适应度 / Get fitness for all agents
+    const fitness = new Map();
+    for (const id of agentIds) {
+      const stats = personaEvolution.getPersonaStats(id);
+      const f = (stats.winRate || 0) * 0.6 + (stats.avgQuality || 0) * 0.4;
+      fitness.set(id, Math.max(0.001, f));
+
+      // 初始化食物源状态 / Initialize food source state
+      if (!this._abcFoodSources.has(id)) {
+        this._abcFoodSources.set(id, { trial: 0, fitness: f });
+      }
+    }
+
+    // 总适应度 / Total fitness
+    const totalFitness = [...fitness.values()].reduce((s, v) => s + v, 0);
+
+    // ── Phase 1: Employed bees (邻域搜索) ──
+    for (const id of agentIds) {
+      const source = this._abcFoodSources.get(id);
+      const currentFitness = fitness.get(id) || 0;
+
+      // 在当前位置邻域变异 / Mutate in neighborhood
+      personaEvolution.mutatePersona(id, { mutationRate: 0.05 });
+      employed++;
+
+      // 检查适应度是否改进 / Check if fitness improved
+      const newStats = personaEvolution.getPersonaStats(id);
+      const newFitness = (newStats.winRate || 0) * 0.6 + (newStats.avgQuality || 0) * 0.4;
+
+      if (newFitness > currentFitness) {
+        source.trial = 0; // 重置尝试计数 / Reset trial count
+        source.fitness = newFitness;
+      } else {
+        source.trial++; // 增加未改进计数 / Increment no-improve count
+      }
+    }
+
+    // ── Phase 2: Onlooker bees (轮盘赌选择 + 局部搜索) ──
+    for (const id of agentIds) {
+      const f = fitness.get(id) || 0;
+      const selectionProb = f / totalFitness;
+
+      // 轮盘赌选择 / Roulette wheel selection
+      if (Math.random() < selectionProb) {
+        personaEvolution.mutatePersona(id, { mutationRate: 0.03 });
+        onlooker++;
+      }
+    }
+
+    // ── Phase 3: Scout bees (侦察，放弃低效食物源) ──
+    for (const id of agentIds) {
+      const source = this._abcFoodSources.get(id);
+      if (source && source.trial >= this._abcConfig.abandonLimit) {
+        // 放弃当前位置，随机重置 / Abandon current, random reset
+        personaEvolution.mutatePersona(id, { mutationRate: 0.3 }); // 大变异 = 探索
+        source.trial = 0;
+        source.fitness = 0;
+        scouted++;
+      }
+    }
+
+    this._messageBus.publish?.(
+      'species.abc.evolved',
+      wrapEvent('species.abc.evolved', {
+        employed,
+        onlooker,
+        scouted,
+        agentCount: agentIds.length,
+      }),
+    );
+
+    this._logger.info?.(
+      `[SpeciesEvolver] ABC evolution: employed=${employed} onlooker=${onlooker} scouted=${scouted}`
+    );
+
+    return { employed, onlooker, scouted };
+  }
+
+  // --------------------------------------------------------------------------
   // 生命周期 / Lifecycle
   // --------------------------------------------------------------------------
 
@@ -559,6 +775,7 @@ export class SpeciesEvolver {
     this._species.clear();
     this._evolutionLog = [];
     this._gepHistory.clear();
+    this._abcFoodSources.clear();
     this._logger.info?.('[SpeciesEvolver] Destroyed');
   }
 

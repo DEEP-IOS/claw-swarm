@@ -51,10 +51,12 @@ export class ToolResilience {
    * @param {Object} [options.config] - 韧性配置 / Resilience config
    * @param {Object} [options.messageBus] - MessageBus 实例
    */
-  constructor({ logger, config = {}, messageBus }) {
+  constructor({ logger, config = {}, messageBus, db }) {
     this._logger = logger;
     this._config = config;
     this._messageBus = messageBus;
+    /** @type {Object|null} V5.2: SQLite DB for repair memory queries */
+    this._db = db || null;
 
     // ── AJV 懒编译缓存 / AJV lazy compilation cache ──
     this._ajv = new Ajv({
@@ -388,6 +390,88 @@ export class ToolResilience {
     while (this._failedToolCalls.size >= FAILED_CALLS_MAX) {
       const firstKey = this._failedToolCalls.keys().next().value;
       this._failedToolCalls.delete(firstKey);
+    }
+  }
+
+  // ============================================================================
+  // V5.2: 自适应修复记忆 / Adaptive Repair Memory
+  // ============================================================================
+
+  /**
+   * 查询修复记忆寻找匹配的修复策略
+   * Query repair memory for matching repair strategies
+   *
+   * 当工具调用失败时，先查 repair_memory 表寻找历史成功修复策略，
+   * 找到则返回修复建议，否则返回 null。
+   *
+   * @param {string} toolName - 失败的工具名
+   * @param {string} errorPattern - 错误信息模式
+   * @returns {{ strategy: string, confidence: number } | null}
+   */
+  findRepairStrategy(toolName, errorPattern) {
+    if (!this._db) return null;
+
+    try {
+      const rows = this._db.prepare(
+        `SELECT strategy, success_count, attempt_count
+         FROM repair_memory
+         WHERE tool_name = ? AND error_pattern LIKE ?
+         ORDER BY success_count DESC LIMIT 3`
+      ).all(toolName, `%${errorPattern.substring(0, 50)}%`);
+
+      if (rows.length === 0) return null;
+
+      const best = rows[0];
+      const confidence = best.attempt_count > 0
+        ? best.success_count / best.attempt_count
+        : 0;
+
+      if (confidence < 0.3) return null; // 信心不足 / Insufficient confidence
+
+      this._logger.info?.(
+        `[ToolResilience] Repair strategy found for ${toolName}: confidence=${confidence.toFixed(2)}`
+      );
+
+      return { strategy: best.strategy, confidence };
+    } catch (err) {
+      this._logger.debug?.(`[ToolResilience] Repair memory query failed: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * 记录修复策略结果（成功或失败）
+   * Record repair strategy outcome (success or failure)
+   *
+   * @param {string} toolName
+   * @param {string} errorPattern
+   * @param {string} strategy
+   * @param {boolean} success
+   */
+  recordRepairOutcome(toolName, errorPattern, strategy, success) {
+    if (!this._db) return;
+
+    try {
+      const existing = this._db.prepare(
+        'SELECT id, success_count, attempt_count FROM repair_memory WHERE tool_name = ? AND error_pattern = ? AND strategy = ?'
+      ).get(toolName, errorPattern.substring(0, 200), strategy);
+
+      if (existing) {
+        this._db.prepare(
+          `UPDATE repair_memory SET
+            success_count = success_count + ?,
+            attempt_count = attempt_count + 1,
+            updated_at = datetime('now')
+          WHERE id = ?`
+        ).run(success ? 1 : 0, existing.id);
+      } else {
+        this._db.prepare(
+          `INSERT INTO repair_memory (tool_name, error_pattern, strategy, success_count, attempt_count, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
+        ).run(toolName, errorPattern.substring(0, 200), strategy, success ? 1 : 0);
+      }
+    } catch (err) {
+      this._logger.debug?.(`[ToolResilience] Repair memory write failed: ${err.message}`);
     }
   }
 }

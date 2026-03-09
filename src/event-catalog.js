@@ -66,6 +66,28 @@ export const EventTopics = {
 
   // ── 追踪 / Tracing ──
   TRACE_SPAN: 'trace.span',
+
+  // ── V5.2: 信息素增强 / Pheromone enhancements ──
+  PHEROMONE_ESCALATED: 'pheromone.escalated',
+  PHEROMONE_RESPONSE_TRIGGERED: 'pheromone.response.triggered',
+
+  // ── V5.2: 系统启动 / System startup ──
+  SYSTEM_STARTUP: 'system.startup',
+
+  // ── V5.2: 断路器 / Circuit breaker ──
+  CIRCUIT_BREAKER_TRANSITION: 'circuit_breaker.transition',
+
+  // ── V5.2: 公告板 / Stigmergic board ──
+  STIGMERGIC_POST_CREATED: 'stigmergic.post.created',
+  STIGMERGIC_POST_EXPIRED: 'stigmergic.post.expired',
+
+  // ── V5.2: 免疫记忆 / Failure vaccination ──
+  FAILURE_VACCINE_CREATED: 'failure.vaccine.created',
+  FAILURE_VACCINE_APPLIED: 'failure.vaccine.applied',
+
+  // ── V5.2: 响应阈值 / Response threshold ──
+  THRESHOLD_ADJUSTED: 'threshold.adjusted',
+  THRESHOLD_TRIGGERED: 'threshold.triggered',
 };
 
 // ============================================================================

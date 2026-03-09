@@ -498,6 +498,172 @@ export class PheromoneEngine {
     };
   }
 
+  // ━━━ V5.2: 自动升压 / Auto Escalation ━━━
+
+  /**
+   * 自动升压: 扫描所有活跃信息素，对滞留超时的 pending 信息素升压
+   * Auto-escalate: scan active pheromones, boost stale pending ones
+   *
+   * @param {Object} [options]
+   * @param {number} [options.k=0.3] - 压力梯度系数
+   * @param {number} [options.threshold=0.9] - 升压阈值
+   * @returns {{ checked: number, escalated: number }}
+   */
+  autoEscalate({ k = 0.3, threshold = 0.9 } = {}) {
+    const all = this._repo.getAll();
+    const now = Date.now();
+    let checked = 0, escalated = 0;
+
+    for (const ph of all) {
+      const current = this._computeDecayedIntensity(ph, now);
+      if (current < MIN_INTENSITY) continue;
+      checked++;
+
+      const ageMinutes = (now - ph.createdAt) / 60000;
+      const pressure = current * (1 + k * Math.log(1 + ageMinutes));
+
+      if (pressure > threshold && ph.type !== 'recruit') {
+        this.emitPheromone({
+          type: 'recruit',
+          sourceId: 'auto-escalate',
+          targetScope: ph.targetScope,
+          intensity: Math.min(pressure, 1.0),
+          payload: { escalatedFrom: ph.id, ageMinutes: Math.round(ageMinutes * 100) / 100 },
+        });
+        escalated++;
+
+        this._emit('pheromone.escalated', {
+          originalId: ph.id,
+          targetScope: ph.targetScope,
+          pressure: Math.round(pressure * 10000) / 10000,
+          ageMinutes: Math.round(ageMinutes * 100) / 100,
+        });
+      }
+    }
+
+    return { checked, escalated };
+  }
+
+  // ━━━ V5.2: 多类型衰减 / Multi-type Decay ━━━
+
+  /**
+   * 按类型获取独立衰减函数
+   * Get type-specific decay function
+   *
+   * trail: 线性衰减, alarm: 阶梯衰减, recruit/default: 指数衰减
+   *
+   * @param {string} type
+   * @param {number} intensity
+   * @param {number} ageMinutes
+   * @param {number} decayRate
+   * @returns {number}
+   */
+  computeTypedDecay(type, intensity, ageMinutes, decayRate) {
+    switch (type) {
+      case 'trail':
+        return Math.max(0, intensity - decayRate * ageMinutes);
+      case 'alarm': {
+        const steps = Math.floor(ageMinutes / 10);
+        return intensity * Math.pow(0.7, steps);
+      }
+      case 'recruit':
+      default:
+        return intensity * Math.exp(-decayRate * ageMinutes);
+    }
+  }
+
+  // ━━━ 导出 / Export ━━━
+
+  /**
+   * 将当前所有活跃信息素导出为结构化 JSON
+   * Export all active pheromones to structured JSON
+   *
+   * 支持过滤和格式选项；包含衰减状态（剩余 TTL、衰减百分比）。
+   * Supports filtering and format options; includes decay status (remaining TTL, decay %).
+   *
+   * @param {Object} [options]
+   * @param {string} [options.type]        - 按类型过滤 / Filter by pheromone type
+   * @param {string} [options.scope]       - 按范围前缀过滤 / Filter by scope prefix
+   * @param {number} [options.minIntensity=0.01] - 最低强度阈值 / Minimum intensity threshold
+   * @param {boolean} [options.pretty=false]     - 是否美化输出 / Pretty-print JSON
+   * @returns {string} JSON string
+   *
+   * @example
+   * // 导出所有活跃信息素
+   * const json = engine.exportToJSON({ pretty: true });
+   *
+   * // 只导出 /task/42 范围的 alarm 信息素
+   * const json = engine.exportToJSON({ type: 'alarm', scope: '/task/42' });
+   */
+  exportToJSON({ type, scope, minIntensity = MIN_INTENSITY, pretty = false } = {}) {
+    const now = Date.now();
+    let pheromones = this._repo.getAll();
+
+    // 过滤 type / Filter by type
+    if (type) {
+      pheromones = pheromones.filter(p => p.type === type);
+    }
+    // 过滤 scope 前缀 / Filter by scope prefix
+    if (scope) {
+      pheromones = pheromones.filter(
+        p => p.targetScope === scope || p.targetScope.startsWith(scope + '/')
+      );
+    }
+
+    const active = [];
+
+    for (const ph of pheromones) {
+      const currentIntensity = this._computeDecayedIntensity(ph, now);
+
+      if (currentIntensity < MIN_INTENSITY) continue;
+      if (currentIntensity < minIntensity) continue;
+
+      const typeConfig = this._getTypeConfig(ph.type);
+      const ageMinutes = (now - ph.updatedAt) / 60000;
+      // 剩余 TTL 估算: I·e^(-λ·t) = MIN → t = ln(I/MIN) / λ
+      const remainingMinutes = Math.log(currentIntensity / MIN_INTENSITY)
+        / (ph.decayRate || typeConfig.decayRate);
+      const decayPct = ph.intensity > 0
+        ? Math.round((1 - currentIntensity / ph.intensity) * 10000) / 100
+        : 0;
+
+      active.push({
+        id: ph.id,
+        type: ph.type,
+        sourceId: ph.sourceId,
+        targetScope: ph.targetScope,
+        intensity: Math.round(currentIntensity * 10000) / 10000,
+        storedIntensity: ph.intensity,
+        decayStatus: {
+          decayRate: ph.decayRate ?? typeConfig.decayRate,
+          ageMinutes: Math.round(ageMinutes * 100) / 100,
+          decayPct,
+          remainingMinutes: Math.round(remainingMinutes * 100) / 100,
+          mmasMin: typeConfig.mmasMin,
+          mmasMax: typeConfig.mmasMax,
+        },
+        payload: ph.payload ?? null,
+        createdAt: ph.createdAt,
+        updatedAt: ph.updatedAt,
+        createdAtISO: new Date(ph.createdAt).toISOString(),
+        updatedAtISO: new Date(ph.updatedAt).toISOString(),
+      });
+    }
+
+    const output = {
+      exportedAt: new Date(now).toISOString(),
+      exportedAtMs: now,
+      filters: { type: type ?? null, scope: scope ?? null, minIntensity },
+      stats: {
+        active: active.length,
+        engineStats: this.getStats(),
+      },
+      pheromones: active,
+    };
+
+    return pretty ? JSON.stringify(output, null, 2) : JSON.stringify(output);
+  }
+
   // ━━━ 内部方法 / Internal Methods ━━━
 
   /**

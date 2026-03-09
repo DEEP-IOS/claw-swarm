@@ -14,6 +14,10 @@
  * - GET /api/v1/topology        → 力导向拓扑数据 (V5.1) / Topology data
  * - GET /api/v1/affinity        → 任务亲和度矩阵 (V5.1) / Task affinity matrix
  * - GET /api/v1/dead-letters    → 死信队列 (V5.1) / Dead letter queue
+ * - GET /api/v1/context-debug   → 上下文调试 (V5.2) / Context debug info
+ * - GET /api/v1/breaker-status  → 断路器状态 (V5.2) / Circuit breaker status
+ * - GET /api/v1/trace-spans     → 追踪 spans (V5.2) / Trace spans
+ * - GET /api/v1/startup-summary → 启动摘要 (V5.2) / Startup summary
  *
  * 注意: Fastify 为可选依赖, 不可用时服务优雅降级。
  * Note: Fastify is optional; service degrades gracefully if unavailable.
@@ -47,7 +51,7 @@ export class DashboardService {
    * @param {number} [deps.port=19100]
    * @param {Object} [deps.db] - better-sqlite3 database instance for V5.1 queries
    */
-  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port, db }) {
+  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port, db, toolResilience, startupSummary }) {
     this._broadcaster = stateBroadcaster;
     this._metrics = metricsCollector;
     this._messageBus = messageBus || null;
@@ -55,6 +59,10 @@ export class DashboardService {
     this._port = port || DEFAULT_PORT;
     /** @type {Object | null} SQLite DB for V5.1 API queries */
     this._db = db || null;
+    /** @type {Object | null} V5.2: ToolResilience for breaker status */
+    this._toolResilience = toolResilience || null;
+    /** @type {Object | null} V5.2: Startup summary cache */
+    this._startupSummary = startupSummary || null;
 
     /** @type {Object | null} Fastify 实例 / Fastify instance */
     this._server = null;
@@ -292,6 +300,77 @@ export class DashboardService {
       } catch {
         reply.send({ entries: [], total: 0, note: 'dead_letter_tasks table not yet populated' });
       }
+    });
+
+    // ━━━ V5.2 REST API 端点 / V5.2 REST API Endpoints ━━━
+
+    // GET /api/v1/context-debug → 上下文调试（脱敏）/ Context debug (sanitized)
+    server.get('/api/v1/context-debug', (req, reply) => {
+      const snapshot = this._metrics.getSnapshot();
+      // 仅返回结构信息，不泄露实际文本 / Return structure only, no actual text
+      reply.send({
+        agents: (snapshot.agents || []).map(a => ({
+          id: a.agentId || a.id,
+          role: a.role,
+          status: a.status,
+        })),
+        pheromones: {
+          count: (snapshot.pheromones || []).length,
+          types: [...new Set((snapshot.pheromones || []).map(p => p.type))],
+          avgIntensity: (snapshot.pheromones || []).length > 0
+            ? (snapshot.pheromones || []).reduce((s, p) => s + (p.intensity || 0), 0) / snapshot.pheromones.length
+            : 0,
+        },
+        memory: {
+          note: 'Token counts and segment lengths — no actual content exposed',
+        },
+        timestamp: Date.now(),
+      });
+    });
+
+    // GET /api/v1/breaker-status → 断路器状态 / Circuit breaker status
+    server.get('/api/v1/breaker-status', (req, reply) => {
+      if (!this._toolResilience) {
+        return reply.send({ breakers: {}, note: 'ToolResilience not available' });
+      }
+      try {
+        const states = this._toolResilience.getCircuitBreakerStates();
+        reply.send({ breakers: states, timestamp: Date.now() });
+      } catch {
+        reply.send({ breakers: {}, note: 'Error reading breaker states' });
+      }
+    });
+
+    // GET /api/v1/trace-spans → 追踪 spans 查询 / Trace spans query
+    server.get('/api/v1/trace-spans', (req, reply) => {
+      if (!this._db) {
+        return reply.send({ spans: [], note: 'Database not available' });
+      }
+      try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const traceId = req.query.traceId;
+        let rows;
+        if (traceId) {
+          rows = this._db.prepare(
+            'SELECT * FROM trace_spans WHERE trace_id = ? ORDER BY start_time DESC LIMIT ?'
+          ).all(traceId, limit);
+        } else {
+          rows = this._db.prepare(
+            'SELECT * FROM trace_spans ORDER BY start_time DESC LIMIT ?'
+          ).all(limit);
+        }
+        reply.send({ spans: rows, timestamp: Date.now() });
+      } catch {
+        reply.send({ spans: [], note: 'trace_spans table not yet populated' });
+      }
+    });
+
+    // GET /api/v1/startup-summary → 启动摘要 / Startup summary
+    server.get('/api/v1/startup-summary', (req, reply) => {
+      reply.send({
+        summary: this._startupSummary || { note: 'No startup summary available' },
+        timestamp: Date.now(),
+      });
     });
   }
 }

@@ -1,11 +1,11 @@
 /**
  * database-schemas.js
- * Claw-Swarm V5.1 - Complete Database Schema Definitions
- * Claw-Swarm V5.1 - 完全なデータベーススキーマ定義
+ * Claw-Swarm V5.2 - Complete Database Schema Definitions
+ * Claw-Swarm V5.2 - 完全なデータベーススキーマ定義
  *
- * Defines ALL 38 table DDL statements, PRAGMA settings,
+ * Defines ALL 44 table DDL statements, PRAGMA settings,
  * and the createAllTables() bootstrap function.
- * 全38テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
+ * 全44テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
  *
  * Tables breakdown:
  *   - Metadata:              1 table   (swarm_meta)
@@ -17,7 +17,8 @@
  *   - Orchestration Stats:   2 tables  (role_execution_stats, task_state_transitions)
  *   - NEW V5.0:              7 tables  (knowledge_nodes .. execution_plans)
  *   - NEW V5.1:              4 tables  (breaker_state, repair_memory, dead_letter_tasks, task_affinity)
- *   Total:                  38 tables
+ *   - NEW V5.2:              6 tables  (agent_thresholds, pheromone_type_config, stigmergic_posts, failure_vaccines, trace_spans, skill_symbiosis)
+ *   Total:                  44 tables
  */
 
 'use strict';
@@ -25,7 +26,7 @@
 // ---------------------------------------------------------------------------
 // Schema version / スキーマバージョン
 // ---------------------------------------------------------------------------
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // ---------------------------------------------------------------------------
 // PRAGMA settings (inherited from v4.x, tuned for WAL + concurrent reads)
@@ -946,6 +947,156 @@ const TABLE_SCHEMAS = [
       'CREATE INDEX IF NOT EXISTS idx_task_affinity_affinity  ON task_affinity (affinity DESC)',
     ],
   },
+
+  // =========================================================================
+  //  10. NEW V5.2 TABLES / V5.2 新規テーブル  (6 tables)
+  // =========================================================================
+
+  {
+    // agent_thresholds - Per-agent response thresholds for FRTM
+    // agent_thresholds - FRTM用のエージェントごとの応答閾値
+    name: 'agent_thresholds',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_thresholds (
+        agent_id      TEXT NOT NULL,
+        task_type     TEXT NOT NULL,
+        threshold     REAL DEFAULT 0.5,
+        integral      REAL DEFAULT 0,
+        activity_rate REAL DEFAULT 0,
+        adjustments   INTEGER DEFAULT 0,
+        updated_at    INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        PRIMARY KEY (agent_id, task_type)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_agent_thresholds_agent_id ON agent_thresholds (agent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_agent_thresholds_threshold ON agent_thresholds (threshold)',
+    ],
+  },
+
+  {
+    // pheromone_type_config - Extended pheromone type configurations for multi-type system
+    // pheromone_type_config - マルチタイプシステム用の拡張フェロモンタイプ設定
+    name: 'pheromone_type_config',
+    sql: `
+      CREATE TABLE IF NOT EXISTS pheromone_type_config (
+        type_name    TEXT PRIMARY KEY,
+        decay_model  TEXT NOT NULL DEFAULT 'exponential',
+        decay_rate   REAL DEFAULT 0.05,
+        max_ttl_min  INTEGER DEFAULT 120,
+        mmas_min     REAL DEFAULT 0.05,
+        mmas_max     REAL DEFAULT 1.0,
+        auto_escalate INTEGER DEFAULT 0,
+        escalate_k   REAL DEFAULT 0.3,
+        description  TEXT,
+        created_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      )
+    `,
+    indexes: [],
+  },
+
+  {
+    // stigmergic_posts - Persistent swarm bulletin board
+    // stigmergic_posts - 持続的なスウォーム掲示板
+    name: 'stigmergic_posts',
+    sql: `
+      CREATE TABLE IF NOT EXISTS stigmergic_posts (
+        id          TEXT PRIMARY KEY,
+        author_id   TEXT NOT NULL,
+        scope       TEXT NOT NULL,
+        category    TEXT DEFAULT 'general',
+        title       TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        priority    INTEGER DEFAULT 0,
+        ttl_minutes INTEGER DEFAULT 1440,
+        read_count  INTEGER DEFAULT 0,
+        created_at  INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        expires_at  INTEGER
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_stigmergic_posts_scope      ON stigmergic_posts (scope)',
+      'CREATE INDEX IF NOT EXISTS idx_stigmergic_posts_category   ON stigmergic_posts (category)',
+      'CREATE INDEX IF NOT EXISTS idx_stigmergic_posts_author_id  ON stigmergic_posts (author_id)',
+      'CREATE INDEX IF NOT EXISTS idx_stigmergic_posts_priority   ON stigmergic_posts (priority DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_stigmergic_posts_expires_at ON stigmergic_posts (expires_at)',
+    ],
+  },
+
+  {
+    // failure_vaccines - Failure pattern immunization database
+    // failure_vaccines - 失敗パターン免疫データベース
+    name: 'failure_vaccines',
+    sql: `
+      CREATE TABLE IF NOT EXISTS failure_vaccines (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        failure_pattern  TEXT NOT NULL,
+        tool_name        TEXT,
+        error_category   TEXT,
+        vaccine_strategy TEXT NOT NULL,
+        effectiveness    REAL DEFAULT 0.5,
+        applications     INTEGER DEFAULT 0,
+        successes        INTEGER DEFAULT 0,
+        created_at       INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        last_applied_at  INTEGER,
+        UNIQUE (failure_pattern, vaccine_strategy)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_failure_vaccines_pattern       ON failure_vaccines (failure_pattern)',
+      'CREATE INDEX IF NOT EXISTS idx_failure_vaccines_tool          ON failure_vaccines (tool_name)',
+      'CREATE INDEX IF NOT EXISTS idx_failure_vaccines_effectiveness ON failure_vaccines (effectiveness DESC)',
+    ],
+  },
+
+  {
+    // trace_spans - Lightweight distributed tracing spans (Jaeger-lite)
+    // trace_spans - 軽量分散トレーシングスパン（Jaeger-lite）
+    name: 'trace_spans',
+    sql: `
+      CREATE TABLE IF NOT EXISTS trace_spans (
+        id          TEXT PRIMARY KEY,
+        trace_id    TEXT NOT NULL,
+        parent_id   TEXT,
+        operation   TEXT NOT NULL,
+        service     TEXT NOT NULL,
+        start_time  INTEGER NOT NULL,
+        duration_ms INTEGER,
+        status      TEXT DEFAULT 'ok',
+        tags        TEXT,
+        created_at  INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_trace_spans_trace_id   ON trace_spans (trace_id)',
+      'CREATE INDEX IF NOT EXISTS idx_trace_spans_parent_id  ON trace_spans (parent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_trace_spans_operation  ON trace_spans (operation)',
+      'CREATE INDEX IF NOT EXISTS idx_trace_spans_start_time ON trace_spans (start_time)',
+    ],
+  },
+
+  {
+    // skill_symbiosis - Agent skill complementarity tracking
+    // skill_symbiosis - エージェントスキル相補性追跡
+    name: 'skill_symbiosis',
+    sql: `
+      CREATE TABLE IF NOT EXISTS skill_symbiosis (
+        agent_a_id        TEXT NOT NULL,
+        agent_b_id        TEXT NOT NULL,
+        complementarity   REAL DEFAULT 0,
+        collaborations    INTEGER DEFAULT 0,
+        avg_quality       REAL DEFAULT 0,
+        last_collaboration INTEGER,
+        updated_at        INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        PRIMARY KEY (agent_a_id, agent_b_id)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_skill_symbiosis_agent_a        ON skill_symbiosis (agent_a_id)',
+      'CREATE INDEX IF NOT EXISTS idx_skill_symbiosis_agent_b        ON skill_symbiosis (agent_b_id)',
+      'CREATE INDEX IF NOT EXISTS idx_skill_symbiosis_complementarity ON skill_symbiosis (complementarity DESC)',
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -954,9 +1105,9 @@ const TABLE_SCHEMAS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Creates all 38 tables and their indexes inside a single transaction.
+ * Creates all 44 tables and their indexes inside a single transaction.
  * Also seeds swarm_meta with the current schema version.
- * 単一トランザクション内で全38テーブルとインデックスを作成する。
+ * 単一トランザクション内で全44テーブルとインデックスを作成する。
  * また、現在のスキーマバージョンでswarm_metaをシードする。
  *
  * @param {import('better-sqlite3').Database} db - A better-sqlite3 database instance

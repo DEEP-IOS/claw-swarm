@@ -33,6 +33,10 @@ const ALLOWED_FIELDS = new Set([
   'taskId', 'verdict', 'score', 'type', 'traceId', 'eventId',
   'source', '_meta', 'reason', 'dimension', 'pheromoneType',
   'operationName', 'startTime', 'duration', 'spanId', 'parentSpanId',
+  // V5.2 新增 / V5.2 additions
+  'breakerState', 'toolName', 'escalated', 'pressure', 'threshold',
+  'postId', 'scope', 'priority', 'vaccineId', 'pattern', 'effectiveness',
+  'featureFlags', 'engineStatus', 'configSummary',
 ]);
 
 // ============================================================================
@@ -92,6 +96,8 @@ export class StateBroadcaster {
       // V5.1 新增 / V5.1 additions
       'tool.*', 'capability.*', 'persona.*', 'species.*',
       'dag.*', 'skill.*', 'trace.*',
+      // V5.2 新增 / V5.2 additions
+      'circuit_breaker.*', 'stigmergic.*', 'failure.*', 'threshold.*',
     ];
     this._unsubscribes = topics.map((topic) =>
       this._messageBus.subscribe(topic, (message) => {

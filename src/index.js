@@ -37,7 +37,17 @@
  * - SkillGovernor: Skill 清单 + 使用追踪 + 推荐引擎 + 能力缺口建议
  *
  * @module claw-swarm
- * @version 5.1.0
+ * V5.2 新增:
+ * - PheromoneResponseMatrix: 信息素压力梯度 + 自动升压 + recruit 信号
+ * - ResponseThreshold: FRTM 固定响应阈值 + PI 控制器
+ * - StigmergicBoard: 持久化公告板
+ * - FailureVaccination: 免疫记忆库
+ * - SkillSymbiosisTracker: 共生技能配对
+ * - Lotka-Volterra + ABC 进化激活
+ * - SYSTEM_STARTUP 事件 + 断路器可视化 + Jaeger-lite 追踪
+ * - Agent 空闲检测 + 自适应修复记忆
+ *
+ * @version 5.2.0
  * @author DEEP-IOS
  */
 
@@ -50,6 +60,13 @@ import { ToolResilience } from './L5-application/tool-resilience.js';
 import { HealthChecker } from './L6-monitoring/health-checker.js';
 import { buildSwarmContextFallback } from './L3-agent/swarm-context-engine.js';
 import { HierarchicalCoordinator } from './L4-orchestration/hierarchical-coordinator.js';
+// V5.2 模块导入 / V5.2 module imports
+import { PheromoneResponseMatrix } from './L2-communication/pheromone-response-matrix.js';
+import { ResponseThreshold } from './L3-agent/response-threshold.js';
+import { StigmergicBoard } from './L2-communication/stigmergic-board.js';
+import { FailureVaccination } from './L3-agent/failure-vaccination.js';
+import { SkillSymbiosisTracker } from './L3-agent/skill-symbiosis.js';
+import { EventTopics, wrapEvent } from './event-catalog.js';
 
 // ============================================================================
 // 常量 / Constants
@@ -122,6 +139,8 @@ const FLAG_DEPENDENCIES = {
   'evolution.clustering': 'evolution.scoring',
   'evolution.gep': 'evolution.scoring',
   'evolution.abc': 'evolution.scoring',
+  // V5.2
+  'evolution.lotkaVolterra': 'evolution.scoring',
 };
 
 /**
@@ -291,6 +310,76 @@ export default {
       }
     }
 
+    // ── 2c. V5.2: 仿生智能 + 蜂群生态模块 ──────────────────────────────
+    //    V5.2: Bio-inspired intelligence + swarm ecology modules
+
+    let pheromoneResponseMatrix = null;
+    if (config.pheromoneEscalation?.enabled !== false) {
+      try {
+        pheromoneResponseMatrix = new PheromoneResponseMatrix({
+          messageBus: adapter._engines?.messageBus,
+          pheromoneEngine: adapter._engines?.pheromoneEngine,
+          logger,
+          config: config.pheromoneEscalation || {},
+        });
+        logger.info?.('[Claw-Swarm] PheromoneResponseMatrix initialized');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] PheromoneResponseMatrix init failed: ${err.message}`);
+      }
+    }
+
+    let responseThreshold = null;
+    if (config.responseThreshold?.enabled) {
+      try {
+        responseThreshold = new ResponseThreshold({
+          messageBus: adapter._engines?.messageBus,
+          db: adapter._engines?.db,
+          logger,
+          config: config.responseThreshold || {},
+        });
+        logger.info?.('[Claw-Swarm] ResponseThreshold initialized');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] ResponseThreshold init failed: ${err.message}`);
+      }
+    }
+
+    let stigmergicBoard = null;
+    try {
+      stigmergicBoard = new StigmergicBoard({
+        messageBus: adapter._engines?.messageBus,
+        db: adapter._engines?.db,
+        logger,
+      });
+      logger.info?.('[Claw-Swarm] StigmergicBoard initialized');
+    } catch (err) {
+      logger.warn?.(`[Claw-Swarm] StigmergicBoard init failed: ${err.message}`);
+    }
+
+    let failureVaccination = null;
+    try {
+      failureVaccination = new FailureVaccination({
+        messageBus: adapter._engines?.messageBus,
+        db: adapter._engines?.db,
+        logger,
+      });
+      logger.info?.('[Claw-Swarm] FailureVaccination initialized');
+    } catch (err) {
+      logger.warn?.(`[Claw-Swarm] FailureVaccination init failed: ${err.message}`);
+    }
+
+    let skillSymbiosis = null;
+    try {
+      skillSymbiosis = new SkillSymbiosisTracker({
+        messageBus: adapter._engines?.messageBus,
+        db: adapter._engines?.db,
+        capabilityEngine: adapter._engines?.capabilityEngine,
+        logger,
+      });
+      logger.info?.('[Claw-Swarm] SkillSymbiosisTracker initialized');
+    } catch (err) {
+      logger.warn?.(`[Claw-Swarm] SkillSymbiosisTracker init failed: ${err.message}`);
+    }
+
     // 获取内部钩子处理器和工具定义 / Get internal hook handlers and tool definitions
     const hooks = adapter.getHooks();
     const tools = adapter.getTools();
@@ -365,7 +454,38 @@ export default {
         }
       }
 
-      // 4. 启动日志 / Startup log
+      // 4. V5.2: 发布 SYSTEM_STARTUP 事件 / Emit SYSTEM_STARTUP event
+      const startupSummary = {
+        version: VERSION,
+        pid: process.pid,
+        port: event?.port ?? null,
+        engineStatus: status,
+        featureFlags: {
+          toolResilience: !!toolResilience,
+          healthChecker: !!healthChecker,
+          pheromoneEscalation: !!pheromoneResponseMatrix,
+          responseThreshold: !!responseThreshold,
+          stigmergicBoard: !!stigmergicBoard,
+          failureVaccination: !!failureVaccination,
+          skillSymbiosis: !!skillSymbiosis,
+          hierarchical: config.hierarchical?.enabled !== false,
+          dagEngine: config.dagEngine?.enabled !== false,
+          contextEngine: !!config.contextEngine?.enabled,
+          skillGovernor: !!config.skillGovernor?.enabled,
+          lotkaVolterra: !!config.evolution?.lotkaVolterra,
+          abc: !!config.evolution?.abc,
+        },
+        startedAt: Date.now(),
+      };
+
+      try {
+        adapter._engines?.messageBus?.publish?.(
+          EventTopics.SYSTEM_STARTUP,
+          wrapEvent(EventTopics.SYSTEM_STARTUP, startupSummary, 'gateway')
+        );
+      } catch { /* startup event is non-critical */ }
+
+      // 5. 启动日志 / Startup log
       logger.info?.(
         `[Claw-Swarm] V${VERSION} started — PID=${process.pid} ` +
         `port=${event?.port ?? '?'} status=${JSON.stringify(status)}`
@@ -682,6 +802,11 @@ export default {
         // V5.1: 停止健康检查器 / Stop health checker
         if (healthChecker) {
           try { healthChecker.stop(); } catch { /* non-fatal */ }
+        }
+
+        // V5.2: 停止信息素响应矩阵 / Stop pheromone response matrix
+        if (pheromoneResponseMatrix) {
+          try { pheromoneResponseMatrix.stop?.(); } catch { /* non-fatal */ }
         }
 
         adapter.close();
@@ -1102,7 +1227,7 @@ export default {
       } catch { /* best-effort */ }
     });
 
-    const hookCount = 14; // V5.0(6) + V5.1(gateway_start, before_model_resolve, before_tool_call, before_prompt_build, subagent_spawning, subagent_spawned, subagent_ended, llm_output)
+    const hookCount = 14; // V5.0(6) + V5.1(8)
     logger.info?.(`[Claw-Swarm] V${VERSION} plugin registered — ${hookCount} hooks + ${tools.length} tools`);
   },
 };
