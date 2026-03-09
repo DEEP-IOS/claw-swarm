@@ -214,7 +214,7 @@ export function createSwarmContextEngineFactory(deps) {
       info: {
         id: 'claw-swarm',
         name: 'Claw-Swarm Context Engine',
-        version: '5.1.0',
+        version: '5.2.0',
       },
 
       bootstrap: async (args) => safeCall(
