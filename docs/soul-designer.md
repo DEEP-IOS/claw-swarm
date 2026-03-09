@@ -2,9 +2,9 @@
 
 ## Overview / 概述
 
-The Soul Designer is Claw-Swarm v4.0's agent personality system. It provides persona templates that influence agent behavior, communication style, and decision-making. The system learns from outcomes over time, evolving persona selection for better task-agent matching.
+The Soul Designer is Claw-Swarm V5.1's agent personality system. It provides persona templates that influence agent behavior, communication style, and decision-making. The system learns from outcomes over time, evolving persona selection for better task-agent matching.
 
-灵魂设计器是 Claw-Swarm v4.0 的智能体人格系统。提供影响行为、沟通风格和决策的人格模板。系统从结果中学习，随时间进化人格选择以提升任务匹配。
+灵魂设计器是 Claw-Swarm V5.1 的智能体人格系统。提供影响行为、沟通风格和决策的人格模板。系统从结果中学习，随时间进化人格选择以提升任务匹配。
 
 ### Design Principle / 设计原则
 
@@ -13,6 +13,7 @@ The Soul Designer is Claw-Swarm v4.0's agent personality system. It provides per
 - Rapid prototyping needs an exploratory, risk-tolerant agent (scout-bee)
 - Steady implementation needs a methodical, reliable agent (worker-bee)
 - Strategic coordination needs a directive, big-picture agent (queen-messenger)
+- Visualization and UI design needs an aesthetic-driven, visual-first agent (designer-bee)
 
 The Soul Designer bridges this gap by recommending personas based on task keywords and historical performance data.
 
@@ -66,6 +67,19 @@ The Soul Designer bridges this gap by recommending personas based on task keywor
 
 **Biological analogy / 生物类比：** The queen's pheromone signals coordinate colony-wide behavior, while messenger bees carry information between different parts of the hive.
 
+### designer-bee — Creator / 设计蜂 (V5.1 New)
+
+| Property | Value |
+|----------|-------|
+| **Personality** | Aesthetics: 0.9, Creativity: 0.8, Thoroughness: 0.7 |
+| **Best for** | Visualization, dashboard, design, chart, UI, layout, color, style, aesthetic |
+| **SOUL snippet** | Aesthetic-driven agent focused on visual quality and design excellence |
+| **When to use** | Data visualization, UI/UX design, dashboard creation, aesthetic review |
+
+**Biological analogy / 生物类比：** Designer bees are the architects of the hive — constructing the perfect hexagonal comb structure with precise geometry, optimal angles, and harmonious proportions. They bring this pursuit of formal beauty into the digital world.
+
+设计蜂是蜂巢的建筑师。蜂巢的六边形结构是自然界最高效的空间利用形式——完美的几何学、精确的角度、和谐的比例。设计蜂将这种对形式美的追求带入数字世界。
+
 ---
 
 ## Persona Selection / 人格选择
@@ -85,9 +99,9 @@ Each persona has a `bestFor` keyword list. The task description is scanned for t
 
 ### Default Behavior / 默认行为
 
-When no keywords match, `worker-bee` is used as the default persona. This is the safest choice for general-purpose tasks.
+When no keywords match, `worker-bee` is used as the default persona. This is the safest choice for general-purpose tasks. V5.1 adds `designer-bee` for visualization and design tasks.
 
-无关键词匹配时默认使用 `worker-bee`，这是通用任务最安全的选择。
+无关键词匹配时默认使用 `worker-bee`，这是通用任务最安全的选择。V5.1 新增 `designer-bee` 用于可视化和设计任务。
 
 ---
 

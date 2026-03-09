@@ -3,7 +3,7 @@
 **Date**: 2026-03-08
 **Environment**: OpenClaw Gateway + Claw-Swarm V5.0 Plugin
 **Tester**: DEEP-IOS
-**Model**: Claude Opus 4 (main agent)
+**Model**: Opus 4 (main agent)
 
 ---
 

@@ -1,14 +1,17 @@
 {
   "name": "openclaw-swarm",
-  "version": "5.0.0",
-  "description": "Claw-Swarm V5.0 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
+  "version": "5.1.0",
+  "description": "Claw-Swarm V5.1 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
   },
   "main": "src/index.js",
   "openclaw": {
-    "extensions": ["./src/index.js"]
+    "id": "claw-swarm",
+    "extensions": [
+      "./src/index.js"
+    ]
   },
   "exports": {
     ".": "./src/index.js",
@@ -62,10 +65,12 @@
     "abc-algorithm"
   ],
   "dependencies": {
+    "ajv": "^8.18.0",
     "eventemitter3": "^5.0.1",
     "fastify": "^5.2.1",
     "nanoid": "^5.1.2",
     "pino": "^9.6.0",
+    "tiktoken": "^1.0.22",
     "zod": "^3.24.2"
   },
   "devDependencies": {

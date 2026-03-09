@@ -16,7 +16,11 @@ const silentLogger = { info() {}, warn() {}, error() {}, debug() {} };
 // 静默消息总线 / Silent message bus (records emitted events)
 const createMockBus = () => {
   const events = [];
-  return { emit(name, data) { events.push({ name, data }); }, events };
+  return {
+    emit(name, data) { events.push({ name, data }); },
+    publish(name, data) { events.push({ name, data }); },
+    events,
+  };
 };
 
 describe('CapabilityEngine', () => {

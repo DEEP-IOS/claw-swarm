@@ -1,11 +1,11 @@
 /**
  * database-schemas.js
- * Claw-Swarm V5.0 - Complete Database Schema Definitions
- * Claw-Swarm V5.0 - 完全なデータベーススキーマ定義
+ * Claw-Swarm V5.1 - Complete Database Schema Definitions
+ * Claw-Swarm V5.1 - 完全なデータベーススキーマ定義
  *
- * Defines ALL 34 table DDL statements, PRAGMA settings,
+ * Defines ALL 38 table DDL statements, PRAGMA settings,
  * and the createAllTables() bootstrap function.
- * 全34テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
+ * 全38テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
  *
  * Tables breakdown:
  *   - Metadata:              1 table   (swarm_meta)
@@ -16,7 +16,8 @@
  *   - Persona:               1 table   (persona_outcomes)
  *   - Orchestration Stats:   2 tables  (role_execution_stats, task_state_transitions)
  *   - NEW V5.0:              7 tables  (knowledge_nodes .. execution_plans)
- *   Total:                  34 tables
+ *   - NEW V5.1:              4 tables  (breaker_state, repair_memory, dead_letter_tasks, task_affinity)
+ *   Total:                  38 tables
  */
 
 'use strict';
@@ -24,7 +25,7 @@
 // ---------------------------------------------------------------------------
 // Schema version / スキーマバージョン
 // ---------------------------------------------------------------------------
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // ---------------------------------------------------------------------------
 // PRAGMA settings (inherited from v4.x, tuned for WAL + concurrent reads)
@@ -847,6 +848,104 @@ const TABLE_SCHEMAS = [
       'CREATE INDEX IF NOT EXISTS idx_execution_plans_maturity_score ON execution_plans (maturity_score DESC)',
     ],
   },
+  // =========================================================================
+  //  9. NEW V5.1 TABLES / V5.1 新規テーブル  (4 tables)
+  // =========================================================================
+
+  {
+    // breaker_state - Per-tool circuit breaker persistence
+    // breaker_state - ツールごとの断路器状態永続化
+    name: 'breaker_state',
+    sql: `
+      CREATE TABLE IF NOT EXISTS breaker_state (
+        tool_name    TEXT PRIMARY KEY,
+        state        TEXT NOT NULL DEFAULT 'CLOSED',
+        failures     INTEGER DEFAULT 0,
+        last_failure INTEGER,
+        opened_at    INTEGER,
+        half_open_at INTEGER,
+        updated_at   INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_breaker_state_state ON breaker_state (state)',
+    ],
+  },
+
+  {
+    // repair_memory - Adaptive repair strategies for tool errors (V5.2 ready)
+    // repair_memory - ツールエラー用の適応型修復戦略（V5.2対応）
+    name: 'repair_memory',
+    sql: `
+      CREATE TABLE IF NOT EXISTS repair_memory (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        error_signature TEXT NOT NULL,
+        tool_name       TEXT NOT NULL,
+        error_type      TEXT,
+        field_path      TEXT,
+        strategy        TEXT NOT NULL,
+        affinity        REAL DEFAULT 0.5,
+        hit_count       INTEGER DEFAULT 0,
+        last_hit_at     INTEGER,
+        created_at      INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        UNIQUE (error_signature, strategy)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_repair_memory_error_signature ON repair_memory (error_signature)',
+      'CREATE INDEX IF NOT EXISTS idx_repair_memory_tool_name       ON repair_memory (tool_name)',
+      'CREATE INDEX IF NOT EXISTS idx_repair_memory_affinity        ON repair_memory (affinity DESC)',
+    ],
+  },
+
+  {
+    // dead_letter_tasks - Permanently failed tasks structured record (DLQ)
+    // dead_letter_tasks - 永久失敗タスクの構造化記録（DLQ）
+    name: 'dead_letter_tasks',
+    sql: `
+      CREATE TABLE IF NOT EXISTS dead_letter_tasks (
+        id               TEXT PRIMARY KEY,
+        dag_id           TEXT,
+        task_node_id     TEXT,
+        agent_id         TEXT,
+        original_params  TEXT,
+        retry_history    TEXT,
+        failure_category TEXT,
+        created_at       INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        reprocessed_at   INTEGER,
+        resolution       TEXT
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_dead_letter_tasks_dag_id           ON dead_letter_tasks (dag_id)',
+      'CREATE INDEX IF NOT EXISTS idx_dead_letter_tasks_agent_id         ON dead_letter_tasks (agent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_dead_letter_tasks_failure_category ON dead_letter_tasks (failure_category)',
+      'CREATE INDEX IF NOT EXISTS idx_dead_letter_tasks_created_at       ON dead_letter_tasks (created_at)',
+    ],
+  },
+
+  {
+    // task_affinity - Agent-task type affinity matrix for optimized allocation
+    // task_affinity - 最適化された割り当てのためのエージェント-タスクタイプ親和性マトリックス
+    name: 'task_affinity',
+    sql: `
+      CREATE TABLE IF NOT EXISTS task_affinity (
+        agent_id     TEXT NOT NULL,
+        task_type    TEXT NOT NULL,
+        affinity     REAL DEFAULT 0.5,
+        total_tasks  INTEGER DEFAULT 0,
+        successes    INTEGER DEFAULT 0,
+        avg_duration REAL DEFAULT 0,
+        last_updated INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        PRIMARY KEY (agent_id, task_type)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_task_affinity_agent_id  ON task_affinity (agent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_task_affinity_task_type ON task_affinity (task_type)',
+      'CREATE INDEX IF NOT EXISTS idx_task_affinity_affinity  ON task_affinity (affinity DESC)',
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -855,9 +954,9 @@ const TABLE_SCHEMAS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Creates all 34 tables and their indexes inside a single transaction.
+ * Creates all 38 tables and their indexes inside a single transaction.
  * Also seeds swarm_meta with the current schema version.
- * 単一トランザクション内で全34テーブルとインデックスを作成する。
+ * 単一トランザクション内で全38テーブルとインデックスを作成する。
  * また、現在のスキーマバージョンでswarm_metaをシードする。
  *
  * @param {import('better-sqlite3').Database} db - A better-sqlite3 database instance

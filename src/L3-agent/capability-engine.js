@@ -116,6 +116,13 @@ export class CapabilityEngine {
     /** @private */
     this._logger = logger;
 
+    /**
+     * V5.1: 评分启用标志（通过 evolution.scoring 控制）
+     * V5.1: Scoring enabled flag (controlled by evolution.scoring)
+     * @private
+     */
+    this._enabled = config.enabled ?? false;
+
     // 维度权重可配置 / Dimension weights are configurable
     /** @private */
     this._dimensionWeights = config.dimensionWeights || { ...DEFAULT_DIMENSION_WEIGHTS };
@@ -136,6 +143,146 @@ export class CapabilityEngine {
 
     /** @private */
     this._cacheTTL = config.cacheTTL ?? 300_000; // 5 min
+
+    /**
+     * V5.1: 主动评分的 4D 维度（其余冻结在 0.5 中性值）
+     * V5.1: Actively scored 4D dimensions (rest frozen at neutral 0.5)
+     * @private
+     */
+    this._activeDimensions = new Set([
+      CapabilityDimension.coding,
+      CapabilityDimension.performance,
+      CapabilityDimension.communication,
+      CapabilityDimension.domain,
+    ]);
+  }
+
+  // --------------------------------------------------------------------------
+  // V5.1: 轻量观测记录 / Lightweight Observation Recording
+  // --------------------------------------------------------------------------
+
+  /**
+   * 记录单次工具调用观测（EMA 滑动评分）
+   * Record a single tool-call observation using EMA scoring
+   *
+   * ⚠️ 参数签名匹配 plugin-adapter.js 调用方：
+   *    recordObservation({ agentId, dimension, success, weight })
+   *
+   * @param {Object} obs
+   * @param {string} obs.agentId - Agent ID
+   * @param {string} obs.dimension - 能力维度 / Capability dimension
+   * @param {boolean} obs.success - 是否成功 / Whether succeeded
+   * @param {number} [obs.weight=0.1] - EMA 权重 / EMA weight
+   * @param {number} [obs.latencyMs] - 执行耗时（可选）/ Execution latency (optional)
+   * @returns {void}
+   */
+  recordObservation({ agentId, dimension, success, weight = 0.1, latencyMs }) {
+    // V5.1: 特性开关检查 / Feature flag check
+    if (!this._enabled) return;
+
+    // 仅评分主动维度 / Only score active dimensions
+    const dim = dimension || 'coding';
+    if (!DIMENSIONS_8D.includes(dim)) return;
+    if (!this._activeDimensions.has(dim)) return;
+
+    try {
+      const profile = this.getCapabilityProfile(agentId);
+      const current = profile[dim] ?? this._initialScore;
+
+      // EMA: new = current × (1 - α) + observation × α
+      // 成功 +10, 失败 -5（非对称奖惩）/ Success +10, failure -5 (asymmetric)
+      const observedScore = success ? Math.min(current + 10, 100) : Math.max(current - 5, 0);
+      const alpha = Math.max(0.01, Math.min(0.5, weight));
+      const updated = current * (1 - alpha) + observedScore * alpha;
+      const clamped = Math.round(Math.max(0, Math.min(100, updated)) * 100) / 100;
+
+      this._agentRepo.updateCapabilityScore(agentId, dim, clamped);
+      this._cache.delete(agentId);
+
+      // 延迟性能评分 / Latency-based performance scoring
+      if (latencyMs !== undefined && this._activeDimensions.has(CapabilityDimension.performance)) {
+        const perfScore = latencyMs < 5000 ? 70 + (5000 - latencyMs) / 5000 * 30
+          : latencyMs < 30000 ? 30 + (30000 - latencyMs) / 25000 * 40
+          : 10;
+        const currentPerf = profile[CapabilityDimension.performance] ?? this._initialScore;
+        const updatedPerf = currentPerf * (1 - alpha * 0.5) + perfScore * (alpha * 0.5);
+        const clampedPerf = Math.round(Math.max(0, Math.min(100, updatedPerf)) * 100) / 100;
+        this._agentRepo.updateCapabilityScore(agentId, CapabilityDimension.performance, clampedPerf);
+      }
+
+      this._logger.debug?.({ agentId, dim, from: current, to: clamped }, 'observation recorded');
+    } catch (e) {
+      this._logger.warn?.(`[CapabilityEngine] recordObservation error: ${e.message}`);
+    }
+  }
+
+  /**
+   * V5.1: 获取能力摘要（用于蜂群上下文注入）
+   * Get capability summary for swarm context injection
+   *
+   * @returns {Object|null} 团队能力摘要 / Team capability summary
+   */
+  getSummary() {
+    try {
+      const agents = this._agentRepo.listAgents?.('active') || [];
+      if (agents.length === 0) return null;
+
+      const totals = {};
+      for (const dim of DIMENSIONS_8D) totals[dim] = 0;
+      let count = 0;
+
+      for (const agent of agents) {
+        const profile = this.getCapabilityProfile(agent.id);
+        for (const dim of DIMENSIONS_8D) {
+          totals[dim] += profile[dim] ?? this._initialScore;
+        }
+        count++;
+      }
+
+      if (count === 0) return null;
+
+      const avg = {};
+      for (const dim of DIMENSIONS_8D) {
+        avg[dim] = Math.round((totals[dim] / count) * 10) / 10;
+      }
+      return { agentCount: count, average: avg };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * V5.1: 工具名到维度推断 / Infer capability dimension from tool name
+   *
+   * @param {string} toolName - 工具名 / Tool name
+   * @returns {string} 维度名 / Dimension name
+   */
+  static inferDimension(toolName) {
+    if (!toolName) return CapabilityDimension.coding;
+
+    const name = toolName.toLowerCase();
+
+    // 编码相关 / Coding related
+    if (name.includes('write') || name.includes('edit') || name.includes('code')
+      || name.includes('implement') || name.includes('create')) {
+      return CapabilityDimension.coding;
+    }
+    // 性能相关 / Performance related
+    if (name.includes('bench') || name.includes('perf') || name.includes('optim')
+      || name.includes('profil')) {
+      return CapabilityDimension.performance;
+    }
+    // 沟通相关 / Communication related
+    if (name.includes('search') || name.includes('read') || name.includes('fetch')
+      || name.includes('query') || name.includes('ask') || name.includes('message')) {
+      return CapabilityDimension.communication;
+    }
+    // 领域相关 / Domain related
+    if (name.includes('domain') || name.includes('special') || name.includes('expert')) {
+      return CapabilityDimension.domain;
+    }
+
+    return CapabilityDimension.coding;
   }
 
   // --------------------------------------------------------------------------
@@ -203,8 +350,8 @@ export class CapabilityEngine {
     // 清除缓存 / Clear cache
     this._cache.delete(agentId);
 
-    // 发布事件 / Emit event
-    this._messageBus.emit('capability.evaluated', {
+    // 发布事件 / Publish event (V5.1 fix: emit → publish)
+    this._messageBus.publish?.('capability.evaluated', {
       agentId,
       taskType,
       reward,
@@ -235,7 +382,7 @@ export class CapabilityEngine {
     this._agentRepo.updateCapabilityScore(agentId, dimension, clamped);
     this._cache.delete(agentId);
 
-    this._messageBus.emit('capability.updated', { agentId, dimension, score: clamped });
+    this._messageBus.publish?.('capability.updated', { agentId, dimension, score: clamped });
   }
 
   /**

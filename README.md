@@ -1,12 +1,12 @@
 [**中文**](README.zh-CN.md) | English
 
-# Claw-Swarm V5.0
+# Claw-Swarm V5.1
 
-**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 12 algorithms, and real-time monitoring.**
+**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 12+ algorithms, hierarchical swarm, and real-time monitoring.**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
-![Version](https://img.shields.io/badge/version-5.0.0-blue)
-![Tests](https://img.shields.io/badge/tests-475%20across%2030%20files-green)
+![Version](https://img.shields.io/badge/version-5.1.0-blue)
+![Tests](https://img.shields.io/badge/tests-573%20across%2030%2B%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 <p align="center">
@@ -19,9 +19,9 @@
 
 ## Overview / 概述
 
-Claw-Swarm V5.0 is a ground-up rewrite that replaces the legacy 4-layer architecture with a clean **6-layer design** spanning 55+ source files. It powers OpenClaw's multi-agent coordination with bio-inspired communication (pheromones, gossip), structured memory (working/episodic/semantic), DAG-based orchestration, and a real-time SSE monitoring dashboard.
+Claw-Swarm V5.1 builds on the V5.0 ground-up rewrite with **66+ source files** across a clean **6-layer architecture**. V5.1 adds tool resilience (AJV + circuit breaker), hierarchical swarm coordination, DAG orchestration with work-stealing, species evolution, and an enhanced hex-hive monitoring dashboard. It powers OpenClaw's multi-agent coordination with bio-inspired communication (pheromones, gossip), structured memory (working/episodic/semantic), 14 lifecycle hooks, and 5 bee personas.
 
-Claw-Swarm V5.0 是一次完整重写，以全新 **6 层架构**（55+ 源文件）取代旧版 4 层设计。通过仿生通信（信息素、流言协议）、结构化记忆（工作/情景/语义）、DAG 任务编排和实时 SSE 监控仪表盘，驱动 OpenClaw 的多智能体协调。
+Claw-Swarm V5.1 在 V5.0 完整重写基础上扩展至 **66+ 源文件**，6 层架构。V5.1 新增工具韧性（AJV + 断路器）、层级蜂群协调、工作窃取 DAG 编排、物种进化、增强版六边形蜂巢监控仪表盘。通过仿生通信（信息素、流言协议）、结构化记忆（工作/情景/语义）、14 个生命周期钩子和 5 种蜜蜂人格，驱动 OpenClaw 的多智能体协调。
 
 ---
 
@@ -30,12 +30,15 @@ Claw-Swarm V5.0 是一次完整重写，以全新 **6 层架构**（55+ 源文�
 | Feature / 特性 | Description | 描述 |
 |---|---|---|
 | **6-Layer Architecture** | Clean separation: infra, comm, agent, orchestration, app, monitoring | 六层解耦：基础设施、通信、智能体、编排、应用、监控 |
-| **12 Bio-Inspired Algorithms** | MMAS, ACO, Ebbinghaus, BFS, PARL, GEP, CPM, Jaccard, MoE, FIPA CNP, ABC, k-means++ | 12 种仿生/经典算法融合 |
+| **12+ Bio-Inspired Algorithms** | MMAS, ACO, Ebbinghaus, BFS, PARL, GEP, CPM, Jaccard, MoE, FIPA CNP, ABC, k-means++ | 12+ 种仿生/经典算法融合 |
 | **3-Tier Memory** | Working (focus/context/scratchpad), Episodic (forgetting curve), Semantic (knowledge graph) | 三级记忆：工作记忆、情景记忆、语义知识图谱 |
 | **Pheromone Communication** | MMAS-bounded signals with exponential decay and custom type registry | MMAS 边界信息素 + 指数衰减 + 自定义类型注册 |
-| **DAG Orchestration** | Task decomposition, critical path analysis, contract-net negotiation | DAG 任务分解、关键路径分析、合同网协商 |
-| **Real-Time Dashboard** | Fastify + SSE on port 19100, dark theme, RED metrics | 实时仪表盘（Fastify + SSE，端口 19100，暗色主题） |
-| **Plugin SDK Integration** | 6 OpenClaw hooks, 7 agent tools, `{ id, register(api) }` pattern | 6 个钩子、7 个工具，标准 Plugin SDK 模式 |
+| **DAG Orchestration** | Task decomposition, critical path, contract-net, work-stealing, DLQ | DAG 任务分解、关键路径、合同网、工作窃取、死信队列 |
+| **Tool Resilience** | AJV pre-validation, per-tool circuit breaker, retry prompt injection | AJV 预校验、工具级断路器、重试提示注入 |
+| **Hierarchical Swarm** | Agents can spawn sub-agents within governance bounds (depth + concurrency limits) | 层级蜂群：Agent 可在治理边界内派生子 Agent |
+| **5 Bee Personas** | scout, worker, guard, queen-messenger, designer — signal-driven behavior | 5 种蜜蜂人格：侦察蜂、工蜂、守卫蜂、女王信使、设计蜂 |
+| **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标 |
+| **Plugin SDK Integration** | 14 OpenClaw hooks, 7 agent tools, `{ id, register(api) }` pattern | 14 个钩子、7 个工具，标准 Plugin SDK 模式 |
 
 ---
 
@@ -49,6 +52,7 @@ Claw-Swarm V5.0 是一次完整重写，以全新 **6 层架构**（55+ 源文�
 ├─────────────────────────────────────────────────────────────┤
 │  L5  Application       应用层                                │
 │      PluginAdapter · ContextService · CircuitBreaker        │
+│      ToolResilience · SkillGovernor · TokenBudgetTracker    │
 │      7 Tool Factories (spawn/query/pheromone/gate/          │
 │                        memory/plan/zone)                    │
 ├─────────────────────────────────────────────────────────────┤
@@ -57,6 +61,8 @@ Claw-Swarm V5.0 是一次完整重写，以全新 **6 层架构**（55+ 源文�
 │      PipelineBreaker · ResultSynthesizer · ExecutionPlanner │
 │      ContractNet · ReplanEngine · ABCScheduler              │
 │      RoleDiscovery · RoleManager · ZoneManager              │
+│      HierarchicalCoordinator · TaskDAGEngine                │
+│      SpeciesEvolver                                         │
 ├─────────────────────────────────────────────────────────────┤
 │  L3  Agent             智能体层                              │
 │      WorkingMemory · EpisodicMemory · SemanticMemory        │
@@ -68,7 +74,7 @@ Claw-Swarm V5.0 是一次完整重写，以全新 **6 层架构**（55+ 源文�
 │      PheromoneTypeRegistry                                  │
 ├─────────────────────────────────────────────────────────────┤
 │  L1  Infrastructure    基础设施层                             │
-│      DatabaseManager (SQLite, 34 tables) · ConfigManager    │
+│      DatabaseManager (SQLite, 38 tables) · ConfigManager    │
 │      MigrationRunner · 8 Repositories · 3 Schema modules    │
 │      Logger · Types                                         │
 └─────────────────────────────────────────────────────────────┘
@@ -147,9 +153,9 @@ Claw-Swarm 要求模型具备强工具调用能力。完整指南见 [docs/model
 
 | Tier | Models / 模型 | Notes / 说明 |
 |---|---|---|
-| **S** | Claude Opus 4, Claude Sonnet 4.5, GPT-4.1, GPT-4o, Gemini 2.5 Pro | Best tool calling + reasoning / 最佳工具调用 + 推理 |
-| **A** | Kimi K2.5, Qwen3.5-Plus/Max, DeepSeek-V3, Gemini 2.5 Flash, Claude Haiku 4.5 | Strong with minor trade-offs / 强，少量取舍 |
-| **B** | DeepSeek-R1, GLM-5, Qwen3-Coder, Mistral Large, Llama 4 Maverick | Usable for specific roles / 特定角色可用 |
+| **S** | Opus 4.6, Sonnet 4.6, GPT-5.4, GPT-5.3-Codex, Gemini 2.5 Pro | Best tool calling + reasoning / 最佳工具调用 + 推理 |
+| **A** | Kimi K2.5, Qwen3.5-Plus/Max, DeepSeek-V3, Gemini 2.5 Flash, o4-mini | Strong with minor trade-offs / 强，少量取舍 |
+| **B** | DeepSeek-Reasoner, GLM-5, Qwen3-Coder-Next, MiniMax-M2.5, Llama 4 Maverick | Usable for specific roles / 特定角色可用 |
 
 ---
 
@@ -174,20 +180,28 @@ Claw-Swarm 要求模型具备强工具调用能力。完整指南见 [docs/model
 
 ## OpenClaw Hooks / OpenClaw 钩子
 
-6 hooks registered via Plugin SDK / 通过 Plugin SDK 注册 6 个钩子：
+14 hooks registered via Plugin SDK / 通过 Plugin SDK 注册 14 个钩子：
 
 | Hook | Trigger | Internal Mapping / 内部映射 |
 |---|---|---|
+| `gateway_start` | Gateway starting | Engine initialization + config validation / 引擎初始化 + 配置校验 |
+| `before_model_resolve` | Model selection | Model capability auto-detection / 模型能力自动检测 |
+| `before_tool_call` | Tool invocation | ToolResilience AJV validation + circuit breaker / 工具韧性校验 + 断路器 |
+| `before_prompt_build` | Prompt assembly | Tool failure injection + swarm context / 工具失败注入 + 蜂群上下文 |
 | `before_agent_start` | Agent begins | SOUL injection + context prepend (memory, knowledge, pheromone) / SOUL 注入 + 上下文注入 |
 | `agent_end` | Agent finishes | Quality gate + pheromone reinforcement + memory consolidation / 质量门控 + 信息素 + 记忆固化 |
-| `after_tool_call` | Tool completes | Working memory recording + capability dimension update / 工具监控 + 能力更新 |
+| `after_tool_call` | Tool completes | Tool resilience + health check + working memory / 工具韧性 + 健康检查 + 工作记忆 |
 | `before_reset` | Conversation reset | Memory consolidation (working → episodic) / 记忆固化 |
-| `gateway_stop` | Gateway shutting down | Engine cleanup / 引擎关闭 |
+| `gateway_stop` | Gateway shutting down | Engine cleanup + PID file removal / 引擎关闭 + PID 清理 |
 | `message_sending` | Message routed | Agent-to-agent message routing via MessageBus / 消息路由 |
+| `subagent_spawning` | Sub-agent creating | Hierarchical coordinator validation / 层级协调器校验 |
+| `subagent_spawned` | Sub-agent created | Hierarchy tracking / 层级追踪 |
+| `subagent_ended` | Sub-agent finished | Result collection + pheromone update / 结果收集 + 信息素更新 |
+| `llm_output` | LLM response | SOUL.md dual-stage migration / SOUL.md 双阶段迁移 |
 
-Sub-agent lifecycle is driven by the `swarm_spawn` tool: SOUL snippets are returned in the tool result, and quality gates are triggered when agents end.
+Sub-agent lifecycle is managed by the hierarchical coordinator: depth limits, concurrency control, and governance gates are enforced automatically.
 
-子 Agent 生命周期由 `swarm_spawn` 工具驱动：SOUL 片段通过工具结果返回，Agent 结束时触发质量门控。
+子 Agent 生命周期由层级协调器管理：深度限制、并发控制和治理门控自动执行。
 
 ---
 
@@ -225,7 +239,7 @@ Claw-Swarm 采用多层次测试策略确保生产可用性：
 
 | Level | Type | Coverage | 覆盖范围 |
 |-------|------|----------|----------|
-| Unit | 475 tests across 30 files (vitest) | All 6 layers, every module | 6 层全覆盖 |
+| Unit | 573 tests across 30+ files (vitest) | All 6 layers, every module | 6 层全覆盖 |
 | Integration | End-to-end pipeline | Multi-tool workflows, memory persistence, zone governance | 跨工具流程、记忆持久化、Zone 治理 |
 | Stress | High-frequency & boundary | 20+ rapid calls, WAL concurrency, edge cases | 高频调用、并发写入、边界值 |
 | **Production** | **20 tests in live OpenClaw Gateway** | **Plugin load, tool invocation, MMAS, memory, quality gate, MoE, integration scenarios, stress** | **真实 Gateway 环境全链路验证** |
@@ -240,7 +254,7 @@ The install test was independently conducted on a clean Linux (Node.js v22, Open
 安装测试在干净 Linux 环境（Node.js v22, OpenClaw 2026.2.13）中独立执行 — 从 `git clone` 到 `swarm_query` 调用成功仅需 3 分钟，100% 通过率，零阻断性问题。报告见：**[安装测试报告](docs/install-test-report.md)**
 
 ```bash
-# All tests (475 tests, 30 files) / 全部测试
+# All tests (573 tests, 30+ files) / 全部测试
 npm test
 
 # By category / 按类别
@@ -271,13 +285,14 @@ npm run test:coverage
 src/
 ├── index.js                                  # Plugin entry { id, register(api) }
 │                                             # 插件入口
-├── L1-infrastructure/                        # 基础设施层 (17 files)
+├── L1-infrastructure/                        # 基础设施层 (18 files)
 │   ├── types.js                              # Type definitions / 类型定义
 │   ├── logger.js                             # Pino-based logging / 日志
+│   ├── monotonic-clock.js                    # V5.1: hrtime monotonic timing
 │   ├── config/
 │   │   └── config-manager.js                 # Zod-validated config / 配置管理
 │   ├── database/
-│   │   ├── database-manager.js               # SQLite DatabaseSync (34 tables)
+│   │   ├── database-manager.js               # SQLite DatabaseSync (38 tables)
 │   │   ├── migration-runner.js               # Schema migrations / 迁移
 │   │   ├── sqlite-binding.js                 # node:sqlite binding
 │   │   └── repositories/                     # 8 data repositories
@@ -300,7 +315,7 @@ src/
 │   ├── gossip-protocol.js                    # Epidemic broadcast + heartbeat
 │   └── pheromone-type-registry.js            # Custom pheromone types
 │
-├── L3-agent/                                 # 智能体层 (8 files)
+├── L3-agent/                                 # 智能体层 (9 files)
 │   ├── memory/
 │   │   ├── working-memory.js                 # 3-tier: focus/context/scratchpad
 │   │   ├── episodic-memory.js                # Ebbinghaus forgetting curve
@@ -309,9 +324,10 @@ src/
 │   ├── capability-engine.js                  # 4D capability scoring
 │   ├── persona-evolution.js                  # PARL A/B testing
 │   ├── reputation-ledger.js                  # Agent reputation tracking
-│   └── soul-designer.js                      # 4 bee persona templates
+│   ├── soul-designer.js                      # 5 bee persona templates
+│   └── swarm-context-engine.js               # V5.1: Rich context builder
 │
-├── L4-orchestration/                         # 编排层 (12 files)
+├── L4-orchestration/                         # 编排层 (15 files)
 │   ├── orchestrator.js                       # DAG task decomposition
 │   ├── critical-path.js                      # CPM scheduling
 │   ├── quality-controller.js                 # Multi-rubric quality gate
@@ -323,12 +339,18 @@ src/
 │   ├── abc-scheduler.js                      # Artificial Bee Colony
 │   ├── role-discovery.js                     # k-means++ clustering
 │   ├── role-manager.js                       # MoE expert routing
-│   └── zone-manager.js                       # Jaccard auto-assign
+│   ├── zone-manager.js                       # Jaccard auto-assign
+│   ├── hierarchical-coordinator.js           # V5.1: Hierarchical swarm
+│   ├── task-dag-engine.js                    # V5.1: DAG + work-stealing + DLQ
+│   └── species-evolver.js                    # V5.1: Species evolution + GEP
 │
-├── L5-application/                           # 应用层 (10 files)
+├── L5-application/                           # 应用层 (13 files)
 │   ├── plugin-adapter.js                     # Engine lifecycle manager
 │   ├── context-service.js                    # Rich LLM context builder
 │   ├── circuit-breaker.js                    # 3-state circuit breaker
+│   ├── tool-resilience.js                    # V5.1: AJV + per-tool breaker
+│   ├── skill-governor.js                     # V5.1: Skill inventory + tracking
+│   ├── token-budget-tracker.js               # V5.1: 800-token budget coord
 │   └── tools/
 │       ├── swarm-spawn-tool.js
 │       ├── swarm-query-tool.js
@@ -338,11 +360,15 @@ src/
 │       ├── swarm-plan-tool.js
 │       └── swarm-zone-tool.js
 │
-└── L6-monitoring/                            # 监控层 (4 files)
+├── event-catalog.js                          # V5.1: 27 EventTopics + schema
+│
+└── L6-monitoring/                            # 监控层 (6 files)
     ├── state-broadcaster.js                  # SSE push to clients
     ├── metrics-collector.js                  # RED metrics (Rate/Errors/Duration)
-    ├── dashboard-service.js                  # Fastify HTTP server
-    └── dashboard.html                        # Dark theme web dashboard
+    ├── dashboard-service.js                  # Fastify HTTP + /v2 API
+    ├── dashboard.html                        # Dark theme web dashboard
+    ├── dashboard-v2.html                     # V5.1: Hex hive + DAG + particles
+    └── health-checker.js                     # V5.1: Multi-dimensional health
 
 tests/
 ├── unit/

@@ -98,11 +98,13 @@ describe('StateBroadcaster', () => {
     broadcaster.addClient(c2);
 
     bus._emit('task.completed', { taskId: 't1' });
+    broadcaster._flushBatch(); // V5.1: 手动刷新批处理 / Manually flush batch
 
     expect(c1._sent.length).toBe(1);
     expect(c2._sent.length).toBe(1);
-    expect(c1._sent[0].event).toBe('task.completed');
-    expect(c1._sent[0].data).toEqual({ taskId: 't1' });
+    // V5.1: 批处理模式下数据格式变化 / Batch mode changes data format
+    expect(c1._sent[0].event).toBe('batch');
+    expect(c1._sent[0].data[0].event).toBe('task.completed');
   });
 
   it('无客户端时广播不报错 / broadcast with no clients does not throw', () => {
@@ -119,6 +121,7 @@ describe('StateBroadcaster', () => {
     expect(broadcaster.getClientCount()).toBe(2);
 
     bus._emit('task.test', {});
+    broadcaster._flushBatch(); // V5.1: 刷新触发发送 / Flush triggers send
 
     expect(broadcaster.getClientCount()).toBe(1);
     expect(good._sent.length).toBe(1);
@@ -130,6 +133,7 @@ describe('StateBroadcaster', () => {
     broadcaster.addClient(client);
     bus._emit('task.a', {});
     bus._emit('agent.b', {});
+    broadcaster._flushBatch(); // V5.1: 刷新触发发送 / Flush triggers send
 
     const stats = broadcaster.getStats();
     expect(stats.broadcasting).toBe(true);
@@ -143,6 +147,7 @@ describe('StateBroadcaster', () => {
     clients.forEach((c) => broadcaster.addClient(c));
 
     bus._emit('task.ping', { v: 1 });
+    broadcaster._flushBatch(); // V5.1: 刷新触发发送 / Flush triggers send
 
     for (const c of clients) {
       expect(c._sent.length).toBe(1);

@@ -68,7 +68,8 @@ describe('PheromoneEngine', () => {
       });
       const ph = engine.readById(id);
       expect(ph).not.toBeNull();
-      expect(ph.intensity).toBeGreaterThanOrEqual(0.05);
+      // 浮点精度容差 / Float precision tolerance
+      expect(ph.intensity).toBeGreaterThanOrEqual(0.05 - 1e-10);
     });
   });
 

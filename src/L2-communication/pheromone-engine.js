@@ -347,21 +347,32 @@ export class PheromoneEngine {
    * ACO 轮盘赌路径选择
    * ACO roulette wheel path selection
    *
-   * 从多个路径/选项中按信息素浓度概率选择。
-   * P(select_i) = τ_i^α / Σ(τ_j^α)
+   * 从多个路径/选项中按信息素浓度 + 启发式值概率选择。
+   * P(select_i) = [τ_i^α · η_i^β] / Σ[τ_j^α · η_j^β]
    *
-   * Select from multiple paths/options by pheromone intensity probability.
+   * Select from multiple paths/options by pheromone intensity + heuristic probability.
    *
-   * @param {Array<{id: string, intensity: number}>} candidates - 候选列表 / Candidate list
+   * V5.1: 新增 beta 参数用于启发式权重（如 capability_match_score）。
+   *   beta=0 时退化为 V5.0 行为（纯信息素强度）。
+   *   调用方通过 candidate.eta 提供启发式值，缺失时中性化为 1.0。
+   *
+   * @param {Array<{id: string, intensity: number, eta?: number}>} candidates - 候选列表 / Candidate list
    * @param {number} [alpha=1.0] - 信息素权重指数 / Pheromone weight exponent
+   * @param {number} [beta=0] - 启发式权重指数 / Heuristic weight exponent (0=V5.0 compat)
    * @returns {Object | null} 选中的候选 / Selected candidate
    */
-  acoSelect(candidates, alpha = 1.0) {
+  acoSelect(candidates, alpha = 1.0, beta = 0) {
     if (!candidates || candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
 
-    // 计算概率 / Compute probabilities
-    const weights = candidates.map(c => Math.pow(c.intensity, alpha));
+    // 计算概率: [τ^α · η^β] / Compute probabilities: [τ^α · η^β]
+    const weights = candidates.map(c => {
+      const tau = Math.pow(c.intensity, alpha);
+      // ⚠️ NaN 防护: 缺失 eta 时中性化为 1.0, Math.pow(1, β)=1, 等同 V5.0
+      const eta = c.eta ?? 1.0;
+      const heuristic = beta > 0 ? Math.pow(eta, beta) : 1;
+      return tau * heuristic;
+    });
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
     if (totalWeight <= 0) {
@@ -390,13 +401,14 @@ export class PheromoneEngine {
    *
    * @param {string} targetScope - 范围 / Scope
    * @param {string} type - 信息素类型 / Pheromone type
-   * @param {number} [alpha=1.0] - 权重指数 / Weight exponent
+   * @param {number} [alpha=1.0] - 信息素权重指数 / Pheromone weight exponent
+   * @param {number} [beta=0] - 启发式权重指数 / Heuristic weight exponent
    * @returns {Object | null} 选中的信息素 / Selected pheromone
    */
-  routeByPheromone(targetScope, type, alpha = 1.0) {
+  routeByPheromone(targetScope, type, alpha = 1.0, beta = 0) {
     const pheromones = this.read(targetScope, { type });
     if (pheromones.length === 0) return null;
-    return this.acoSelect(pheromones, alpha);
+    return this.acoSelect(pheromones, alpha, beta);
   }
 
   // ━━━ MMAS 边界查询 / MMAS Bounds Query ━━━

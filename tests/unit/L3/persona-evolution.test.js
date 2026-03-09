@@ -16,7 +16,11 @@ const silentLogger = { info() {}, warn() {}, error() {}, debug() {} };
 // 模拟消息总线 / Mock message bus (records emitted events)
 const createMockBus = () => {
   const events = [];
-  return { emit(name, data) { events.push({ name, data }); }, events };
+  return {
+    emit(name, data) { events.push({ name, data }); },
+    publish(name, data) { events.push({ name, data }); },
+    events,
+  };
 };
 
 describe('PersonaEvolution', () => {
@@ -130,9 +134,10 @@ describe('PersonaEvolution', () => {
         'collaborativeness', 'autonomy', 'speed', 'thoroughness'];
       for (const param of mutableParams) {
         const val = result[param];
-        // 原始值 0.5, 缩放 [0.9, 1.1] → [0.45, 0.55] / Original 0.5, scale [0.9,1.1] → [0.45,0.55]
-        expect(val).toBeGreaterThanOrEqual(0.5 * (1 - rate) - 0.001);
-        expect(val).toBeLessThanOrEqual(0.5 * (1 + rate) + 0.001);
+        // V5.1: 加法变异 — 原始值 0.5, 加 [-0.1, 0.1] → [0.4, 0.6], 下限 0.001
+        // V5.1: Additive mutation — original 0.5, add [-0.1, 0.1] → [0.4, 0.6], min 0.001
+        expect(val).toBeGreaterThanOrEqual(Math.max(0.001, 0.5 - rate) - 0.001);
+        expect(val).toBeLessThanOrEqual(Math.min(1, 0.5 + rate) + 0.001);
       }
     });
   });

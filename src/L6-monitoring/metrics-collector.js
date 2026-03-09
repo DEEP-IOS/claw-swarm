@@ -92,7 +92,11 @@ export class MetricsCollector {
   start() {
     if (this._running) return;
 
-    const topics = ['task.*', 'agent.*', 'pheromone.*', 'quality.*', 'memory.*'];
+    // V5.1: 扩展订阅主题 / Extended topic subscriptions
+    const topics = [
+      'task.*', 'agent.*', 'pheromone.*', 'quality.*', 'memory.*',
+      'system.*', 'tool.*', 'capability.*', 'persona.*', 'species.*',
+    ];
 
     for (const topic of topics) {
       const unsub = this._messageBus.subscribe(topic, (msg) => this._onMessage(topic, msg));
@@ -261,7 +265,10 @@ export class MetricsCollector {
     this._totalRequests++;
     const topic = msg.topic || topicPattern;
 
-    const data = msg.data || {};
+    // V5.1: 支持 V5.1 包装格式 — payload 可能在 msg.data.payload 或 msg.data 中
+    // V5.1: Support wrapped format — payload may be in msg.data.payload or msg.data
+    const rawData = msg.data || {};
+    const data = rawData.payload || rawData;
 
     if (topic.startsWith('task.')) {
       const isComplete = topic.includes('complete') || topic.includes('success');
@@ -309,6 +316,21 @@ export class MetricsCollector {
         layer: data.layer || data.memoryType, timestamp: Date.now(),
       });
       this._appendTimeSeries('memory', 1);
+    } else if (topic.startsWith('system.')) {
+      // V5.1: 系统事件（健康检查、错误等） / System events (health, errors, etc.)
+      if (topic.includes('error') || topic.includes('danger')) {
+        this._totalErrors++;
+      }
+      this._appendTimeSeries('system', 1);
+    } else if (topic.startsWith('tool.')) {
+      // V5.1: 工具事件（失败、修复等） / Tool events (failures, coercion, etc.)
+      if (topic.includes('failure') || topic.includes('error')) {
+        this._totalErrors++;
+      }
+      this._appendTimeSeries('tools', 1);
+    } else if (topic.startsWith('capability.')) {
+      // V5.1: 能力更新事件 / Capability update events
+      this._appendTimeSeries('capability', 1);
     }
 
     // 如果消息包含 duration, 记录 / If message has duration, record it

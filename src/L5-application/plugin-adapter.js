@@ -96,10 +96,19 @@ import { ABCScheduler } from '../L4-orchestration/abc-scheduler.js';
 import { RoleDiscovery } from '../L4-orchestration/role-discovery.js';
 import { RoleManager } from '../L4-orchestration/role-manager.js';
 import { ZoneManager } from '../L4-orchestration/zone-manager.js';
+// V5.1 新增 / V5.1 additions
+import { HierarchicalCoordinator } from '../L4-orchestration/hierarchical-coordinator.js';
+import { TaskDAGEngine } from '../L4-orchestration/task-dag-engine.js';
+import { SpeciesEvolver } from '../L4-orchestration/species-evolver.js';
 
 // ── L5 应用层 / L5 Application ──────────────────────────────────────────────
 import { ContextService } from './context-service.js';
 import { CircuitBreaker } from './circuit-breaker.js';
+import { SkillGovernor } from './skill-governor.js';
+import { TokenBudgetTracker } from './token-budget-tracker.js';
+
+// ── V5.1 事件目录 / V5.1 Event Catalog ──────────────────────────────────────
+import { EventTopics, wrapEvent } from '../event-catalog.js';
 
 // ── 工具工厂 / Tool Factories ───────────────────────────────────────────────
 import { createSpawnTool } from './tools/swarm-spawn-tool.js';
@@ -263,7 +272,11 @@ export class PluginAdapter {
       agentRepo,
       messageBus,
       logger,
-      config: config.capability || {},
+      config: {
+        ...(config.capability || {}),
+        // V5.1: evolution.scoring 控制评分启用
+        enabled: config.evolution?.scoring ?? false,
+      },
     });
     this._engines.capabilityEngine = capabilityEngine;
 
@@ -359,6 +372,61 @@ export class PluginAdapter {
     });
     this._engines.zoneManager = zoneManager;
 
+    // V5.1: 层级蜂群协调器 / Hierarchical swarm coordinator
+    if (config.hierarchical?.enabled !== false) {
+      try {
+        const hierarchicalCoordinator = new HierarchicalCoordinator({
+          messageBus, pheromoneEngine, agentRepo,
+          logger,
+          config: config.hierarchical || {},
+        });
+        this._engines.hierarchicalCoordinator = hierarchicalCoordinator;
+        logger.info?.('[PluginAdapter] HierarchicalCoordinator initialized');
+      } catch (err) {
+        logger.warn?.(`[PluginAdapter] HierarchicalCoordinator init failed: ${err.message}`);
+      }
+    }
+
+    // V5.1: DAG 任务编排引擎 / DAG task orchestration engine
+    if (config.dagEngine?.enabled !== false && config.hierarchical?.enabled !== false) {
+      try {
+        const dagEngine = new TaskDAGEngine({
+          messageBus, pheromoneEngine, agentRepo, taskRepo,
+          capabilityEngine,
+          logger,
+          config: config.dagEngine || {},
+        });
+        this._engines.dagEngine = dagEngine;
+        logger.info?.('[PluginAdapter] TaskDAGEngine initialized');
+      } catch (err) {
+        logger.warn?.(`[PluginAdapter] TaskDAGEngine init failed: ${err.message}`);
+      }
+    }
+
+    // V5.1 Phase 4: 种群进化器（依赖 evolution.scoring）
+    // V5.1 Phase 4: Species evolver (requires evolution.scoring)
+    if (config.evolution?.scoring) {
+      try {
+        const speciesEvolver = new SpeciesEvolver({
+          messageBus,
+          capabilityEngine,
+          roleManager,
+          logger,
+          config: {
+            enabled: true,
+            clustering: config.evolution?.clustering ?? false,
+            gep: config.evolution?.gep ?? false,
+            minTasksPerAgent: config.evolution?.minTasksPerAgent ?? 10,
+            silhouetteThreshold: config.evolution?.silhouetteThreshold ?? 0.45,
+          },
+        });
+        this._engines.speciesEvolver = speciesEvolver;
+        logger.info?.('[PluginAdapter] SpeciesEvolver initialized');
+      } catch (err) {
+        logger.warn?.(`[PluginAdapter] SpeciesEvolver init failed: ${err.message}`);
+      }
+    }
+
     // ── L5: 应用层服务 ────────────────────────────────────────────────
     const contextService = new ContextService({
       workingMemory, episodicMemory, semanticMemory, contextCompressor,
@@ -374,8 +442,71 @@ export class PluginAdapter {
     });
     this._engines.circuitBreaker = circuitBreaker;
 
+    // V5.1 Phase 5: Skills 治理引擎 / V5.1 Phase 5: Skill Governor
+    if (config.skillGovernor?.enabled) {
+      try {
+        const skillGovernor = new SkillGovernor({
+          messageBus,
+          capabilityEngine,
+          roleManager,
+          logger,
+          config: {
+            enabled: true,
+            useCapabilityWeighting: config.skillGovernor?.useCapabilityWeighting ?? true,
+            skillDirs: config.skillGovernor?.skillDirs || [],
+          },
+        });
+        this._engines.skillGovernor = skillGovernor;
+        logger.info?.('[PluginAdapter] SkillGovernor initialized');
+      } catch (err) {
+        logger.warn?.(`[PluginAdapter] SkillGovernor init failed: ${err.message}`);
+      }
+    }
+
+    // V5.1: Token 预算协调器 / Token budget tracker
+    this._engines.tokenBudgetTracker = new TokenBudgetTracker({
+      totalBudget: 800,
+      quotas: {
+        swarmContext: 500,
+        skillRecommendation: 200,
+        toolFailureHint: 100,
+      },
+    });
+
+    // V5.1: 去重守卫——plugin-adapter 内部维护已发布 agent ID Set
+    // V5.1: Dedup guard — plugin-adapter maintains its own published agent ID Set
+    /** @type {Set<string>} */
+    this._publishedAgentIds = new Set();
+
     this._initialized = true;
     this._logger.info?.(`[PluginAdapter] Claw-Swarm V${VERSION} 初始化完成 / Initialized successfully`);
+  }
+
+  /**
+   * V5.1: 引擎健康自检 / Engine health self-check
+   *
+   * @returns {{ initialized: boolean, dbReachable: boolean, messageBusActive: boolean, engineCount: number }}
+   */
+  healthCheck() {
+    let dbReachable = false;
+    try {
+      const db = this._engines.dbManager;
+      if (db) {
+        // 简单查询测试 DB 可达性 / Simple query to test DB reachability
+        db._db?.prepare?.('SELECT 1')?.get?.();
+        dbReachable = true;
+      }
+    } catch {
+      // DB 不可达 / DB unreachable
+    }
+
+    return {
+      initialized: this._initialized,
+      dbReachable,
+      messageBusActive: !!(this._engines.messageBus?.subscriberCount > 0 ||
+                           this._engines.messageBus?._subscribers?.size > 0),
+      engineCount: Object.keys(this._engines).length,
+    };
   }
 
   /**
@@ -394,6 +525,18 @@ export class PluginAdapter {
     }
 
     // 逆序关闭 / Close in reverse order
+
+    // L5: V5.1 Skills 治理引擎销毁 / L5: V5.1 Skill Governor destroy
+    try { this._engines.skillGovernor?.destroy?.(); } catch (e) { this._logCloseError('skillGovernor', e); }
+
+    // L4: V5.1 种群进化器销毁 / L4: V5.1 Species evolver destroy
+    try { this._engines.speciesEvolver?.destroy?.(); } catch (e) { this._logCloseError('speciesEvolver', e); }
+
+    // L4: V5.1 DAG 引擎销毁 / L4: V5.1 DAG engine destroy
+    try { this._engines.dagEngine?.destroy?.(); } catch (e) { this._logCloseError('dagEngine', e); }
+
+    // L4: V5.1 层级协调器销毁 / L4: V5.1 Hierarchical coordinator destroy
+    try { this._engines.hierarchicalCoordinator?.destroy?.(); } catch (e) { this._logCloseError('hierarchicalCoordinator', e); }
 
     // L4: 编排层销毁 / L4: Orchestration layer destroy
     try { this._engines.orchestrator?.destroy?.(); } catch (e) { this._logCloseError('orchestrator', e); }
@@ -427,6 +570,7 @@ export class PluginAdapter {
     const engines = this._engines;
     const logger = this._logger;
     const config = this._config;
+    const publishedAgentIds = this._publishedAgentIds;
 
     return {
       // ── 1. onAgentStart: 初始化蜂群引擎 / Initialize swarm engine ──
@@ -448,6 +592,21 @@ export class PluginAdapter {
           });
         } catch (err) {
           logger.warn?.(`[Hook:onAgentStart] Agent 注册失败 / Agent registration failed: ${err.message}`);
+        }
+
+        // V5.1: 发布 agent.registered 事件（去重守卫）
+        // V5.1: Publish agent.registered event (with dedup guard)
+        if (!publishedAgentIds.has(event.agentId)) {
+          publishedAgentIds.add(event.agentId);
+          engines.messageBus?.publish?.(
+            EventTopics.AGENT_REGISTERED,
+            wrapEvent(EventTopics.AGENT_REGISTERED, {
+              agentId: event.agentId,
+              role: event.role || null,
+              tier: event.tier || 'trainee',
+              status: 'online',
+            }, 'plugin-adapter')
+          );
         }
       },
 
@@ -475,6 +634,16 @@ export class PluginAdapter {
 
         // 清除上下文缓存 / Clear context cache
         engines.contextService?.invalidateCache?.(event.agentId);
+
+        // V5.1: 发布 agent.end 事件 / Publish agent.end event
+        engines.messageBus?.publish?.(
+          EventTopics.AGENT_END,
+          wrapEvent(EventTopics.AGENT_END, {
+            agentId: event.agentId,
+            status: 'offline',
+          }, 'plugin-adapter')
+        );
+        publishedAgentIds.delete(event.agentId);
       },
 
       // ── 3. onSubAgentSpawn: 注入 SOUL 片段 + Trace 传播 / Inject SOUL snippet + Trace propagation ──
@@ -563,6 +732,16 @@ export class PluginAdapter {
           logger.warn?.(`[Hook:onSubAgentComplete] 声誉更新失败 / Reputation update failed: ${err.message}`);
         }
 
+        // V5.1: 发布 task.completed 事件 / Publish task.completed event
+        engines.messageBus?.publish?.(
+          EventTopics.TASK_COMPLETED,
+          wrapEvent(EventTopics.TASK_COMPLETED, {
+            taskId: event.taskId,
+            agentId: event.subAgentId,
+            verdict: qualityResult?.verdict || 'unknown',
+          }, 'plugin-adapter', { traceId })
+        );
+
         return { qualityResult, traceId };
       },
 
@@ -601,6 +780,16 @@ export class PluginAdapter {
           reason: event.reason,
           abortedAt: Date.now(),
         });
+
+        // V5.1: 发布 task.failed 事件 / Publish task.failed event
+        engines.messageBus?.publish?.(
+          EventTopics.TASK_FAILED,
+          wrapEvent(EventTopics.TASK_FAILED, {
+            taskId: event.taskId,
+            agentId: event.subAgentId,
+            reason: event.reason,
+          }, 'plugin-adapter', { traceId })
+        );
       },
 
       // ── 6. onToolCall: 工具调用拦截/监控 ─────────────────────────

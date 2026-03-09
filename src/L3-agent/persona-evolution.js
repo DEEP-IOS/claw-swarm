@@ -142,7 +142,7 @@ export class PersonaEvolution {
       'underperformer detection complete / 低绩效检测完成',
     );
 
-    this._messageBus.emit('persona.underperformers.detected', {
+    this._messageBus.publish?.('persona.underperformers.detected', {
       taskType,
       count: underperformers.length,
       personaIds: underperformers.map((u) => u.personaId),
@@ -178,9 +178,11 @@ export class PersonaEvolution {
     for (const param of MUTABLE_PARAMS) {
       if (typeof mutated[param] === 'number') {
         const original = mutated[param];
-        // 随机缩放: 在 [1-rate, 1+rate] 范围 / Random scale within [1-rate, 1+rate]
-        const scale = 1 + (Math.random() * 2 - 1) * rate;
-        mutated[param] = Math.max(0, Math.min(1, original * scale));
+        // V5.1 fix: 加法变异替代乘法变异（消除零值陷阱）
+        // V5.1 fix: Additive mutation replaces multiplicative (eliminates zero-value trap)
+        // clamp(original + random(-rate, +rate), 0.001, 1.0)
+        const delta = (Math.random() * 2 - 1) * rate;
+        mutated[param] = Math.max(0.001, Math.min(1, original + delta));
         mutated[param] = Math.round(mutated[param] * 1000) / 1000;
 
         if (mutated[param] !== original) {
@@ -206,7 +208,7 @@ export class PersonaEvolution {
       mutations,
     });
 
-    this._messageBus.emit('persona.mutated', {
+    this._messageBus.publish?.('persona.mutated', {
       personaId,
       mutatedId,
       mutations,
@@ -262,7 +264,7 @@ export class PersonaEvolution {
       trials,
     });
 
-    this._messageBus.emit('persona.abtest.started', {
+    this._messageBus.publish?.('persona.abtest.started', {
       testId,
       personaA,
       personaB,
@@ -342,11 +344,37 @@ export class PersonaEvolution {
     };
 
     this._logEvolution('ab_test_completed', winner, { testId, metrics });
-    this._messageBus.emit('persona.abtest.completed', { testId, winner, metrics });
+    this._messageBus.publish?.('persona.abtest.completed', { testId, winner, metrics });
 
     this._logger.info({ testId, winner, margin: metrics.margin }, 'A/B test evaluated / A/B 测试评估完成');
 
+    // V5.1: 清理已完成测试, 防止 _abTests Map 无限增长
+    // V5.1: Remove completed test to prevent unbounded _abTests Map growth
+    this._abTests.delete(testId);
+
     return { winner, metrics };
+  }
+
+  /**
+   * 清理过期的 A/B 测试记录 / Prune stale A/B test records
+   *
+   * 移除超过 maxAge 仍未完成的测试（防止僵尸测试占用内存）。
+   * Remove tests that have been pending for longer than maxAge.
+   *
+   * @param {number} [maxAgeMs=3600000] - 最大存活时间 (默认 1h) / Max age in ms (default 1h)
+   * @returns {number} 清理数量 / Number of pruned tests
+   */
+  pruneStaleTests(maxAgeMs = 3600000) {
+    const now = Date.now();
+    let pruned = 0;
+    for (const [id, test] of this._abTests) {
+      const age = now - (test.startedAt || 0);
+      if (age > maxAgeMs) {
+        this._abTests.delete(id);
+        pruned++;
+      }
+    }
+    return pruned;
   }
 
   // --------------------------------------------------------------------------
@@ -400,7 +428,7 @@ export class PersonaEvolution {
 
     // 持久化 (通过 agentRepo 或消息总线通知外部存储)
     // Persist via agentRepo or notify external storage via message bus
-    this._messageBus.emit('persona.capsule.promoted', capsule);
+    this._messageBus.publish?.('persona.capsule.promoted', capsule);
 
     this._logEvolution('capsule_promoted', personaId, { capsuleId, stats: capsule.stats });
 
@@ -464,7 +492,7 @@ export class PersonaEvolution {
       notes: null,
     });
 
-    this._messageBus.emit('persona.outcome.recorded', {
+    this._messageBus.publish?.('persona.outcome.recorded', {
       personaId: outcome.personaId,
       taskType: outcome.taskType,
       success: outcome.success,

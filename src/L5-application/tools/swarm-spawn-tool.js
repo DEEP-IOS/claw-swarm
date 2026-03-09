@@ -1,8 +1,8 @@
 /**
  * SwarmSpawnTool -- 蜂群生成工具 / Swarm Spawn Tool
  *
- * V5.0 L5 应用层工具: 创建和管理子代理, 基于 MoE 角色选择。
- * V5.0 L5 Application Layer tool: Create and manage sub-agents
+ * V5.1 L5 应用层工具: 创建和管理子代理, 基于 MoE 角色选择。
+ * V5.1 L5 Application Layer tool: Create and manage sub-agents
  * with MoE-based role selection.
  *
  * 动作 / Actions:
@@ -10,6 +10,11 @@
  *           Create sub-agent (MoE role recommendation + task creation + recruit pheromone)
  * - list:   列出活跃子代理 / List active sub-agents
  * - cancel: 取消子代理 / Cancel a sub-agent
+ *
+ * V5.1 增强 / V5.1 Enhancements:
+ * - 子 Agent 可再 spawn（层级蜂群支持）/ Child agents can re-spawn (hierarchical swarm)
+ * - 全局并发上限检查 / Global concurrency limit check
+ * - DAG 任务关联 / DAG task association
  *
  * @module L5-application/tools/swarm-spawn-tool
  * @author DEEP-IOS
@@ -64,6 +69,15 @@ const inputSchema = {
       type: 'boolean',
       description: '是否自动执行 / Whether to auto-execute (default true)',
     },
+    // V5.1: DAG 关联 / DAG association
+    dagId: {
+      type: 'string',
+      description: 'DAG 编排 ID (V5.1) / DAG orchestration ID (optional)',
+    },
+    dagNodeId: {
+      type: 'string',
+      description: 'DAG 任务节点 ID (V5.1) / DAG task node ID (optional)',
+    },
     // list 参数 / list params (parentTaskId reused)
     // cancel 参数 / cancel params
     agentId: {
@@ -95,6 +109,8 @@ export function createSpawnTool({ engines, logger }) {
     pheromoneEngine,
     messageBus,
     soulDesigner,
+    hierarchicalCoordinator,
+    dagEngine,
   } = engines;
 
   /**
@@ -127,6 +143,18 @@ export function createSpawnTool({ engines, logger }) {
     }
 
     logger.info?.(`[SwarmSpawnTool] 生成子代理请求 / Spawn request: "${taskDescription.substring(0, 80)}"`);
+
+    // V5.1: 全局并发检查 / Global concurrency check
+    if (hierarchicalCoordinator) {
+      const stats = hierarchicalCoordinator.getStats();
+      if (stats.currentActiveAgents >= stats.swarmMaxAgents) {
+        return {
+          success: false,
+          error: `蜂群 Agent 数已达上限 (${stats.currentActiveAgents}/${stats.swarmMaxAgents}) / ` +
+            `Swarm agent limit reached (${stats.currentActiveAgents}/${stats.swarmMaxAgents})`,
+        };
+      }
+    }
 
     // Step 1: MoE 角色推荐 / MoE role recommendation
     let recommendedRoles = [];

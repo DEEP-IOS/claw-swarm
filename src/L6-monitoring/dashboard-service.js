@@ -5,10 +5,15 @@
  * V5.0 L6 Monitoring Layer: provides HTTP REST API + SSE streaming dashboard.
  *
  * 路由 / Routes:
- * - GET /          → 静态 HTML 仪表板 / Static HTML dashboard
- * - GET /api/metrics → 当前指标快照 / Current metrics snapshot
- * - GET /api/stats   → 系统统计 / System stats
- * - GET /events      → SSE 事件流 / SSE event stream
+ * - GET /                       → V1 静态 HTML 仪表板 / V1 Static HTML dashboard
+ * - GET /v2                     → V2 蜂巢可视化仪表板 / V2 Hive visualization dashboard
+ * - GET /api/metrics            → 当前指标快照 / Current metrics snapshot
+ * - GET /api/stats              → 系统统计 / System stats
+ * - GET /events                 → SSE 事件流 / SSE event stream
+ * - GET /api/v1/traces/:traceId → 追踪查询 (V5.1) / Trace query
+ * - GET /api/v1/topology        → 力导向拓扑数据 (V5.1) / Topology data
+ * - GET /api/v1/affinity        → 任务亲和度矩阵 (V5.1) / Task affinity matrix
+ * - GET /api/v1/dead-letters    → 死信队列 (V5.1) / Dead letter queue
  *
  * 注意: Fastify 为可选依赖, 不可用时服务优雅降级。
  * Note: Fastify is optional; service degrades gracefully if unavailable.
@@ -40,13 +45,16 @@ export class DashboardService {
    * @param {import('../L2-communication/message-bus.js').MessageBus} [deps.messageBus]
    * @param {Object} [deps.logger]
    * @param {number} [deps.port=19100]
+   * @param {Object} [deps.db] - better-sqlite3 database instance for V5.1 queries
    */
-  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port }) {
+  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port, db }) {
     this._broadcaster = stateBroadcaster;
     this._metrics = metricsCollector;
     this._messageBus = messageBus || null;
     this._logger = logger || console;
     this._port = port || DEFAULT_PORT;
+    /** @type {Object | null} SQLite DB for V5.1 API queries */
+    this._db = db || null;
 
     /** @type {Object | null} Fastify 实例 / Fastify instance */
     this._server = null;
@@ -149,6 +157,17 @@ export class DashboardService {
       }
     });
 
+    // GET /v2 → V2 蜂巢可视化仪表板 / V2 Hive visualization dashboard
+    server.get('/v2', (req, reply) => {
+      try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const html = readFileSync(join(__dirname, 'dashboard-v2.html'), 'utf-8');
+        reply.type('text/html').send(html);
+      } catch {
+        reply.type('text/html').send('<h1>Claw-Swarm V5.1 Dashboard V2</h1><p>dashboard-v2.html not found</p>');
+      }
+    });
+
     // GET /api/metrics → 指标快照 / Metrics snapshot
     server.get('/api/metrics', (req, reply) => {
       reply.send(this._metrics.getSnapshot());
@@ -190,6 +209,89 @@ export class DashboardService {
       req.raw.on('close', () => {
         remove();
       });
+    });
+
+    // ━━━ V5.1 REST API 端点 / V5.1 REST API Endpoints ━━━
+
+    // GET /api/v1/traces/:traceId → 分布式追踪查询 / Distributed trace query
+    server.get('/api/v1/traces/:traceId', (req, reply) => {
+      const { traceId } = req.params;
+      if (!traceId) {
+        return reply.status(400).send({ error: 'traceId is required' });
+      }
+      // V5.2: 从 span 存储查询完整追踪树。当前返回空 span 列表（追踪收集在 V5.2 激活）
+      // V5.2: Query full span tree from span storage. Currently returns empty (trace collection activates in V5.2)
+      const snapshot = this._metrics.getSnapshot();
+      reply.send({
+        traceId,
+        spans: [],
+        summary: {
+          totalSpans: 0,
+          agents: snapshot.agents?.length || 0,
+          note: 'Trace collection will be activated in V5.2',
+        },
+      });
+    });
+
+    // GET /api/v1/topology → 力导向拓扑数据 / Force-directed topology data
+    server.get('/api/v1/topology', (req, reply) => {
+      const snapshot = this._metrics.getSnapshot();
+      const agents = snapshot.agents || [];
+      const pheromones = snapshot.pheromones || [];
+
+      // 构建节点+边 / Build nodes + edges
+      const nodes = agents.map(a => ({
+        id: a.agentId || a.id,
+        role: a.role,
+        status: a.status || 'unknown',
+        score: a.score || 0,
+      }));
+
+      const edges = [];
+      for (const p of pheromones) {
+        if (p.intensity > 0.1 && p.sourceId && p.targetScope) {
+          edges.push({
+            source: p.sourceId,
+            target: p.targetScope,
+            type: p.type,
+            intensity: p.intensity,
+          });
+        }
+      }
+
+      reply.send({ nodes, edges, timestamp: Date.now() });
+    });
+
+    // GET /api/v1/affinity → 任务亲和度矩阵 / Task affinity matrix
+    server.get('/api/v1/affinity', (req, reply) => {
+      if (!this._db) {
+        return reply.send({ matrix: [], note: 'Database not available' });
+      }
+      try {
+        const rows = this._db.prepare(
+          'SELECT agent_id, task_type, affinity, total_tasks, successes FROM task_affinity ORDER BY agent_id, affinity DESC'
+        ).all();
+        reply.send({ matrix: rows, timestamp: Date.now() });
+      } catch {
+        reply.send({ matrix: [], note: 'task_affinity table not yet populated' });
+      }
+    });
+
+    // GET /api/v1/dead-letters → 死信队列查询 / Dead letter queue query
+    server.get('/api/v1/dead-letters', (req, reply) => {
+      if (!this._db) {
+        return reply.send({ entries: [], total: 0, note: 'Database not available' });
+      }
+      try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const rows = this._db.prepare(
+          'SELECT * FROM dead_letter_tasks ORDER BY created_at DESC LIMIT ?'
+        ).all(limit);
+        const total = this._db.prepare('SELECT COUNT(*) as count FROM dead_letter_tasks').get();
+        reply.send({ entries: rows, total: total?.count || 0, timestamp: Date.now() });
+      } catch {
+        reply.send({ entries: [], total: 0, note: 'dead_letter_tasks table not yet populated' });
+      }
     });
   }
 }

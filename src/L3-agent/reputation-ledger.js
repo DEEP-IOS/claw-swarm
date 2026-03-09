@@ -140,7 +140,7 @@ export class ReputationLedger {
     });
 
     // 发布事件 / Emit event
-    this._messageBus.emit('reputation.updated', {
+    this._messageBus.publish?.('reputation.updated', {
       agentId,
       dimension,
       previousScore: current,
@@ -264,7 +264,7 @@ export class ReputationLedger {
       this._agentRepo.createCapability(agentId, `rep_${dim}`, rounded);
     }
 
-    this._messageBus.emit('reputation.decayed', { agentId, factor });
+    this._messageBus.publish?.('reputation.decayed', { agentId, factor });
     this._logger.debug({ agentId, factor }, 'reputation decayed / 声誉已衰减');
   }
 

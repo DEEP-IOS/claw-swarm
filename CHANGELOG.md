@@ -4,6 +4,104 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.1.0] - 2026-03-09
+
+### Enhancement: Resilience, Hierarchy & Monitoring / 增强：韧性、层级蜂群与监控
+
+Claw-Swarm V5.1 adds 11 new source files, 4 new database tables, 8 new OpenClaw hooks (total 14), and comprehensive production hardening. 573 tests across 30+ test files.
+
+Claw-Swarm V5.1 新增 11 个源文件、4 张数据库表、8 个新 OpenClaw 钩子（共 14 个），全面生产加固。30+ 测试文件共 573 个测试。
+
+### New Source Files (11) / 新增源文件
+
+#### L1 Infrastructure / L1 基础设施层
+- **MonotonicClock** (`monotonic-clock.js`): `process.hrtime.bigint()` monotonic timing utility for accurate duration measurement
+  基于 `process.hrtime.bigint()` 的单调时钟，用于精确耗时测量
+
+#### L3 Agent / L3 智能体层
+- **SwarmContextEngine** (`swarm-context-engine.js`): Rich context builder with legacy delegation, TTL-based caching, and automatic context assembly (Working Memory + Recent Events + Knowledge + Pheromone Signals + Peer Agents)
+  丰富上下文引擎，支持遗留委托、TTL 缓存、自动上下文组装
+
+#### L4 Orchestration / L4 编排层
+- **HierarchicalCoordinator** (`hierarchical-coordinator.js`): Hierarchical swarm with configurable depth limit and concurrency control. Enables agents to spawn sub-agents within governance bounds
+  层级蜂群协调器，可配置深度和并发限制，允许 Agent 在治理边界内派生子 Agent
+- **TaskDAGEngine** (`task-dag-engine.js`): Advanced DAG orchestration with auction-based task allocation, work-stealing, and dead letter queue (DLQ)
+  高级 DAG 编排引擎，支持拍卖式任务分配、工作窃取和死信队列
+- **SpeciesEvolver** (`species-evolver.js`): Species proposal, trial, and culling with GEP tournament. Enables organic evolution of agent role types
+  物种进化器，支持提议→试用→淘汰 + GEP 锦标赛
+
+#### L5 Application / L5 应用层
+- **ToolResilience** (`tool-resilience.js`): AJV pre-validation + per-tool circuit breaker + retry prompt injection for automatic tool call recovery
+  AJV 预校验 + 工具级断路器 + 重试提示注入
+- **SkillGovernor** (`skill-governor.js`): Skill inventory, usage tracking, and recommendation engine
+  技能治理器：清单管理 + 使用追踪 + 推荐引擎
+- **TokenBudgetTracker** (`token-budget-tracker.js`): 800-token budget coordinator for prompt injection context management
+  800 token 预算协调器，用于提示注入上下文管理
+
+#### L6 Monitoring / L6 监控层
+- **HealthChecker** (`health-checker.js`): Multi-dimensional health check with event-driven detection and adaptive polling
+  多维健康检查，事件驱动 + 自适应轮询
+- **dashboard-v2.html**: Enhanced dashboard with hex hive visualization, DAG task graph, pheromone particle animation, and radar capability charts
+  增强版仪表盘：六边形蜂巢视图 + DAG 任务图 + 信息素粒子动画 + 雷达能力图
+
+#### Root / 根目录
+- **EventCatalog** (`event-catalog.js`): 27 EventTopics with unified event schema, serving as the single source of truth for all swarm events
+  27 个事件主题 + 统一事件 schema，蜂群事件的唯一真相源
+
+### Key Modifications / 重要修改
+
+- **index.js**: 14 OpenClaw hooks (V5.0: 6 → V5.1: +8 new hooks including `gateway_start`, `before_model_resolve`, `before_tool_call`, `before_prompt_build`, `llm_output`, `subagent_spawning`, `subagent_spawned`, `subagent_ended`). Feature flag dependency validation added
+  14 个 OpenClaw 钩子（V5.0 的 6 个 + 8 个新钩子），新增特性标志依赖校验
+- **plugin-adapter.js**: MessageBus event publishing integration, SkillGovernor and TokenBudgetTracker initialization
+  消息总线事件发布集成，技能治理器和预算追踪器初始化
+- **database-schemas.js**: 4 new tables (`breaker_state`, `repair_memory`, `dead_letter_tasks`, `task_affinity`), SCHEMA_VERSION upgraded to 6. Total 38 tables
+  4 张新表，SCHEMA_VERSION 升至 6，共 38 张表
+- **pheromone-engine.js**: `acoSelect()` now supports beta parameter for full ACO formula `[τ^α · η^β]`
+  `acoSelect()` 支持 β 参数，实现完整 ACO 公式
+- **capability-engine.js**: Added `recordObservation()`, fixed `emit` → `publish` for MessageBus compatibility
+- **persona-evolution.js**: Fixed `emit` → `publish`, added `_abTests` memory cleanup
+- **reputation-ledger.js**: Fixed `emit` → `publish`
+- **dashboard-service.js**: Added `/v2` route + 4 REST API endpoints (`traces`, `topology`, `affinity`, `dead-letters`)
+- **state-broadcaster.js**: Extended topic subscriptions for V5.1 event types
+- **metrics-collector.js**: Extended topic subscriptions + new V5.1 metrics
+
+### Feature Flags / 特性标志
+
+V5.1 introduces a feature flag system for gradual rollout:
+
+V5.1 引入特性标志系统，支持渐进式启用：
+
+| Flag | Default | Description / 说明 |
+|------|---------|---|
+| `toolResilience` | ✅ enabled | AJV validation + circuit breaker / AJV 校验 + 断路器 |
+| `healthChecker` | ✅ enabled | Multi-dimensional health / 多维健康检查 |
+| `hierarchical` | ✅ enabled | Hierarchical swarm / 层级蜂群 |
+| `dagEngine` | ✅ enabled | DAG orchestration / DAG 编排 |
+| `workStealing` | ✅ enabled | Work-stealing scheduler / 工作窃取调度 |
+| `taskAffinity` | ✅ enabled | Task affinity tracking / 任务亲和追踪 |
+| `evolution.scoring` | ✅ enabled | Evolution scoring / 进化评分 |
+| `contextEngine` | ❌ disabled | V5.1 context engine / 上下文引擎 |
+| `skillGovernor` | ❌ disabled | Skill governance / 技能治理 |
+| `speculativeExecution` | ❌ disabled | Speculative execution / 推测执行 |
+
+### Agent Personas / 智能体人格
+
+- **designer-bee** persona added as the 5th built-in bee persona, optimized for visualization, UI/UX design, and aesthetic review
+  新增 designer-bee（设计蜂）作为第 5 个内置蜜蜂人格，专注可视化、UI/UX 设计和审美评审
+
+### Database / 数据库
+- 4 new tables: `breaker_state`, `repair_memory`, `dead_letter_tasks`, `task_affinity`
+  4 张新表
+- Total: 38 tables (up from 34 in V5.0)
+  共 38 张表（V5.0 为 34 张）
+- SCHEMA_VERSION: 6 (up from 5)
+
+### Test Coverage / 测试覆盖
+- 573 tests across 30+ files (up from 471 in V5.0)
+  573 个测试（V5.0 为 471 个）
+
+---
+
 ## [5.0.0] - 2026-03-08
 
 ### Major: Complete Ground-Up Rewrite / 重大变更：完全重写
