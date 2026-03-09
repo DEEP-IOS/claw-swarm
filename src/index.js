@@ -72,7 +72,7 @@ import { EventTopics, wrapEvent } from './event-catalog.js';
 // 常量 / Constants
 // ============================================================================
 
-const VERSION = '5.1.0';
+const VERSION = '5.2.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 

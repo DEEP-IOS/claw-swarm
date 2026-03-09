@@ -2,9 +2,9 @@
 
 ## Concept / 概念
 
-Pheromones are **time-decaying environmental signals** inspired by ant colony communication. In nature, ants deposit chemical trails that evaporate over time, creating a distributed, stigmergic coordination mechanism. Claw-Swarm v4.0 applies this concept to multi-agent AI systems.
+Pheromones are **time-decaying environmental signals** inspired by ant colony communication. In nature, ants deposit chemical trails that evaporate over time, creating a distributed, stigmergic coordination mechanism. Claw-Swarm applies this concept to multi-agent AI systems.
 
-信息素是受蚁群通信启发的**随时间衰减的环境信号**。自然界中蚂蚁留下随时间蒸发的化学痕迹，创造分布式协调机制。Claw-Swarm v4.0 将此概念应用于多智能体 AI 系统。
+信息素是受蚁群通信启发的**随时间衰减的环境信号**。自然界中蚂蚁留下随时间蒸发的化学痕迹，创造分布式协调机制。Claw-Swarm 将此概念应用于多智能体 AI 系统。
 
 ### Why Pheromones, Not Just Memory? / 为什么用信息素而非记忆？
 
@@ -192,3 +192,69 @@ This reduces false positives from ~40% to ~10% in scenarios where external servi
 Set `pheromone.enabled = false` to completely disable the pheromone subsystem. No DB tables are accessed, no background service runs, no snapshot injection occurs.
 
 设置 `pheromone.enabled = false` 完全禁用信息素子系统。不访问 DB 表、不运行后台服务、不注入快照。
+
+---
+
+## V5.2 Enhancements / V5.2 增强
+
+### Pressure Gradient Auto-Escalation / 压力梯度自动升级
+
+V5.2 introduces `PheromoneResponseMatrix` — a scanning module that monitors pheromone pressure and auto-escalates when a threshold is exceeded.
+
+V5.2 引入信息素响应矩阵 — 扫描模块，监控信息素压力并在超阈值时自动升级。
+
+**Pressure formula / 压力公式:**
+
+```
+pressure = base_intensity * (1 + k * log(1 + age_minutes))
+```
+
+Where:
+- `base_intensity`: Current pheromone intensity after decay
+- `k`: Escalation rate constant (configurable, default 0.5)
+- `age_minutes`: Time since emission in minutes
+
+When pressure exceeds the escalation threshold, the matrix emits a `PHEROMONE_ESCALATED` event and may trigger replanning or reinforcement.
+
+当压力超过升级阈值时，矩阵发射 `PHEROMONE_ESCALATED` 事件，可能触发重规划或强化。
+
+Feature flag: `pheromoneEscalation` (enabled by default)
+
+### Multi-Type Pheromone Decay / 多类型信息素衰减
+
+V5.2 extends the PheromoneEngine with `computeTypedDecay()` — different pheromone types now have distinct decay behaviors:
+
+V5.2 扩展信息素引擎，不同类型有不同的衰减行为：
+
+| Type | Decay Model | Formula / 公式 | Rationale / 原理 |
+|------|-------------|----------------|-------------------|
+| `trail` | Linear | `I(t) = I0 * max(0, 1 - rate * t)` | Work traces fade steadily / 工作痕迹均匀衰减 |
+| `alarm` | Step (threshold) | `I(t) = t < halflife ? I0 : 0` | Warnings either active or gone / 警报非有即无 |
+| `recruit` | Exponential | `I(t) = I0 * e^(-rate * t)` | Help requests fade gradually / 求助信号逐渐消退 |
+| `food` | Exponential | `I(t) = I0 * e^(-rate * t)` | Resource signals standard decay / 资源信号标准衰减 |
+| `danger` | Step (threshold) | `I(t) = t < halflife ? I0 : 0` | Danger alerts binary / 危险警报二元化 |
+
+Feature flag: `multiTypePheromone` (enabled by default)
+
+### StigmergicBoard / 公告板
+
+V5.2 adds a persistent bulletin board that complements short-lived pheromones:
+
+V5.2 新增持久公告板，补充短寿信息素：
+
+```
+Pheromone: short-lived (minutes), auto-decay, intensity-based
+StigmergicBoard: long-lived (TTL-based), persistent, text-based
+
+信息素：短寿命（分钟级），自动衰减，强度驱动
+公告板：长寿命（TTL 控制），持久化，文本驱动
+```
+
+**API / 接口:**
+- `post({ authorId, scope, title, content, category, priority, ttlMinutes })` → post ID
+- `read(scope, { category?, limit? })` → post array
+- `expireOld()` → cleanup count
+
+Posts are stored in the `stigmergic_posts` table and auto-expired by TTL.
+
+公告存储在 `stigmergic_posts` 表中，按 TTL 自动过期。

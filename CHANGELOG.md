@@ -4,6 +4,76 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.2.0] - 2026-03-09
+
+### Enhancement: Bio-Inspired Ecology, Stigmergic Coordination & Observability / 增强：仿生生态、间接协调与可观测性
+
+Claw-Swarm V5.2 adds 5 new source modules, 6 new database tables (total 44), 10 new event topics (total 37), and 8 new test files (86 tests). 659 tests across 43 test files. SCHEMA_VERSION upgraded to 7.
+
+Claw-Swarm V5.2 新增 5 个源模块、6 张新数据库表（共 44 张）、10 个新事件主题（共 37 个）、8 个新测试文件（86 个测试）。43 测试文件共 659 个测试。SCHEMA_VERSION 升至 7。
+
+### New Source Files (5) / 新增源文件
+
+#### L2 Communication / L2 通信层
+- **PheromoneResponseMatrix** (`pheromone-response-matrix.js`): Pheromone pressure gradient with auto-escalation scanning. Formula: `intensity = base * (1 + k * log(1 + age_minutes))`
+  信息素压力梯度矩阵，自动升级扫描
+- **StigmergicBoard** (`stigmergic-board.js`): Persistent bulletin board for indirect coordination. Posts with TTL, categories, priorities, and scope-based querying
+  持久公告板，支持 TTL、分类、优先级、范围查询
+
+#### L3 Agent / L3 智能体层
+- **ResponseThreshold** (`response-threshold.js`): FRTM (Fixed Response Threshold Model) with per-agent/task-type thresholds and PI controller: `threshold_new = threshold_old - Kp * error - Ki * integral(error)`
+  固定响应阈值模型 + PI 控制器自适应调节
+- **FailureVaccination** (`failure-vaccination.js`): Pattern-based failure immunization with effectiveness feedback loop. Register → find → apply → track outcomes
+  基于模式的失败免疫，效果反馈循环
+- **SkillSymbiosisTracker** (`skill-symbiosis.js`): Cosine-similarity-based agent complementarity tracking for optimal agent pairing
+  余弦相似度互补性追踪，最优 Agent 配对
+
+### Key Modifications / 重要修改
+
+- **event-catalog.js**: 10 new V5.2 event topics (PHEROMONE_ESCALATED, PHEROMONE_RESPONSE_TRIGGERED, SYSTEM_STARTUP, CIRCUIT_BREAKER_TRANSITION, STIGMERGIC_POST_CREATED/EXPIRED, FAILURE_VACCINE_CREATED/APPLIED, THRESHOLD_ADJUSTED/TRIGGERED). Total 37 topics
+  10 个新事件主题，共 37 个
+- **database-schemas.js**: 6 new tables (agent_thresholds, pheromone_type_config, stigmergic_posts, failure_vaccines, trace_spans, skill_symbiosis). SCHEMA_VERSION 6 → 7. Total 44 tables
+  6 张新表，SCHEMA_VERSION 升至 7，共 44 张
+- **pheromone-engine.js**: Added `autoEscalate()` and `computeTypedDecay()` methods for multi-type pheromone support (trail=linear, alarm=step, recruit=exponential)
+  新增自动升级和类型化衰减方法
+- **species-evolver.js**: Activated Lotka-Volterra population dynamics (`performLVDynamics()`) and ABC three-stage evolution (`performABCEvolution()`)
+  激活 Lotka-Volterra 种群动力学和 ABC 三阶段进化
+- **tool-resilience.js**: Added adaptive repair memory (`findRepairStrategy()`, `recordRepairOutcome()`) backed by `repair_memory` DB table
+  新增自适应修复记忆
+- **health-checker.js**: Added idle detection with 5-minute threshold, automatic recruit pheromone emission for idle agents
+  新增空闲检测，5 分钟阈值，自动发射招募信息素
+- **dashboard-service.js**: 4 new REST endpoints (`/api/v1/context-debug`, `/api/v1/breaker-status`, `/api/v1/trace-spans`, `/api/v1/startup-summary`)
+  4 个新 REST 端点
+- **state-broadcaster.js**: Extended with V5.2 topic subscriptions (circuit_breaker.*, stigmergic.*, failure.*, threshold.*)
+  扩展 V5.2 主题订阅
+- **index.js**: V5.2 module initialization (5 new modules with try/catch guards), SYSTEM_STARTUP event emission with full feature flags summary
+  V5.2 模块初始化 + SYSTEM_STARTUP 启动诊断事件
+
+### Feature Flags (new in V5.2) / 新增特性标志
+
+| Flag | Default | Description / 说明 |
+|------|---------|---|
+| `pheromoneEscalation` | ✅ enabled | Pressure gradient auto-escalation / 信息素压力梯度自动升级 |
+| `responseThreshold` | ✅ enabled | FRTM per-agent thresholds / 固定响应阈值 |
+| `multiTypePheromone` | ✅ enabled | Typed decay (trail/alarm/recruit) / 多类型信息素衰减 |
+| `evolution.lotkaVolterra` | ✅ enabled | Lotka-Volterra population dynamics / 种群竞争动力学 |
+| `evolution.abc` | ✅ enabled | ABC three-stage evolution / ABC 三阶段进化 |
+
+### Database / 数据库
+- 6 new tables: `agent_thresholds`, `pheromone_type_config`, `stigmergic_posts`, `failure_vaccines`, `trace_spans`, `skill_symbiosis`
+  6 张新表
+- Total: 44 tables (up from 38 in V5.1)
+  共 44 张表（V5.1 为 38 张）
+- SCHEMA_VERSION: 7 (up from 6)
+
+### Test Coverage / 测试覆盖
+- 659 tests across 43 files (up from 573 in V5.1)
+  659 个测试（V5.1 为 573 个）
+- 8 new test files (86 tests): pheromone-response-matrix, stigmergic-board, response-threshold, failure-vaccination, skill-symbiosis, species-evolver-v52, tool-resilience-v52, health-checker-v52
+  8 个新测试文件
+
+---
+
 ## [5.1.0] - 2026-03-09
 
 ### Enhancement: Resilience, Hierarchy & Monitoring / 增强：韧性、层级蜂群与监控

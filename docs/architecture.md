@@ -1,8 +1,8 @@
-# Claw-Swarm V5.1 — Technical Architecture / 技术架构
+# Claw-Swarm V5.2 — Technical Architecture / 技术架构
 
-> V5.1 builds on the V5.0 ground-up rewrite with additional resilience, hierarchical swarm, and monitoring enhancements. This document describes the 6-layer implementation architecture, component responsibilities, data flows, and design rationale.
+> V5.2 builds on V5.1 with bio-inspired ecology (Lotka-Volterra, ABC evolution), stigmergic coordination, failure vaccination, FRTM response thresholds, skill symbiosis, pheromone pressure gradients, Jaeger-lite tracing, and idle detection. This document describes the 6-layer implementation architecture, component responsibilities, data flows, and design rationale.
 >
-> V5.1 在 V5.0 完全重写基础上增加韧性、层级蜂群和监控增强。本文档描述 6 层实现架构、组件职责、数据流与设计原理。
+> V5.2 在 V5.1 基础上增加仿生生态（Lotka-Volterra、ABC 进化）、公告板协调、失败免疫、FRTM 响应阈值、技能共生、信息素压力梯度、Jaeger-lite 追踪和空闲检测。本文档描述 6 层实现架构、组件职责、数据流与设计原理。
 
 ---
 
@@ -81,7 +81,7 @@ V5.0 将 V4.0 的 4 层结构替换为 **6 层架构**，更清晰地分离关�
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-**File count / 文件计数:** L1(18) + L2(4) + L3(9) + L4(15) + L5(13) + L6(6) + event-catalog = **66+ source files**
+**File count / 文件计数:** L1(18) + L2(6) + L3(12) + L4(15) + L5(13) + L6(6) + event-catalog = **75+ source files**
 
 ### Dependency Rules / 依赖规则
 
@@ -165,7 +165,7 @@ export class XxxRepo {
 
 | File | Content |
 |---|---|
-| `database-schemas.js` | 38 `TABLE_SCHEMAS` constants (CREATE TABLE SQL strings, V5.1: +4 tables) |
+| `database-schemas.js` | 44 `TABLE_SCHEMAS` constants (CREATE TABLE SQL strings, V5.1: +4, V5.2: +6 tables) |
 | `config-schemas.js` | Zod schemas for all configuration sections |
 | `message-schemas.js` | Zod schemas for inter-component message validation |
 
@@ -179,12 +179,12 @@ export class XxxRepo {
 
 ---
 
-### L2 Communication / 通信层 (4 files)
+### L2 Communication / 通信层 (6 files)
 
 Provides all inter-component messaging primitives. No agent logic, no
-orchestration decisions -- pure message transport and signal mechanics.
+orchestration decisions -- pure message transport and signal mechanics. V5.2 adds PheromoneResponseMatrix for pressure gradient auto-escalation and StigmergicBoard for persistent indirect coordination.
 
-提供所有组件间通信原语。无智能体逻辑、无编排决策 -- 纯消息传输与信号机制。
+提供所有组件间通信原语。无智能体逻辑、无编排决策 -- 纯消息传输与信号机制。V5.2 新增信息素压力梯度矩阵和持久公告板。
 
 #### MessageBus (`message-bus.js`)
 
@@ -248,18 +248,18 @@ Operations:
 
 ---
 
-### L3 Agent / 智能体层 (9 files)
+### L3 Agent / 智能体层 (12 files)
 
 Individual agent cognition: memory, capabilities, identity, and persona. This
 layer models what a single agent *knows* and *is*. It does NOT coordinate
-multiple agents (that is L4). V5.1 adds SwarmContextEngine for rich context building.
+multiple agents (that is L4). V5.1 adds SwarmContextEngine; V5.2 adds ResponseThreshold (FRTM + PI controller), FailureVaccination, and SkillSymbiosisTracker.
 
 单个智能体的认知：记忆、能力、身份与人格。此层建模单个智能体的知识与特性。
-不负责多智能体协调（那是 L4 的职责）。V5.1 新增 SwarmContextEngine 用于丰富的上下文构建。
+不负责多智能体协调（那是 L4 的职责）。V5.1 新增上下文引擎；V5.2 新增响应阈值、失败免疫和技能共生。
 
-> **Note (V5.1):** SwarmContextEngine currently operates via hook fallback (`buildSwarmContextFallback()`) rather than full ContextEngine slot registration. The feature flag `contextEngine` is **disabled** by default. Full ContextEngine slot registration is planned for V5.2.
+> **Note:** SwarmContextEngine currently operates via hook fallback (`buildSwarmContextFallback()`). Feature flag `contextEngine` is **disabled** by default.
 >
-> **注意 (V5.1):** SwarmContextEngine 当前通过 hook fallback（`buildSwarmContextFallback()`）降级使用，尚未启用完整的 ContextEngine 插槽注册。Feature flag `contextEngine` 默认为 **disabled**。完整的 ContextEngine 插槽注册计划在 V5.2 实现。
+> **注意：** SwarmContextEngine 当前通过 hook fallback 降级使用。Feature flag `contextEngine` 默认为 **disabled**。
 
 #### Memory Subsystem / 记忆子系统
 
@@ -398,7 +398,7 @@ coupling moved to L5.
 | **ZoneManager** | `zone-manager.js` | Spatial management | Jaccard auto-assign for zone membership. Leader election. Health check |
 | **HierarchicalCoordinator** | `hierarchical-coordinator.js` | V5.1: Hierarchical swarm | Depth limit + concurrency control. Agents spawn sub-agents within governance |
 | **TaskDAGEngine** | `task-dag-engine.js` | V5.1: Advanced DAG | Auction allocation + work-stealing + dead letter queue (DLQ) |
-| **SpeciesEvolver** | `species-evolver.js` | V5.1: Species evolution | Proposal → trial → culling + GEP tournament for role type evolution |
+| **SpeciesEvolver** | `species-evolver.js` | V5.1+V5.2: Species evolution | Proposal → trial → culling + GEP tournament + V5.2: Lotka-Volterra dynamics + ABC three-stage evolution |
 
 ---
 
@@ -491,12 +491,12 @@ Each factory creates a tool object: `{ name, description, inputSchema, handler }
 
 ---
 
-### L6 Monitoring / 监控层 (4 files)
+### L6 Monitoring / 监控层 (6 files)
 
 Real-time observability into the swarm. Consumes events from the MessageBus
-(L2) and exposes metrics via HTTP/SSE.
+(L2) and exposes metrics via HTTP/SSE. V5.2 extends with Jaeger-lite tracing, idle detection, and startup diagnostics.
 
-蜂群实时可观测性。从 MessageBus(L2)消费事件，通过 HTTP/SSE 暴露指标。
+蜂群实时可观测性。从 MessageBus(L2)消费事件，通过 HTTP/SSE 暴露指标。V5.2 扩展 Jaeger-lite 追踪、空闲检测和启动诊断。
 
 #### StateBroadcaster (`state-broadcaster.js`)
 
@@ -538,9 +538,16 @@ Fastify HTTP server (lazy import — not loaded until monitoring enabled):
 
   Routes:
     GET /                → serves dashboard.html (dark theme UI)
+    GET /v2              → serves dashboard-v2.html (hex hive + DAG + particles)
     GET /api/metrics     → JSON snapshot of MetricsCollector
     GET /api/stats       → aggregated swarm statistics
     GET /events          → SSE stream from StateBroadcaster
+
+  V5.2 REST endpoints:
+    GET /api/v1/context-debug    → sanitized context structure (no actual text)
+    GET /api/v1/breaker-status   → circuit breaker states from ToolResilience
+    GET /api/v1/trace-spans      → Jaeger-lite trace spans (optional ?traceId= filter)
+    GET /api/v1/startup-summary  → cached startup diagnostics (feature flags + engine status)
 ```
 
 #### Dashboard UI (`dashboard.html`)
@@ -750,7 +757,7 @@ E:\OpenClaw\data\swarm\
 │   │
 │   ├── L1-infrastructure/                    # ══ 17 files ══
 │   │   ├── database/
-│   │   │   ├── database-manager.js           #   SQLite WAL, DatabaseSync
+│   │   │   ├── database-manager.js           #   SQLite WAL, DatabaseSync, 44 tables
 │   │   │   ├── sqlite-binding.js             #   createRequire() wrapper
 │   │   │   ├── migration-runner.js           #   versioned schema migrations
 │   │   │   └── repositories/
@@ -765,19 +772,21 @@ E:\OpenClaw\data\swarm\
 │   │   ├── config/
 │   │   │   └── config-manager.js             #   Zod validation, deep merge, onChange
 │   │   ├── schemas/
-│   │   │   ├── database-schemas.js           #   34 TABLE_SCHEMAS
+│   │   │   ├── database-schemas.js           #   44 TABLE_SCHEMAS
 │   │   │   ├── config-schemas.js             #   Zod config schemas
 │   │   │   └── message-schemas.js            #   Zod message schemas
 │   │   ├── types.js                          #   shared enums & type defs
 │   │   └── logger.js                         #   pino wrapper
 │   │
-│   ├── L2-communication/                     # ══ 4 files ══
+│   ├── L2-communication/                     # ══ 6 files ══
 │   │   ├── message-bus.js                    #   pub/sub, wildcards, DLQ
-│   │   ├── pheromone-engine.js               #   MMAS bounds, exponential decay
+│   │   ├── pheromone-engine.js               #   MMAS bounds, typed decay
 │   │   ├── gossip-protocol.js                #   epidemic broadcast, version vectors
-│   │   └── pheromone-type-registry.js        #   custom pheromone type registration
+│   │   ├── pheromone-type-registry.js        #   custom pheromone type registration
+│   │   ├── pheromone-response-matrix.js      #   V5.2: pressure gradient + auto-escalation
+│   │   └── stigmergic-board.js              #   V5.2: persistent bulletin board
 │   │
-│   ├── L3-agent/                             # ══ 8 files ══
+│   ├── L3-agent/                             # ══ 12 files ══
 │   │   ├── memory/
 │   │   │   ├── working-memory.js             #   3-tier: focus/context/scratchpad
 │   │   │   ├── episodic-memory.js            #   Ebbinghaus forgetting curve
@@ -786,7 +795,11 @@ E:\OpenClaw\data\swarm\
 │   │   ├── capability-engine.js              #   4D scoring, ACO roulette
 │   │   ├── persona-evolution.js              #   PARL A/B testing
 │   │   ├── reputation-ledger.js              #   multi-factor scoring
-│   │   └── soul-designer.js                  #   4 bee personas, keyword selection
+│   │   ├── soul-designer.js                  #   5 bee personas, keyword selection
+│   │   ├── swarm-context-engine.js           #   V5.1: rich context builder
+│   │   ├── response-threshold.js             #   V5.2: FRTM + PI controller
+│   │   ├── failure-vaccination.js            #   V5.2: pattern immunization
+│   │   └── skill-symbiosis.js               #   V5.2: cosine complementarity
 │   │
 │   ├── L4-orchestration/                     # ══ 12 files ══
 │   │   ├── orchestrator.js                   #   DAG task decomposition
@@ -815,11 +828,13 @@ E:\OpenClaw\data\swarm\
 │   │       ├── swarm-plan-tool.js            #   plan design/validate
 │   │       └── swarm-zone-tool.js            #   zone CRUD + auto-assign
 │   │
-│   └── L6-monitoring/                        # ══ 4 files ══
+│   └── L6-monitoring/                        # ══ 6 files ══
 │       ├── state-broadcaster.js              #   MessageBus → SSE push
 │       ├── metrics-collector.js              #   RED metrics + swarm counters
-│       ├── dashboard-service.js              #   Fastify HTTP server
-│       └── dashboard.html                    #   dark theme CSS Grid UI
+│       ├── dashboard-service.js              #   Fastify HTTP + Jaeger-lite tracing
+│       ├── health-checker.js                 #   multi-dim health + idle detection
+│       ├── dashboard.html                    #   dark theme CSS Grid UI
+│       └── dashboard-v2.html                 #   hex hive + DAG + particles
 │
 ├── tests/
 │   ├── unit/
@@ -847,5 +862,5 @@ E:\OpenClaw\data\swarm\
 | Messaging | None (direct function calls) | MessageBus (pub/sub) + GossipProtocol | Components decoupled via events |
 | Memory model | Flat OME memory engine | 3-tier working + episodic + semantic | Memory API completely redesigned |
 | Monitoring | `monitor.js` ring buffer | L6: StateBroadcaster + MetricsCollector + Dashboard | New capability; no V4.0 equivalent |
-| Schemas | Inline in `db.js` | `database-schemas.js` (34 TABLE_SCHEMAS) | Extracted; schema count grew from 25 to 34 |
-| Pheromone types | Hardcoded 5 types | 5 built-in + PheromoneTypeRegistry for custom | Extensible; backward compatible |
+| Schemas | Inline in `db.js` | `database-schemas.js` (44 TABLE_SCHEMAS) | Extracted; schema count grew from 25 to 44 |
+| Pheromone types | Hardcoded 5 types | 5 built-in + PheromoneTypeRegistry + pressure gradient + typed decay | Extensible; backward compatible |

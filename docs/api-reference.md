@@ -1,25 +1,31 @@
 # API Reference / API 参考
 
-**Claw-Swarm V5.0** — Hooks, tools, and engine API documentation.
+**Claw-Swarm V5.2** — Hooks, tools, and engine API documentation.
 
 ---
 
 ## 1. OpenClaw Hooks / OpenClaw 钩子
 
-V5.0 registers **8 hooks** with the OpenClaw gateway, each mapping to internal hook handlers.
+V5.2 registers **14 hooks** with the OpenClaw gateway (V5.0: 6 + V5.1: 8 new).
 
-V5.0 向 OpenClaw 网关注册 **8 个钩子**，每个映射到内部钩子处理器。
+V5.2 向 OpenClaw 网关注册 **14 个钩子**（V5.0: 6 + V5.1: 8 新增）。
 
-| # | OpenClaw Event | V5.0 Internal Mapping | Returns | Priority |
+| # | OpenClaw Event | Internal Mapping | Returns | Priority |
 |---|---|---|---|---|
-| a | `before_agent_start` | `onAgentStart` + `onPrependContext` | `{ prependContext }` | 50 |
-| b | `agent_end` | `onAgentEnd` | void | default |
-| c | `after_tool_call` | `onToolCall` + `onToolResult` | void | default |
-| d | `subagent_spawning` | `onSubAgentSpawn` | `{ customPrompt }` | default |
-| e | `subagent_ended` | `onSubAgentComplete` / `onSubAgentAbort` | void | default |
-| f | `before_reset` | `onMemoryConsolidate` | void | default |
-| g | `gateway_stop` | `adapter.close()` | void | default |
-| h | `message_sending` | `onSubAgentMessage` | void | default |
+| a | `gateway_start` | Engine initialization + config validation + SYSTEM_STARTUP event | void | default |
+| b | `before_model_resolve` | Model capability auto-detection | void | default |
+| c | `before_tool_call` | ToolResilience AJV validation + circuit breaker | void | default |
+| d | `before_prompt_build` | Tool failure injection + swarm context | void | default |
+| e | `before_agent_start` | `onAgentStart` + `onPrependContext` | `{ prependContext }` | 50 |
+| f | `agent_end` | `onAgentEnd` | void | default |
+| g | `after_tool_call` | `onToolCall` + `onToolResult` | void | default |
+| h | `before_reset` | `onMemoryConsolidate` | void | default |
+| i | `gateway_stop` | `adapter.close()` + cleanup | void | default |
+| j | `message_sending` | `onSubAgentMessage` | void | default |
+| k | `subagent_spawning` | Hierarchical coordinator validation | `{ customPrompt }` | default |
+| l | `subagent_spawned` | Hierarchy tracking | void | default |
+| m | `subagent_ended` | `onSubAgentComplete` / `onSubAgentAbort` | void | default |
+| n | `llm_output` | SOUL.md dual-stage migration | void | default |
 
 ### a. `before_agent_start`
 
@@ -99,9 +105,9 @@ Publishes to `'agent.message'` topic on MessageBus. If `broadcast: true`, additi
 
 ## 2. Agent Tools / Agent 工具
 
-V5.0 registers **7 tools** via factory functions in `L5-application/tools/`.
+V5.2 registers **7 tools** via factory functions in `L5-application/tools/`.
 
-V5.0 通过 `L5-application/tools/` 中的工厂函数注册 **7 个工具**。
+V5.2 通过 `L5-application/tools/` 中的工厂函数注册 **7 个工具**。
 
 ### a. `swarm_spawn`
 
@@ -189,7 +195,7 @@ Zone management for agent grouping and governance. / 区域管理。
 
 ---
 
-## 3. Internal V5.0 Hooks / V5.0 内部钩子
+## 3. Internal Hooks / 内部钩子
 
 These hooks are triggered via MessageBus internally and do not map to OpenClaw events.
 
@@ -201,6 +207,8 @@ These hooks are triggered via MessageBus internally and do not map to OpenClaw e
 | `onReplanTrigger` | Fires on agent failure or pheromone threshold breach. Calls `ReplanEngine.checkAndReplan()`. / 失败或信息素超限时触发重规划。 |
 | `onZoneEvent` | Handles zone lifecycle: member join/leave, leader election, health check via `ZoneManager`. / 处理区域生命周期事件。 |
 | `onPheromoneThreshold` | Fires when pheromone density exceeds threshold. For `alarm` type, may trigger replanning. / 信息素密度超限时触发。 |
+| `onPheromoneEscalation` | V5.2: Fires when PheromoneResponseMatrix detects pressure gradient exceeding escalation threshold. / 压力梯度超阈值时触发。 |
+| `onIdleDetected` | V5.2: Fires when HealthChecker detects idle agents exceeding threshold. Auto-emits recruit pheromone. / 空闲检测超阈值时触发。 |
 
 ---
 
@@ -303,3 +311,67 @@ Contains all engine instances. Key engines by layer:
 | Method | Signature | Description / 说明 |
 |---|---|---|
 | `evaluate()` | `({ taskId, agentId, result, criteria? }) -> { verdict, score, feedback }` | Evaluate output quality. Verdict: `pass`/`conditional`/`fail`. / 评估质量。 |
+
+---
+
+## 6. V5.2 New Engine APIs / V5.2 新增引擎 API
+
+### PheromoneResponseMatrix (`L2-communication/pheromone-response-matrix.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `autoEscalate()` | `() -> void` | Scan all pheromones and auto-escalate those exceeding pressure threshold. / 扫描并自动升级超阈值信息素。 |
+| `destroy()` | `() -> void` | Stop scanning timer and cleanup. / 停止扫描定时器。 |
+
+### StigmergicBoard (`L2-communication/stigmergic-board.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `post()` | `({ authorId, scope, title, content, category, priority, ttlMinutes }) -> string` | Create a bulletin post. Returns post ID. / 创建公告，返回 ID。 |
+| `read()` | `(scope, { category?, limit? }) -> object[]` | Read posts by scope and optional category. / 按范围和分类读取公告。 |
+| `expireOld()` | `() -> number` | Remove expired posts. Returns count removed. / 移除过期公告。 |
+
+### ResponseThreshold (`L3-agent/response-threshold.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `getThreshold()` | `(agentId, taskType) -> number` | Get current threshold for agent/task-type pair. / 获取阈值。 |
+| `shouldRespond()` | `(agentId, taskType, stimulus) -> boolean` | Check if agent should respond to stimulus. / 判断是否响应。 |
+| `adjust()` | `(agentId, taskType, actualActivityRate) -> void` | PI controller adjustment. / PI 控制器调节阈值。 |
+
+### FailureVaccination (`L3-agent/failure-vaccination.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `registerVaccine()` | `({ failurePattern, toolName, errorCategory, vaccineStrategy, effectiveness }) -> object` | Register immunization pattern. / 注册免疫模式。 |
+| `findVaccines()` | `(failurePattern, { minEffectiveness?, limit? }) -> object[]` | Find matching vaccines. / 查找匹配免疫。 |
+| `recordOutcome()` | `(failurePattern, vaccineStrategy, success) -> void` | Track effectiveness. / 记录效果。 |
+
+### SkillSymbiosisTracker (`L3-agent/skill-symbiosis.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `updateSkillVector()` | `(agentId, skillVector) -> void` | Update agent skill profile. / 更新技能向量。 |
+| `findComplement()` | `(agentId, { limit? }) -> object[]` | Find complementary agents by cosine distance. / 查找互补 Agent。 |
+| `recordCollaboration()` | `(agentId1, agentId2, outcome) -> void` | Record pairing outcome. / 记录配对结果。 |
+
+### SpeciesEvolver V5.2 Methods (`L4-orchestration/species-evolver.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `performLVDynamics()` | `() -> void` | Run Lotka-Volterra population dynamics. `dN/dt = rN(1-N/K) - αNP`. Culls species with fitness < 0.05. / 运行 LV 种群动力学。 |
+| `performABCEvolution()` | `(personaEvolution, agentIds) -> void` | ABC three-stage evolution: employed → onlooker → scout bees. / ABC 三阶段进化。 |
+
+### ToolResilience V5.2 Methods (`L5-application/tool-resilience.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `findRepairStrategy()` | `(toolName, errorPattern) -> object?` | Query repair memory for matching strategy with confidence > 0.3. / 查询修复记忆。 |
+| `recordRepairOutcome()` | `(toolName, errorPattern, strategy, success) -> void` | Upsert repair memory with success/attempt counts. / 记录修复结果。 |
+
+### HealthChecker V5.2 Methods (`L6-monitoring/health-checker.js`)
+
+| Method | Signature | Description / 说明 |
+|---|---|---|
+| `recordActivity()` | `(agentId) -> void` | Record agent activity timestamp. / 记录活动时间戳。 |
+| `getIdleAgents()` | `() -> string[]` | Get list of idle agents exceeding threshold. / 获取空闲 Agent 列表。 |

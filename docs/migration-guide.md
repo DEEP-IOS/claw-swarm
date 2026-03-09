@@ -1,5 +1,82 @@
 # Migration Guide / 迁移指南
 
+## From V5.1 to V5.2 / 从 V5.1 迁移到 V5.2
+
+### Overview / 概述
+
+V5.2 is a **non-breaking upgrade** from V5.1. All V5.1 configuration, data, and APIs remain compatible. V5.2 adds 5 new modules, 6 new database tables, and activates previously deferred features.
+
+V5.2 是 V5.1 的**非破坏性升级**。所有 V5.1 配置、数据和 API 保持兼容。V5.2 新增 5 个模块、6 张数据库表，并激活了之前搁置的功能。
+
+### Automatic Migration / 自动迁移
+
+On first start after upgrade, MigrationRunner automatically:
+
+升级后首次启动时，MigrationRunner 自动：
+
+1. Detects SCHEMA_VERSION = 6 (V5.1)
+2. Creates 6 new tables: `agent_thresholds`, `pheromone_type_config`, `stigmergic_posts`, `failure_vaccines`, `trace_spans`, `skill_symbiosis`
+3. Updates SCHEMA_VERSION to 7
+4. Auto-backup before migration (as always)
+
+### What Changes / 变化内容
+
+| Aspect / 维度 | V5.1 | V5.2 |
+|---|---|---|
+| SCHEMA_VERSION | 6 | 7 |
+| Database tables | 38 | 44 (+6) |
+| Source files | 66+ | 75+ (+5 new modules) |
+| Tests | 573 / 30+ files | 659 / 43 files |
+| Algorithms | 12 | 18+ |
+| Event topics | 27 | 37 (+10) |
+
+### New Feature Flags / 新增特性标志
+
+All new V5.2 feature flags are **enabled by default**:
+
+| Flag | Default | Purpose / 用途 |
+|------|---------|---|
+| `pheromoneEscalation` | ✅ | Pressure gradient auto-escalation / 压力梯度自动升级 |
+| `responseThreshold` | ✅ | Per-agent FRTM thresholds / 每 Agent 响应阈值 |
+| `multiTypePheromone` | ✅ | Typed decay models / 多类型衰减 |
+| `evolution.lotkaVolterra` | ✅ | Lotka-Volterra population dynamics / 种群动力学 |
+| `evolution.abc` | ✅ | ABC three-stage evolution / ABC 三阶段进化 |
+
+To disable any new feature, add it to your `openclaw.json` config:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "claw-swarm": {
+        "config": {
+          "pheromoneEscalation": false,
+          "responseThreshold": false
+        }
+      }
+    }
+  }
+}
+```
+
+### New REST Endpoints / 新增 REST 端点
+
+| Endpoint | Description / 说明 |
+|---|---|
+| `GET /api/v1/context-debug` | Sanitized context structure (no actual text) / 脱敏上下文结构 |
+| `GET /api/v1/breaker-status` | Circuit breaker states / 断路器状态 |
+| `GET /api/v1/trace-spans` | Jaeger-lite trace spans / 追踪 spans |
+| `GET /api/v1/startup-summary` | Startup diagnostics / 启动诊断 |
+
+### Verification / 验证
+
+```bash
+cd data/swarm
+npm test                    # Should show 659 tests, 43 files
+```
+
+---
+
 ## From OME v1.1.0 to Claw-Swarm v4.0 / 从 OME v1.1.0 迁移到 Claw-Swarm v4.0
 
 ### Overview / 概述

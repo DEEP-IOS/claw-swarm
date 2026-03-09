@@ -1,7 +1,7 @@
 {
   "name": "openclaw-swarm",
-  "version": "5.1.0",
-  "description": "Claw-Swarm V5.1 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
+  "version": "5.2.0",
+  "description": "Claw-Swarm V5.2 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
