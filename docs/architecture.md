@@ -257,6 +257,10 @@ multiple agents (that is L4). V5.1 adds SwarmContextEngine for rich context buil
 单个智能体的认知：记忆、能力、身份与人格。此层建模单个智能体的知识与特性。
 不负责多智能体协调（那是 L4 的职责）。V5.1 新增 SwarmContextEngine 用于丰富的上下文构建。
 
+> **Note (V5.1):** SwarmContextEngine currently operates via hook fallback (`buildSwarmContextFallback()`) rather than full ContextEngine slot registration. The feature flag `contextEngine` is **disabled** by default. Full ContextEngine slot registration is planned for V5.2.
+>
+> **注意 (V5.1):** SwarmContextEngine 当前通过 hook fallback（`buildSwarmContextFallback()`）降级使用，尚未启用完整的 ContextEngine 插槽注册。Feature flag `contextEngine` 默认为 **disabled**。完整的 ContextEngine 插槽注册计划在 V5.2 实现。
+
 #### Memory Subsystem / 记忆子系统
 
 **WorkingMemory** (`working-memory.js`)

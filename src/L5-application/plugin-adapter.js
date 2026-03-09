@@ -124,7 +124,7 @@ import { createZoneTool } from './tools/swarm-zone-tool.js';
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.0.0';
+const VERSION = '5.1.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;

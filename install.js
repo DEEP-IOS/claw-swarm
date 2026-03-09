@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claw-Swarm V5.0 — One-click installer / 一键安装脚本
+ * Claw-Swarm V5.1 — One-click installer / 一键安装脚本
  *
  * Usage / 用法:
  *   node install.js           # Auto-detect best method / 自动检测最佳安装方式
