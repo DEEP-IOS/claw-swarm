@@ -109,11 +109,12 @@ function getToolSafetyClass(toolName) {
  * boardSignal:      活跃公告 (StigmergicBoard)
  */
 const SIGNAL_WEIGHTS = {
-  textStimulus:   0.35,
-  pressureSignal: 0.20,
-  failureSignal:  0.20,
-  breakerSignal:  0.15,
-  boardSignal:    0.10,
+  textStimulus:    0.30,
+  pressureSignal:  0.18,
+  failureSignal:   0.18,
+  breakerSignal:   0.12,
+  boardSignal:     0.10,
+  symbiosisSignal: 0.12,  // V5.7: 共生互补度信号
 };
 
 // ============================================================================
@@ -158,6 +159,8 @@ export class SwarmAdvisor {
     stigmergicBoard, messageBus, logger,
     // V5.4: 新增信号源 / New signal sources
     pheromoneResponseMatrix, failureVaccination, toolResilience,
+    // V5.7: 共生技能信号源 / Skill symbiosis signal source
+    skillSymbiosis,
   } = {}) {
     this._responseThreshold = responseThreshold || null;
     this._pheromoneEngine = pheromoneEngine || null;
@@ -171,6 +174,9 @@ export class SwarmAdvisor {
     this._pheromoneResponseMatrix = pheromoneResponseMatrix || null;
     this._failureVaccination = failureVaccination || null;
     this._toolResilience = toolResilience || null;
+
+    // V5.7: 共生技能引擎 / Skill symbiosis engine
+    this._skillSymbiosis = skillSymbiosis || null;
 
     /** @type {Object|null} V5.5: GlobalModulator for threshold adjustment */
     this._globalModulator = null;
@@ -435,6 +441,18 @@ export class SwarmAdvisor {
       } catch { /* non-fatal */ }
     }
 
+    // ── 信号 6: V5.7 共生团队互补度 / Symbiosis team complementarity ──
+    let symbiosisSignal = 0;
+    if (this._skillSymbiosis) {
+      try {
+        const symStats = this._skillSymbiosis.getStats();
+        const pairDensity = Math.min(symStats.trackedPairs / 10, 1);
+        const usageRate = Math.min(symStats.recommendations / 5, 1);
+        symbiosisSignal = pairDensity * 0.5 + usageRate * 0.5;
+        if (symbiosisSignal > 0) this._stats.symbiosisBoosts = (this._stats.symbiosisBoosts || 0) + 1;
+      } catch { /* non-fatal */ }
+    }
+
     // ── 加权聚合 (缺失引擎权重重分配) / Weighted aggregation (redistribute missing engine weights) ──
     // 当信号源引擎未连接时, 其权重按比例重分配给已连接的信号源
     // When signal source engines are not connected, their weights are proportionally
@@ -446,25 +464,28 @@ export class SwarmAdvisor {
     if (this._failureVaccination)      { activeWeights.failureSignal  = SIGNAL_WEIGHTS.failureSignal;  totalActive += SIGNAL_WEIGHTS.failureSignal; }
     if (this._toolResilience)          { activeWeights.breakerSignal  = SIGNAL_WEIGHTS.breakerSignal;  totalActive += SIGNAL_WEIGHTS.breakerSignal; }
     if (this._stigmergicBoard)         { activeWeights.boardSignal    = SIGNAL_WEIGHTS.boardSignal;    totalActive += SIGNAL_WEIGHTS.boardSignal; }
+    if (this._skillSymbiosis)          { activeWeights.symbiosisSignal = SIGNAL_WEIGHTS.symbiosisSignal; totalActive += SIGNAL_WEIGHTS.symbiosisSignal; }
 
     // 归一化权重 / Normalize weights so they sum to 1.0
     const scale = totalActive > 0 ? 1 / totalActive : 1;
 
     const composite = (
-      (activeWeights.textStimulus   || 0) * scale * textStimulus +
-      (activeWeights.pressureSignal || 0) * scale * pressureSignal +
-      (activeWeights.failureSignal  || 0) * scale * failureSignal +
-      (activeWeights.breakerSignal  || 0) * scale * breakerSignal +
-      (activeWeights.boardSignal    || 0) * scale * boardSignal
+      (activeWeights.textStimulus    || 0) * scale * textStimulus +
+      (activeWeights.pressureSignal  || 0) * scale * pressureSignal +
+      (activeWeights.failureSignal   || 0) * scale * failureSignal +
+      (activeWeights.breakerSignal   || 0) * scale * breakerSignal +
+      (activeWeights.boardSignal     || 0) * scale * boardSignal +
+      (activeWeights.symbiosisSignal || 0) * scale * symbiosisSignal
     );
 
     const signals = {
-      textStimulus:   Math.round(textStimulus * 10000) / 10000,
-      pressureSignal: Math.round(pressureSignal * 10000) / 10000,
-      failureSignal:  Math.round(failureSignal * 10000) / 10000,
-      breakerSignal:  Math.round(breakerSignal * 10000) / 10000,
-      boardSignal:    Math.round(boardSignal * 10000) / 10000,
-      composite:      Math.round(Math.max(0, Math.min(1, composite)) * 10000) / 10000,
+      textStimulus:    Math.round(textStimulus * 10000) / 10000,
+      pressureSignal:  Math.round(pressureSignal * 10000) / 10000,
+      failureSignal:   Math.round(failureSignal * 10000) / 10000,
+      breakerSignal:   Math.round(breakerSignal * 10000) / 10000,
+      boardSignal:     Math.round(boardSignal * 10000) / 10000,
+      symbiosisSignal: Math.round(symbiosisSignal * 10000) / 10000,
+      composite:       Math.round(Math.max(0, Math.min(1, composite)) * 10000) / 10000,
     };
 
     return { composite: signals.composite, signals };

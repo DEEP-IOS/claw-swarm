@@ -231,6 +231,20 @@ export class StartupDiagnostics {
         criticalPathAnalyzer: !!engines?.criticalPathAnalyzer,
         workStealing: !!engines?.dagEngine?._config?.workStealing?.enabled,
       },
+
+      // V5.7: 共生调度 + 多类型信息素 / Skill symbiosis + multi-type pheromones
+      skillSymbiosisScheduling: {
+        skillSymbiosis: !!engines?.skillSymbiosis,
+        contractNetIntegrated: !!engines?.contractNet?._skillSymbiosis,
+        executionPlannerIntegrated: !!engines?.executionPlanner?._skillSymbiosis,
+        swarmAdvisorIntegrated: !!engines?.swarmAdvisor?._skillSymbiosis,
+      },
+      multiTypePheromone: {
+        foodType: true,
+        dangerType: true,
+        typedDecay: true,
+        typeRegistryLoaded: !!engines?.pheromoneTypeRegistry?._loaded,
+      },
     };
 
     return report;

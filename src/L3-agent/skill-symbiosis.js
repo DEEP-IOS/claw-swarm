@@ -28,15 +28,70 @@ export class SkillSymbiosisTracker {
    * @param {Object} [deps.db] - SQLite database
    * @param {Object} [deps.logger]
    */
-  constructor({ capabilityEngine, db, logger } = {}) {
+  constructor({ capabilityEngine, db, logger, messageBus } = {}) {
     this._capabilityEngine = capabilityEngine || null;
     this._db = db || null;
     this._logger = logger || console;
+    this._messageBus = messageBus || null;
 
     /** @type {Map<string, Object>} cache: 'agentA::agentB' -> { complementarity, collaborations, avgQuality } */
     this._pairCache = new Map();
 
     this._stats = { computations: 0, recommendations: 0 };
+  }
+
+  // ━━━ V5.7: 维度映射 / Dimension Mapping ━━━
+
+  /**
+   * V5.7: 8D → 4D 维度映射 (CapabilityEngine 8D → SkillSymbiosis 4D)
+   *
+   * technical    = (coding + architecture + security + performance) / 4
+   * delivery     = (testing + documentation) / 2
+   * collaboration = communication
+   * innovation   = domain
+   *
+   * @param {Object} scores8D
+   * @returns {Object} { technical, delivery, collaboration, innovation }
+   */
+  static mapDimensions8Dto4D(scores8D) {
+    if (!scores8D || typeof scores8D !== 'object') {
+      return { technical: 0, delivery: 0, collaboration: 0, innovation: 0 };
+    }
+    return {
+      technical: ((scores8D.coding || 0) + (scores8D.architecture || 0) + (scores8D.security || 0) + (scores8D.performance || 0)) / 4,
+      delivery: ((scores8D.testing || 0) + (scores8D.documentation || 0)) / 2,
+      collaboration: scores8D.communication || 0,
+      innovation: scores8D.domain || 0,
+    };
+  }
+
+  // ━━━ V5.7: 团队互补度 / Team Complementarity ━━━
+
+  /**
+   * V5.7: 获取 agent 与当前团队的互补度信号
+   *
+   * @param {string} agentId - 候选 agent
+   * @param {string[]} currentTeam - 当前已分配 agent ID 列表
+   * @returns {number} 平均互补度 [0, 1]
+   */
+  getTeamComplementarity(agentId, currentTeam) {
+    if (!currentTeam || currentTeam.length === 0) return 0.5;
+
+    let totalComplementarity = 0;
+    let count = 0;
+
+    for (const memberId of currentTeam) {
+      if (memberId === agentId) continue;
+      const key1 = `${agentId}::${memberId}`;
+      const key2 = `${memberId}::${agentId}`;
+      const pair = this._pairCache.get(key1) || this._pairCache.get(key2);
+      if (pair) {
+        totalComplementarity += pair.complementarity;
+        count++;
+      }
+    }
+
+    return count > 0 ? totalComplementarity / count : 0.5;
   }
 
   // ━━━ 互补度计算 / Complementarity Computation ━━━
@@ -106,6 +161,18 @@ export class SkillSymbiosisTracker {
 
     // 持久化
     this._persist(a, b, pair);
+
+    // V5.7: 发布协作事件 / Publish collaboration event
+    if (this._messageBus) {
+      try {
+        this._messageBus.publish('symbiosis.collaboration.recorded', {
+          agentAId: a, agentBId: b,
+          complementarity: pair.complementarity,
+          avgQuality: pair.avgQuality,
+          collaborations: pair.collaborations,
+        }, { senderId: SOURCE });
+      } catch { /* non-fatal */ }
+    }
   }
 
   // ━━━ 推荐 / Recommendation ━━━

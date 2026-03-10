@@ -88,7 +88,7 @@ import { EventTopics, wrapEvent } from './event-catalog.js';
 // 常量 / Constants
 // ============================================================================
 
-const VERSION = '5.6.0';
+const VERSION = '5.7.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 
@@ -434,6 +434,8 @@ export default {
           pheromoneResponseMatrix,
           failureVaccination,
           toolResilience,
+          // V5.7: 共生技能信号源 / Skill symbiosis signal source
+          skillSymbiosis,
         });
         logger.info?.('[Claw-Swarm] SwarmAdvisor initialized (V5.4 multi-signal)');
       } catch (err) {
@@ -500,6 +502,18 @@ export default {
       if (governanceMetrics) adapter._engines.governanceMetrics = governanceMetrics;
       if (swarmAdvisor) adapter._engines.swarmAdvisor = swarmAdvisor;
       if (toolResilience) adapter._engines.toolResilience = toolResilience;
+      if (skillSymbiosis) adapter._engines.skillSymbiosis = skillSymbiosis;
+    }
+
+    // V5.7: 注入 skillSymbiosis 到 ContractNet + ExecutionPlanner (后初始化)
+    // V5.7: Inject skillSymbiosis into ContractNet + ExecutionPlanner (post-init)
+    if (skillSymbiosis && adapter._engines) {
+      if (adapter._engines.contractNet) {
+        adapter._engines.contractNet._skillSymbiosis = skillSymbiosis;
+      }
+      if (adapter._engines.executionPlanner) {
+        adapter._engines.executionPlanner._skillSymbiosis = skillSymbiosis;
+      }
     }
 
     // 获取内部钩子处理器和工具定义 / Get internal hook handlers and tool definitions
@@ -600,6 +614,8 @@ export default {
           signalAggregation: !!swarmAdvisor, // V5.4: multi-signal routing
           stateConvergence: !!stateConvergence, // V5.5
           globalModulator: !!globalModulator,   // V5.5
+          skillSymbiosisScheduling: !!skillSymbiosis, // V5.7
+          multiTypePheromone: true,                   // V5.7
         },
         startedAt: Date.now(),
       };

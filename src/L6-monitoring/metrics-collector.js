@@ -100,6 +100,8 @@ export class MetricsCollector {
       'repair.*', 'convergence.*', 'modulator.*', 'governance.*',
       // V5.6 新增 / V5.6 additions
       'speculative.*', 'work.*', 'pipeline.*', 'dag.*',
+      // V5.7 新增 / V5.7 additions
+      'symbiosis.*',
     ];
 
     for (const topic of topics) {

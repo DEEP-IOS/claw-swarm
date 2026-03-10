@@ -1,12 +1,12 @@
 [**中文**](README.zh-CN.md) | English
 
-# Claw-Swarm V5.6
+# Claw-Swarm V5.7
 
-**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, structured DAG orchestration, speculative execution, work-stealing, state-convergence, runtime global-modulator, three feedback loops, governance triple metrics, and full observability.**
+**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, skill-symbiosis scheduling, multi-type pheromones, structured DAG orchestration, speculative execution, work-stealing, state-convergence, runtime global-modulator, three feedback loops, governance triple metrics, and full observability.**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
-![Version](https://img.shields.io/badge/version-5.6.0-blue)
-![Tests](https://img.shields.io/badge/tests-1053%20across%2062%20files-green)
+![Version](https://img.shields.io/badge/version-5.7.0-blue)
+![Tests](https://img.shields.io/badge/tests-65%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 <p align="center">
@@ -17,24 +17,28 @@
 
 ---
 
-## Overview
+## Overview / 概述
 
 Claw-Swarm is a **bio-inspired swarm intelligence plugin** for [OpenClaw](https://github.com/nicepkg/openclaw) that brings self-organizing multi-agent coordination to LLM-powered workflows. It models agent collaboration after real bee colonies — using pheromone trails, gossip protocols, and structured memory to let autonomous agents discover, negotiate, and complete tasks without centralized control.
 
-### What problems does it solve?
+Claw-Swarm 是 [OpenClaw](https://github.com/nicepkg/openclaw) 的**仿生蜂群智能插件**，为 LLM 驱动的工作流带来自组织多智能体协调能力。它模拟真实蜂群的协作方式——通过信息素路径、Gossip 协议和结构化记忆，让自治智能体在无中央控制的情况下自主发现、协商并完成任务。
 
-| Challenge | Symptom | Claw-Swarm Solution |
+### What problems does it solve? / 解决什么问题？
+
+| Challenge / 挑战 | Symptom / 表现 | Claw-Swarm Solution / 解决方案 |
 |-----------|---------|---------------------|
-| **Collaboration blind spots** | Agents unaware of each other's progress | Indirect pheromone communication + Gossip protocol + StigmergicBoard |
-| **Memory fragmentation** | Knowledge lost after context window reset | 3-tier memory (working / episodic / semantic) |
-| **Scheduling inefficiency** | Manual task assignment, no adaptability | DAG decomposition + Contract Net + ABC scheduling + Lotka-Volterra dynamics |
-| **Tool brittleness** | Single API failure cascades to full stop | AJV pre-validation + per-tool circuit breaker + retry injection + failure vaccination |
-| **Observability gap** | No visibility into swarm dynamics | Real-time hex-hive dashboard + RED metrics + SSE + Jaeger-lite tracing |
-| **Idle resources** | Agents sitting idle while tasks queue up | Idle detection + automatic recruit pheromone emission |
+| **Collaboration blind spots** / 协作盲区 | Agents unaware of each other's progress / 智能体彼此不知道对方进度 | Indirect pheromone communication + Gossip protocol + StigmergicBoard / 信息素间接通信 + Gossip 协议 + 公告板 |
+| **Memory fragmentation** / 记忆碎片 | Knowledge lost after context window reset / 上下文窗口重置后知识丢失 | 3-tier memory (working / episodic / semantic) / 三层记忆架构 |
+| **Scheduling inefficiency** / 调度低效 | Manual task assignment, no adaptability / 手动分配任务，缺乏自适应 | DAG decomposition + Contract Net + ABC scheduling + Lotka-Volterra dynamics / DAG 分解 + 合同网 + ABC 调度 + 种群动力学 |
+| **Tool brittleness** / 工具脆弱 | Single API failure cascades to full stop / 单个 API 失败全线崩溃 | AJV pre-validation + per-tool circuit breaker + retry injection + failure vaccination / AJV 预校验 + 断路器 + 重试注入 + 失败免疫 |
+| **Observability gap** / 可观测性不足 | No visibility into swarm dynamics / 无法了解蜂群内部动态 | Real-time hex-hive dashboard + RED metrics + SSE + Jaeger-lite tracing / 实时仪表盘 + RED 指标 + SSE + Jaeger-lite 追踪 |
+| **Idle resources** / 资源闲置 | Agents sitting idle while tasks queue up / Agent 空闲而任务排队 | Idle detection + automatic recruit pheromone emission / 空闲检测 + 自动招募信息素发射 |
 
-### Why 6 layers?
+### Why 6 layers? / 为什么 6 层？
 
 The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Contract Net, and knowledge graph modules. V5.0 re-divided responsibilities into 6 cleanly separated layers, with dependencies flowing strictly downward (L6 → L1). Only L5 couples to OpenClaw — L1–L4 can be independently reused in any Node.js 22+ environment.
+
+V4.0 的 4 层架构在引入 DAG 编排、合同网协议和知识图谱模块后变得臃肿。V5.0 将职责重新划分为 6 个清晰解耦的层级，依赖严格向下流动（L6 → L1）。仅 L5 耦合 OpenClaw——L1–L4 可在任何 Node.js 22+ 环境中独立复用。
 
 ---
 
@@ -67,6 +71,8 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 | **Speculative Execution** | V5.6: Parallel candidate execution for critical-path tasks; first completion wins | V5.6: 临界路径任务并行候选执行 |
 | **DAG-Orchestrator Bridge** | V5.6: Shadow plans as DAGs with CPM analysis and bottleneck detection | V5.6: 计划影子化为 DAG + CPM 分析 |
 | **Work-Stealing** | V5.6: Idle agents auto-steal tasks with modulator-aware cooldown | V5.6: 空闲 Agent 自动窃取 + 调节器感知冷却 |
+| **Skill-Symbiosis Scheduling** | V5.7: SkillSymbiosisTracker integrated into ContractNet (5th weight), ExecutionPlanner (4th MoE expert), SwarmAdvisor (6th signal) | V5.7: 共生技能接入 ContractNet/ExecutionPlanner/SwarmAdvisor |
+| **Multi-Type Pheromones** | V5.7: food (linear decay) + danger (step decay) types; typed decay routing via `computeTypedDecay()`; DB-backed type config | V5.7: food/danger 类型 + 类型化衰减路由 + DB 配置 |
 | **5 Bee Personas** | scout, worker, guard, queen-messenger, designer — signal-driven behavior | 5 种蜜蜂人格：侦察蜂、工蜂、守卫蜂、女王信使、设计蜂 |
 | **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics, breaker status, trace timeline | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标、断路器状态、追踪时间线 |
 | **Jaeger-lite Tracing** | Lightweight distributed tracing with trace span collector and startup diagnostics | 轻量分布式追踪 span 收集器 + 启动诊断 |

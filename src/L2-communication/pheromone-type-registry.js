@@ -18,7 +18,7 @@
  */
 
 /** 内置类型 (不可删除) / Built-in types (cannot be deleted) */
-const BUILTIN_TYPES = new Set(['trail', 'alarm', 'recruit', 'queen', 'dance']);
+const BUILTIN_TYPES = new Set(['trail', 'alarm', 'recruit', 'queen', 'dance', 'food', 'danger']);
 
 export class PheromoneTypeRegistry {
   /**

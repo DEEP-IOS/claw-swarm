@@ -124,7 +124,7 @@ export class ContractNet {
    * @param {Object} [deps.config.awardWeights] - 授予权重覆盖
    * @param {Object} [deps.logger] - 日志器 / Logger
    */
-  constructor({ messageBus, config = {}, logger } = {}) {
+  constructor({ messageBus, config = {}, logger, skillSymbiosis } = {}) {
     /** @private */
     this._messageBus = messageBus || null;
 
@@ -139,6 +139,9 @@ export class ContractNet {
 
     /** @private @type {typeof AWARD_WEIGHTS} */
     this._awardWeights = { ...AWARD_WEIGHTS, ...(config.awardWeights || {}) };
+
+    /** @private V5.7: skill-symbiosis 调度集成 */
+    this._skillSymbiosis = skillSymbiosis || null;
 
     /**
      * 活跃 CFP: cfpId -> CFP data
@@ -329,6 +332,12 @@ export class ContractNet {
       score: 0, // 评估时计算 / Computed at evaluation
       submittedAt: Date.now(),
     };
+
+    // V5.7: 计算共生互补度 / Compute symbiosis complementarity
+    if (this._skillSymbiosis && cfp.bids.length > 0) {
+      const currentTeam = cfp.bids.map(b => b.agentId);
+      bid.symbiosisScore = this._skillSymbiosis.getTeamComplementarity(agentId, currentTeam);
+    }
 
     cfp.bids.push(bid);
     this._stats.bidsReceived++;
@@ -694,11 +703,17 @@ export class ContractNet {
     const res = bid.resource ?? 0.5;
     const load = bid.workloadFactor ?? 0.5;
 
-    const score =
+    let score =
       cap * this._awardWeights.capabilityMatch +
       rep * this._awardWeights.reputation +
       res * this._awardWeights.resource +
       load * this._awardWeights.loadFactor;
+
+    // V5.7: 共生互补度信号注入 / Symbiosis complementarity signal injection
+    if (this._skillSymbiosis && bid.symbiosisScore !== undefined) {
+      const symbiosisWeight = this._config?.symbiosisWeight ?? 0.08;
+      score = score * (1 - symbiosisWeight) + bid.symbiosisScore * symbiosisWeight;
+    }
 
     return Math.max(0, Math.min(1, score));
   }

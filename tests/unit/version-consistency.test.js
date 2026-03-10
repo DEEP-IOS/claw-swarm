@@ -1,5 +1,5 @@
 /**
- * 版本一致性检查 V5.6 / Version Consistency Check V5.6
+ * 版本一致性检查 V5.7 / Version Consistency Check V5.7
  *
  * 自动验证所有版本号引用的一致性
  */
@@ -16,17 +16,17 @@ function readFile(relativePath) {
 }
 
 describe('Version Consistency', () => {
-  const EXPECTED_VERSION = '5.6.0';
-  const EXPECTED_NAME = 'Claw-Swarm V5.6';
+  const EXPECTED_VERSION = '5.7.0';
+  const EXPECTED_NAME = 'Claw-Swarm V5.7';
 
   it('openclaw.plugin.json version should be ' + EXPECTED_VERSION, () => {
     const content = JSON.parse(readFile('openclaw.plugin.json'));
     expect(content.version).toBe(EXPECTED_VERSION);
   });
 
-  it('openclaw.plugin.json name should contain V5.6', () => {
+  it('openclaw.plugin.json name should contain V5.7', () => {
     const content = JSON.parse(readFile('openclaw.plugin.json'));
-    expect(content.name).toContain('V5.6');
+    expect(content.name).toContain('V5.7');
   });
 
   it('plugin-adapter.js VERSION should be ' + EXPECTED_VERSION, () => {
@@ -39,7 +39,7 @@ describe('Version Consistency', () => {
     expect(content).toContain(`VERSION = '${EXPECTED_VERSION}'`);
   });
 
-  it('install.js should reference V5.6', () => {
+  it('install.js should reference V5.7', () => {
     const content = readFile('install.js');
     expect(content).toContain(EXPECTED_NAME);
   });

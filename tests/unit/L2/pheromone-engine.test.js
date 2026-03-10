@@ -116,10 +116,11 @@ describe('PheromoneEngine', () => {
       const tenMinAgo = Date.now() - 10 * 60 * 1000;
       pheromoneRepo.updateIntensity(id, 0.8, tenMinAgo);
 
-      // I(t) = 0.8 × e^(-0.05 × 10) ≈ 0.485
+      // V5.7: trail 使用线性衰减 / trail uses linear decay
+      // I(t) = max(0, 0.8 - 0.05 × 10) = 0.3
       const ph = engine.readById(id);
       expect(ph).not.toBeNull();
-      const expected = 0.8 * Math.exp(-0.05 * 10);
+      const expected = Math.max(0, 0.8 - 0.05 * 10);
       expect(ph.intensity).toBeCloseTo(expected, 1);
       expect(ph.intensity).toBeLessThan(0.8);
     });

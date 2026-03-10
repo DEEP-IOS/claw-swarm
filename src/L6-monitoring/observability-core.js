@@ -121,6 +121,12 @@ export class ObservabilityCore {
     this._sub(EventTopics.WORK_STEAL_COMPLETED, OBS_CATEGORIES.EXECUTION);
     this._sub(EventTopics.DAG_BRIDGE_ACTIVATED, OBS_CATEGORIES.DECISION);
 
+    // V5.7: 共生调度 + 多类型信息素事件 / Skill symbiosis + multi-type pheromone events
+    this._sub(EventTopics.SYMBIOSIS_COLLABORATION_RECORDED, OBS_CATEGORIES.STRATEGY);
+    this._sub(EventTopics.SYMBIOSIS_PARTNER_RECOMMENDED, OBS_CATEGORIES.STRATEGY);
+    this._sub(EventTopics.PHEROMONE_TYPE_REGISTERED, OBS_CATEGORIES.DECISION);
+    this._sub(EventTopics.PHEROMONE_FOOD_ATTRACTION, OBS_CATEGORIES.DECISION);
+
     this._subscribed = true;
     this._logger.info?.(`[${SOURCE}] started — subscribing to observation events`);
   }

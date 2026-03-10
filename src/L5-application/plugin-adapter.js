@@ -126,7 +126,7 @@ import { createRunTool } from './tools/swarm-run-tool.js';
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.6.0';
+const VERSION = '5.7.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;
@@ -215,6 +215,8 @@ export class PluginAdapter {
     this._engines.messageBus = messageBus;
 
     const pheromoneTypeRegistry = new PheromoneTypeRegistry({ pheromoneTypeRepo, logger });
+    // V5.7: 加载 DB 类型配置 (激活 pheromone_type_config.decay_model)
+    try { pheromoneTypeRegistry.load(); } catch { /* non-fatal: DB may be empty */ }
     this._engines.pheromoneTypeRegistry = pheromoneTypeRegistry;
 
     const pheromoneEngine = new PheromoneEngine({

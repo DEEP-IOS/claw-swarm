@@ -126,7 +126,7 @@ export class ExecutionPlanner {
    * @param {number} [deps.config.defaultMinConfidence=0.25] - 默认最低信心
    * @param {Object} [deps.logger] - 日志器 / Logger
    */
-  constructor({ taskRepo, agentRepo, roleManager, messageBus, config = {}, logger } = {}) {
+  constructor({ taskRepo, agentRepo, roleManager, messageBus, config = {}, logger, skillSymbiosis } = {}) {
     /** @private */
     this._taskRepo = taskRepo || null;
 
@@ -148,6 +148,9 @@ export class ExecutionPlanner {
       capability: config.weights?.capability ?? DEFAULT_WEIGHTS.capability,
       history: config.weights?.history ?? DEFAULT_WEIGHTS.history,
     };
+
+    /** @private V5.7: skill-symbiosis 调度集成 */
+    this._skillSymbiosis = skillSymbiosis || null;
 
     /** @private @type {number} */
     this._defaultTopK = config.defaultTopK ?? DEFAULT_TOP_K;
@@ -210,15 +213,23 @@ export class ExecutionPlanner {
 
     // 对每个模板计算 MoE 综合分 / Score each template with MoE
     const scored = [];
+    // V5.7: 动态归一化权重 (含共生专家) / Dynamic normalized weights (with symbiosis expert)
+    const symbiosisWeight = this._skillSymbiosis ? 0.15 : 0;
+    const baseSum = this._weights.keyword + this._weights.capability + this._weights.history;
+    const totalSum = baseSum + symbiosisWeight;
+    const scale = totalSum > 0 ? 1 / totalSum : 1;
+
     for (const template of templates) {
       const kwScore = this._keywordExpert(taskDescription, template);
       const capScore = this._capabilityExpert(requirements || {}, template);
       const histScore = this._historyExpert(template.name);
+      const symScore = this._skillSymbiosis ? this._symbiosisExpert(template) : 0;
 
       const weightedScore =
-        kwScore * this._weights.keyword +
-        capScore * this._weights.capability +
-        histScore * this._weights.history;
+        kwScore * this._weights.keyword * scale +
+        capScore * this._weights.capability * scale +
+        histScore * this._weights.history * scale +
+        symScore * symbiosisWeight * scale;
 
       scored.push({
         template,
@@ -227,6 +238,7 @@ export class ExecutionPlanner {
           keyword: Math.round(kwScore * 10000) / 10000,
           capability: Math.round(capScore * 10000) / 10000,
           history: Math.round(histScore * 10000) / 10000,
+          symbiosis: Math.round(symScore * 10000) / 10000,
         },
       });
     }
@@ -562,6 +574,29 @@ export class ExecutionPlanner {
     const qualityComponent = (stats.avgQuality || 0.5) * 0.4;
 
     return Math.min(1, successComponent + qualityComponent);
+  }
+
+  // =========================================================================
+  // V5.7: 共生专家 / Symbiosis Expert
+  // =========================================================================
+
+  /**
+   * V5.7: 共生专家 — 评估角色模板的团队互补潜力
+   *
+   * @param {Object} roleTemplate - 角色模板
+   * @returns {number} 分数 0-1
+   * @private
+   */
+  _symbiosisExpert(roleTemplate) {
+    if (!this._skillSymbiosis) return 0.5;
+    const stats = this._skillSymbiosis.getStats();
+    if (stats.trackedPairs === 0) return 0.5;
+
+    const partners = this._skillSymbiosis.recommendPartners(roleTemplate.name, 3);
+    if (partners.length === 0) return 0.5;
+
+    const avgComp = partners.reduce((sum, p) => sum + p.complementarity, 0) / partners.length;
+    return avgComp;
   }
 
   // =========================================================================

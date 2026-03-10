@@ -102,6 +102,8 @@ export class StateBroadcaster {
       'repair.*', 'convergence.*', 'modulator.*', 'governance.*', 'arbiter.*', 'baseline.*',
       // V5.6 新增 / V5.6 additions
       'speculative.*', 'work.*', 'pipeline.*',
+      // V5.7 新增 / V5.7 additions
+      'symbiosis.*',
     ];
     this._unsubscribes = topics.map((topic) =>
       this._messageBus.subscribe(topic, (message) => {

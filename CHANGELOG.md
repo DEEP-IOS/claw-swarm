@@ -4,6 +4,48 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.7.0] - 2026-03-10
+
+### Enhancement: Skill Symbiosis + Multi-Type Pheromones / 增强：共生调度 + 多类型信息素
+
+**Core Theme**: Wire SkillSymbiosisTracker into scheduling pipeline; activate typed pheromone decay.
+
+核心主题：共生技能追踪器接入调度管线；激活类型化信息素衰减。
+
+#### Key Modifications / 关键修改
+
+| File | Change |
+|------|--------|
+| `pheromone-engine.js` | food/danger types in BUILTIN_DEFAULTS; `_computeDecayedIntensity` routes through `computeTypedDecay`; `_getDecayModel()` |
+| `pheromone-type-registry.js` | food/danger in BUILTIN_TYPES set |
+| `pheromone-response-matrix.js` | food attraction on task.completed; danger avoidance on task.failed; `getDangerDensity()` |
+| `pheromone-type-repo.js` | `getTypeConfig()` / `listTypeConfigs()` for pheromone_type_config table |
+| `skill-symbiosis.js` | `mapDimensions8Dto4D()`, `getTeamComplementarity()`, MessageBus event publishing |
+| `contract-net.js` | 5th award weight (symbiosisScore) in `_computeAwardScore()` |
+| `execution-planner.js` | 4th MoE expert `_symbiosisExpert()`; dynamic weight normalization |
+| `swarm-advisor.js` | 6th signal (symbiosisSignal); SIGNAL_WEIGHTS redistribution |
+| `event-catalog.js` | +4 topics (SYMBIOSIS×2, PHEROMONE_TYPE_REGISTERED, PHEROMONE_FOOD_ATTRACTION) → 66 total |
+| `plugin-adapter.js` | `pheromoneTypeRegistry.load()` on init; VERSION bump |
+| `index.js` | skillSymbiosis → SwarmAdvisor/ContractNet/ExecutionPlanner injection; featureFlags |
+
+#### Dead Code Paths Activated / 激活的死代码路径
+
+| Method | File | Previously | Now |
+|--------|------|-----------|-----|
+| `computeTypedDecay()` | pheromone-engine.js | Defined but never called | Called by `_computeDecayedIntensity` |
+| `pheromone_type_config.decay_model` | DB | Column exists but unused | Read by `_getDecayModel()` via TypeRegistry |
+| `PheromoneTypeRegistry.load()` | plugin-adapter.js | Never called | Called during init |
+| `SkillSymbiosisTracker` API | skill-symbiosis.js | Not integrated into scheduling | Integrated into ContractNet/ExecutionPlanner/SwarmAdvisor |
+
+#### Test Coverage / 测试覆盖
+
+| Metric | V5.6 | V5.7 |
+|--------|------|------|
+| Test files | 62 | 65 (+3) |
+| EventTopics | 62 | 66 (+4) |
+
+---
+
 ## [5.6.0] - 2026-03-10
 
 ### Enhancement: Structured Orchestration / 增强：结构化编排

@@ -70,6 +70,29 @@ export class PheromoneTypeRepository {
     return !!row;
   }
 
+  // V5.7: 从 pheromone_type_config 表读取类型配置 / Read from pheromone_type_config table
+  getTypeConfig(typeName) {
+    const row = this.db.get('SELECT * FROM pheromone_type_config WHERE type_name = ?', typeName);
+    return row ? this._parseConfig(row) : null;
+  }
+
+  listTypeConfigs() {
+    return this.db.all('SELECT * FROM pheromone_type_config ORDER BY type_name').map(r => this._parseConfig(r));
+  }
+
+  _parseConfig(row) {
+    return {
+      typeName: row.type_name,
+      decayRate: row.decay_rate,
+      maxTTLMin: row.max_ttl_min,
+      mmasMin: row.mmas_min,
+      mmasMax: row.mmas_max,
+      decayModel: row.decay_model,
+      autoEscalate: row.auto_escalate,
+      escalateK: row.escalate_k,
+    };
+  }
+
   _parse(row) {
     return {
       id: row.id,

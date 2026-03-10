@@ -216,6 +216,23 @@ export class PheromoneResponseMatrix {
     };
   }
 
+  // ━━━ V5.7: Danger 密度查询 / Danger Density Query ━━━
+
+  /**
+   * V5.7: 查询指定范围内的 danger 信息素密度
+   * V5.7: Query danger pheromone density in scope
+   *
+   * @param {string} targetScope
+   * @returns {{ count: number, totalIntensity: number }}
+   */
+  getDangerDensity(targetScope) {
+    const dangers = this._pheromoneEngine.read(targetScope, { type: 'danger' });
+    return {
+      count: dangers.length,
+      totalIntensity: dangers.reduce((sum, d) => sum + d.intensity, 0),
+    };
+  }
+
   // ━━━ 统计 / Statistics ━━━
 
   getStats() {
@@ -244,11 +261,46 @@ export class PheromoneResponseMatrix {
     this._messageBus.subscribe('task.completed', (event) => {
       const p = event?.payload || event;
       if (p.taskId) this.removeTask(p.taskId);
+
+      // V5.7: food 信息素吸引 — 高质量完成任务发射 food 信息素
+      if (this._config.foodAttraction !== false && p.taskId && p.scope && (p.quality ?? 0) >= 0.7) {
+        try {
+          this._pheromoneEngine.emitPheromone({
+            type: 'food',
+            sourceId: SOURCE,
+            targetScope: p.scope,
+            intensity: Math.min(p.quality || 0.5, 0.8),
+            payload: { taskId: p.taskId, quality: p.quality, foodAttraction: true },
+          });
+          this._publish(EventTopics.PHEROMONE_FOOD_ATTRACTION, {
+            taskId: p.taskId, scope: p.scope, quality: p.quality,
+          });
+          this._stats.foodEmitted = (this._stats.foodEmitted || 0) + 1;
+        } catch { /* non-fatal */ }
+      }
     });
 
     this._messageBus.subscribe('task.assigned', (event) => {
       const p = event?.payload || event;
       if (p.taskId) this.removeTask(p.taskId);
+    });
+
+    // V5.7: danger 信息素回避 — 失败任务发射 danger 信息素警告
+    this._messageBus.subscribe('task.failed', (event) => {
+      if (this._config.dangerAvoidance === false) return;
+      const p = event?.payload || event;
+      if (p.taskId && p.scope) {
+        try {
+          this._pheromoneEngine.emitPheromone({
+            type: 'danger',
+            sourceId: SOURCE,
+            targetScope: p.scope,
+            intensity: 0.8,
+            payload: { taskId: p.taskId, failureReason: p.error, dangerAvoidance: true },
+          });
+          this._stats.dangerEmitted = (this._stats.dangerEmitted || 0) + 1;
+        } catch { /* non-fatal */ }
+      }
     });
   }
 

@@ -133,6 +133,14 @@ export const EventTopics = {
   WORK_STEAL_COMPLETED: 'work.steal.completed',
   PIPELINE_PARTIAL_RESULT: 'pipeline.partial_result',
   DAG_BRIDGE_ACTIVATED: 'dag.bridge.activated',
+
+  // ── V5.7: 共生技能调度 / Skill symbiosis scheduling ──
+  SYMBIOSIS_COLLABORATION_RECORDED: 'symbiosis.collaboration.recorded',
+  SYMBIOSIS_PARTNER_RECOMMENDED: 'symbiosis.partner.recommended',
+
+  // ── V5.7: 多类型信息素 / Multi-type pheromones ──
+  PHEROMONE_TYPE_REGISTERED: 'pheromone.type.registered',
+  PHEROMONE_FOOD_ATTRACTION: 'pheromone.food.attraction',
 };
 
 // ============================================================================

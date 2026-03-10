@@ -40,6 +40,9 @@ const BUILTIN_DEFAULTS = {
   recruit: { decayRate: 0.10, maxTTLMin: 60,  mmasMin: 0.05, mmasMax: 1.00 },
   queen:   { decayRate: 0.02, maxTTLMin: 480, mmasMin: 0.10, mmasMax: 1.00 },
   dance:   { decayRate: 0.08, maxTTLMin: 90,  mmasMin: 0.05, mmasMax: 1.00 },
+  // V5.7: 多类型信息素 / Multi-type pheromones
+  food:    { decayRate: 0.04, maxTTLMin: 180, mmasMin: 0.05, mmasMax: 1.00 },
+  danger:  { decayRate: 0.20, maxTTLMin: 20,  mmasMin: 0.10, mmasMax: 1.00 },
 };
 
 /** 低于此阈值视为蒸发 / Below this threshold, consider evaporated */
@@ -561,8 +564,10 @@ export class PheromoneEngine {
   computeTypedDecay(type, intensity, ageMinutes, decayRate) {
     switch (type) {
       case 'trail':
+      case 'food':       // V5.7: food 使用线性衰减 (持久资源路径)
         return Math.max(0, intensity - decayRate * ageMinutes);
-      case 'alarm': {
+      case 'alarm':
+      case 'danger': {   // V5.7: danger 使用阶梯衰减 (短暂高强度警告)
         const steps = Math.floor(ageMinutes / 10);
         return intensity * Math.pow(0.7, steps);
       }
@@ -686,7 +691,43 @@ export class PheromoneEngine {
     if (ageMinutes <= 0) return ph.intensity;
 
     const decayRate = ph.decayRate || 0.05;
+
+    // V5.7: 路由到类型特定衰减模型 / Route through type-specific decay model
+    const decayModel = this._getDecayModel(ph.type);
+    if (decayModel && decayModel !== 'exponential') {
+      return this.computeTypedDecay(ph.type, ph.intensity, ageMinutes, decayRate);
+    }
+
     return ph.intensity * Math.exp(-decayRate * ageMinutes);
+  }
+
+  /**
+   * V5.7: 获取类型的衰减模型
+   * V5.7: Get decay model for pheromone type
+   *
+   * 优先级: TypeRegistry (DB) → 内置映射 → null (默认 exponential)
+   *
+   * @param {string} type
+   * @returns {string | null}
+   * @private
+   */
+  _getDecayModel(type) {
+    // 1. TypeRegistry (backed by pheromone_type_config DB)
+    if (this._typeRegistry) {
+      const typeConfig = this._typeRegistry.getType(type);
+      if (typeConfig?.decayModel) return typeConfig.decayModel;
+    }
+    // 2. 内置类型映射 / Built-in type mapping
+    const BUILTIN_DECAY_MODELS = {
+      trail: 'linear',
+      alarm: 'step',
+      recruit: 'exponential',
+      queen: 'exponential',
+      dance: 'exponential',
+      food: 'linear',
+      danger: 'step',
+    };
+    return BUILTIN_DECAY_MODELS[type] || null;
   }
 
   /**
