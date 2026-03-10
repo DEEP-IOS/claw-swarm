@@ -187,11 +187,11 @@ describe('PluginAdapter', () => {
       try { adapter?.close(); } catch { /* ignore */ }
     });
 
-    it('should return an array of 7 tool definitions / 返回包含 7 个工具定义的数组', () => {
+    it('should return an array of 8 tool definitions / 返回包含 8 个工具定义的数组', () => {
       const tools = adapter.getTools();
 
       // 验证工具数量 / Verify tool count
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(8);
 
       // 期望的工具名称 / Expected tool names
       const expectedToolNames = [
@@ -202,6 +202,7 @@ describe('PluginAdapter', () => {
         'swarm_memory',
         'swarm_plan',
         'swarm_zone',
+        'swarm_run',
       ];
 
       // 验证每个工具的结构 / Verify each tool's structure

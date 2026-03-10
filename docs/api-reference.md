@@ -1,14 +1,14 @@
 # API Reference / API 参考
 
-**Claw-Swarm V5.2** — Hooks, tools, and engine API documentation.
+**Claw-Swarm V5.4** — Hooks, tools, and engine API documentation.
 
 ---
 
 ## 1. OpenClaw Hooks / OpenClaw 钩子
 
-V5.2 registers **14 hooks** with the OpenClaw gateway (V5.0: 6 + V5.1: 8 new).
+V5.4 registers **16 hooks** with the OpenClaw gateway (V5.0: 6 + V5.1: 8 + V5.3: 2 new).
 
-V5.2 向 OpenClaw 网关注册 **14 个钩子**（V5.0: 6 + V5.1: 8 新增）。
+V5.4 向 OpenClaw 网关注册 **16 个钩子**（V5.0: 6 + V5.1: 8 + V5.3: 2 新增）。
 
 | # | OpenClaw Event | Internal Mapping | Returns | Priority |
 |---|---|---|---|---|
@@ -105,9 +105,9 @@ Publishes to `'agent.message'` topic on MessageBus. If `broadcast: true`, additi
 
 ## 2. Agent Tools / Agent 工具
 
-V5.2 registers **7 tools** via factory functions in `L5-application/tools/`.
+V5.4 registers **8 tools** via factory functions in `L5-application/tools/`.
 
-V5.2 通过 `L5-application/tools/` 中的工厂函数注册 **7 个工具**。
+V5.4 通过 `L5-application/tools/` 中的工厂函数注册 **8 个工具**。
 
 ### a. `swarm_spawn`
 

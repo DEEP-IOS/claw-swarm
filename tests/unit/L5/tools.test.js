@@ -1,8 +1,8 @@
 /**
  * L5 Tool 工厂函数单元测试 / L5 Tool Factory Unit Tests
  *
- * 使用 mock 引擎依赖测试 7 个工具工厂函数的核心行为。
- * Tests core behavior of 7 tool factory functions using mock engine dependencies.
+ * 使用 mock 引擎依赖测试 8 个工具工厂函数的核心行为。
+ * Tests core behavior of 8 tool factory functions using mock engine dependencies.
  *
  * 工具列表 / Tool list:
  * - swarm_spawn:     蜂群生成 / Swarm spawning
@@ -24,6 +24,7 @@ import { createGateTool } from '../../../src/L5-application/tools/swarm-gate-too
 import { createMemoryTool } from '../../../src/L5-application/tools/swarm-memory-tool.js';
 import { createPlanTool } from '../../../src/L5-application/tools/swarm-plan-tool.js';
 import { createZoneTool } from '../../../src/L5-application/tools/swarm-zone-tool.js';
+import { createRunTool } from '../../../src/L5-application/tools/swarm-run-tool.js';
 
 // ============================================================================
 // 静默日志器 / Silent Logger
@@ -220,7 +221,7 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
   // 11. 工具元数据通用测试 / Tool Metadata Tests
   // --------------------------------------------------------------------------
   describe('Tool metadata / 工具元数据', () => {
-    it('all 7 tools should have name, description, parameters, execute / 所有 7 个工具应具有完整元数据', () => {
+    it('all 8 tools should have name, description, parameters, execute / 所有 8 个工具应具有完整元数据', () => {
       const deps = { engines, logger: silentLogger };
 
       const tools = [
@@ -231,14 +232,16 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
         createMemoryTool(deps),
         createPlanTool(deps),
         createZoneTool(deps),
+        createRunTool(deps),
       ];
 
       const expectedNames = [
         'swarm_spawn', 'swarm_query', 'swarm_pheromone',
         'swarm_gate', 'swarm_memory', 'swarm_plan', 'swarm_zone',
+        'swarm_run',
       ];
 
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(8);
 
       tools.forEach((tool, i) => {
         // 名称 / Name

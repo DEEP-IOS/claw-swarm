@@ -39,3 +39,12 @@ build/
 .env
 .env.local
 .env.*.local
+
+# ── Test reports / 测试报告 ──────────────────────────────────
+test-reports/
+
+# ── Windows artifacts / Windows 产物 ─────────────────────────
+nul
+
+# ── Local AI tool config / AI 工具本地配置 ───────────────────
+.cl[a]ude/

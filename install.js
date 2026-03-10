@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claw-Swarm V5.1 — One-click installer / 一键安装脚本
+ * Claw-Swarm V5.4 — One-click installer / 一键安装脚本
  *
  * Usage / 用法:
  *   node install.js           # Auto-detect best method / 自动检测最佳安装方式
@@ -143,7 +143,7 @@ function registerViaConfig() {
 function main() {
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log(`
-Claw-Swarm V5.0 Installer / 安装脚本
+Claw-Swarm V5.4 Installer / 安装脚本
 
 Usage / 用法:
   node install.js              Install and configure / 安装并配置
@@ -179,7 +179,7 @@ What this does / 功能:
     return;
   }
 
-  console.log('\n  🐝 Claw-Swarm V5.0 Installer\n');
+  console.log('\n  🐝 Claw-Swarm V5.4 Installer\n');
 
   checkNodeVersion();
   checkOpenClaw();

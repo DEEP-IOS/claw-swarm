@@ -1,8 +1,8 @@
-# Claw-Swarm V5.2 — Technical Architecture / 技术架构
+# Claw-Swarm V5.4 — Technical Architecture / 技术架构
 
-> V5.2 builds on V5.1 with bio-inspired ecology (Lotka-Volterra, ABC evolution), stigmergic coordination, failure vaccination, FRTM response thresholds, skill symbiosis, pheromone pressure gradients, Jaeger-lite tracing, and idle detection. This document describes the 6-layer implementation architecture, component responsibilities, data flows, and design rationale.
+> V5.4 implements "main path convergence" — making existing capabilities form a real collaboration main path. Building on V5.3 (SwarmAdvisor decision empowerment + 9-signal aggregation), V5.4 adds 4-state adaptive arbitration (DIRECT/BIAS_SWARM/PREPLAN/BRAKE), evidence discipline (3-tier), protocol semantics (9 message types), collaboration tax tracking (5 dimensions), and unified observability (4 categories). 902 tests across 49 files.
 >
-> V5.2 在 V5.1 基础上增加仿生生态（Lotka-Volterra、ABC 进化）、公告板协调、失败免疫、FRTM 响应阈值、技能共生、信息素压力梯度、Jaeger-lite 追踪和空闲检测。本文档描述 6 层实现架构、组件职责、数据流与设计原理。
+> V5.4 实现"主路径收敛"——让已有能力形成真正的协作主路径。在 V5.3（SwarmAdvisor 赋能决策 + 9 信号源聚合）基础上，V5.4 新增四态自适应仲裁（DIRECT/BIAS_SWARM/PREPLAN/BRAKE）、证据纪律（三层）、协议语义（9 种消息）、协作税追踪（五维）和统一观测核心（四类）。49 测试文件共 902 个测试。
 
 ---
 

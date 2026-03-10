@@ -47,7 +47,17 @@
  * - SYSTEM_STARTUP 事件 + 断路器可视化 + Jaeger-lite 追踪
  * - Agent 空闲检测 + 自适应修复记忆
  *
- * @version 5.2.0
+ * V5.3 新增:
+ * - SwarmAdvisor: 蜂群决策赋能 (赋能优先架构，非强制激活)
+ * - swarm_run: 高层一键入口 (合并 swarm_plan + swarm_spawn, 降低 LLM 决策成本)
+ * - /swarm 命令: 确定性入口 (registerCommand, 100% 触发蜂群, 绕过 LLM 判断)
+ * - before_prompt_build Layer 0 (priority:20): 刺激计算 + recruit 信息素
+ * - before_prompt_build Layer 1 (priority:15): 自适应决策上下文计算
+ * - advisory 通过 prependContext 注入用户消息 (强影响力, 已验证机制)
+ * - PI 控制器动态调节建议强度 (recordOutcome 反馈闭环)
+ * - Turn 级 Map 隔离 (MAX_TURNS=50, 并发安全)
+ *
+ * @version 5.4.0
  * @author DEEP-IOS
  */
 
@@ -66,13 +76,15 @@ import { ResponseThreshold } from './L3-agent/response-threshold.js';
 import { StigmergicBoard } from './L2-communication/stigmergic-board.js';
 import { FailureVaccination } from './L3-agent/failure-vaccination.js';
 import { SkillSymbiosisTracker } from './L3-agent/skill-symbiosis.js';
+// V5.3 模块导入 / V5.3 module imports
+import { SwarmAdvisor } from './L4-orchestration/swarm-advisor.js';
 import { EventTopics, wrapEvent } from './event-catalog.js';
 
 // ============================================================================
 // 常量 / Constants
 // ============================================================================
 
-const VERSION = '5.2.0';
+const VERSION = '5.4.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 
@@ -380,6 +392,30 @@ export default {
       logger.warn?.(`[Claw-Swarm] SkillSymbiosisTracker init failed: ${err.message}`);
     }
 
+    // ── 2d. V5.4: 蜂群主路径路由引擎 ──────────────────────────────────
+    //    V5.4: Swarm Main-Path Routing Engine (multi-signal aggregation)
+    let swarmAdvisor = null;
+    if (config.swarmAdvisor?.enabled !== false) {
+      try {
+        swarmAdvisor = new SwarmAdvisor({
+          responseThreshold,
+          pheromoneEngine: adapter._engines?.pheromoneEngine,
+          dagEngine: adapter._engines?.dagEngine,
+          capabilityEngine: adapter._engines?.capabilityEngine,
+          stigmergicBoard,
+          messageBus: adapter._engines?.messageBus,
+          logger,
+          // V5.4: 新增信号源 / New signal sources
+          pheromoneResponseMatrix,
+          failureVaccination,
+          toolResilience,
+        });
+        logger.info?.('[Claw-Swarm] SwarmAdvisor initialized (V5.4 multi-signal)');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] SwarmAdvisor init failed: ${err.message}`);
+      }
+    }
+
     // 获取内部钩子处理器和工具定义 / Get internal hook handlers and tool definitions
     const hooks = adapter.getHooks();
     const tools = adapter.getTools();
@@ -474,6 +510,8 @@ export default {
           skillGovernor: !!config.skillGovernor?.enabled,
           lotkaVolterra: !!config.evolution?.lotkaVolterra,
           abc: !!config.evolution?.abc,
+          swarmAdvisor: !!swarmAdvisor,
+          signalAggregation: !!swarmAdvisor, // V5.4: multi-signal routing
         },
         startedAt: Date.now(),
       };
@@ -490,6 +528,7 @@ export default {
         `[Claw-Swarm] V${VERSION} started — PID=${process.pid} ` +
         `port=${event?.port ?? '?'} status=${JSON.stringify(status)}`
       );
+
     }, { priority: 10 });
 
     // ━━━ before_model_resolve [V5.1 新增] ━━━
@@ -540,27 +579,200 @@ export default {
       }
     }, { priority: 10 });
 
+    // ━━━ before_tool_call [V5.3: 蜂群路由硬约束] ━━━
+    // 当 SwarmAdvisor 判定需要 swarm_plan 首跳时, block 非 swarm 工具调用
+    // 配合 prependContext 软引导形成两阶段路由器:
+    // Phase A: prependContext 注入 advisory (软引导)
+    // Phase B: before_tool_call block 非 swarm 工具 (硬约束, fail-closed)
+    //
+    // When SwarmAdvisor determines swarm_plan is needed first, block non-swarm tools.
+    // Works with prependContext soft guidance to form a two-stage router:
+    // Phase A: prependContext advisory injection (soft guidance)
+    // Phase B: before_tool_call block non-swarm tools (hard constraint, fail-closed)
+    api.on('before_tool_call', async (event, ctx) => {
+      if (!swarmAdvisor) return;
+
+      const toolName = event.toolName || event.name;
+      const turnId = event.turnId || ctx?.turnId || _lastTurnId;
+      if (!turnId) return;
+
+      try {
+        const result = swarmAdvisor.checkToolRouting(turnId, toolName);
+        if (result?.block) {
+          logger.info?.(`[Claw-Swarm] Swarm routing: blocked ${toolName}, reason: ${result.blockReason?.substring(0, 80)}`);
+          return result;
+        }
+      } catch (err) {
+        logger.debug?.(`[Claw-Swarm] Swarm routing error: ${err.message}`);
+      }
+    }, { priority: 8 }); // priority 8: 在 toolResilience(10) 之后执行
+
+    // V5.3: 从 event.messages 提取最后一条用户消息
+    // V5.3: Extract last user message from event.messages array
+    // OpenClaw before_prompt_build event: { prompt: systemPrompt, messages: [{role,content}...] }
+    /**
+     * 从 OpenClaw before_prompt_build 事件中提取用户消息文本
+     * Extract user message text from OpenClaw before_prompt_build event
+     *
+     * OpenClaw 事件结构 / OpenClaw event structure:
+     *   event.prompt   = 当前用户消息（可能带 Sender metadata 前缀）
+     *                     Current user message (may have Sender metadata prefix)
+     *   event.messages = 历史对话消息（不含当前消息）
+     *                     Historical conversation messages (excludes current)
+     *
+     * WebChat metadata 格式 / WebChat metadata format:
+     *   "Sender (untrusted metadata):\n```json\n{...}\n```\n\n[Mon 2026-...] 用户实际文字"
+     */
+    const _stripMetadata = (text) => {
+      if (!text) return '';
+      // 1. <<<EXTERNAL_UNTRUSTED_CONTENT>>> 包裹格式
+      const metaEnd = text.indexOf('\n<<<END_EXTERNAL_UNTRUSTED_CONTENT');
+      if (metaEnd > 0) {
+        const afterMeta = text.substring(text.indexOf('>>>', metaEnd) + 3).trim();
+        if (afterMeta) return afterMeta;
+      }
+      // 2. Sender (untrusted metadata) 前缀（WebChat 格式）
+      const senderMatch = text.match(/^Sender \(untrusted metadata\):[\s\S]*?```\n([\s\S]+)/);
+      if (senderMatch?.[1]) {
+        let userText = senderMatch[1].trim();
+        // 去除时间戳前缀 / Strip timestamp prefix: [Mon 2026-03-09 21:06 GMT]
+        userText = userText.replace(/^\[.*?\]\s*/, '');
+        return userText || text;
+      }
+      return text;
+    };
+
+    const _extractUserMessage = (event) => {
+      // 1. 优先: event.prompt — OpenClaw 传入的当前用户消息
+      //    Primary: event.prompt — current user message passed by OpenClaw
+      //    新会话首条消息时 event.messages 为空，但 event.prompt 始终包含当前用户文字
+      if (event?.prompt && typeof event.prompt === 'string') {
+        const stripped = _stripMetadata(event.prompt);
+        // 排除纯 metadata 无实际内容的情况 / Skip if metadata-only with no real content
+        if (stripped && stripped.length > 1 &&
+            !stripped.startsWith('Continue where you left off') &&
+            stripped !== 'ping') {
+          return stripped;
+        }
+      }
+
+      // 2. Fallback: event.messages — 历史消息中最后一条 user 消息
+      //    Fallback: last user message from conversation history
+      if (Array.isArray(event?.messages) && event.messages.length > 0) {
+        for (let i = event.messages.length - 1; i >= 0; i--) {
+          const msg = event.messages[i];
+          if (msg?.role === 'user') {
+            let text = '';
+            if (typeof msg.content === 'string') text = msg.content;
+            else if (Array.isArray(msg.content)) {
+              const textPart = msg.content.find(p => p.type === 'text');
+              if (textPart?.text) text = textPart.text;
+            }
+            if (text && !text.startsWith('Continue where you left off') &&
+                !text.startsWith('<!-- Swarm Context') &&
+                text !== 'ping') {
+              return _stripMetadata(text);
+            }
+          }
+        }
+      }
+
+      // 3. Fallback: event.userMessage — E2E 测试兼容
+      //    Fallback: E2E test compatibility
+      if (event?.userMessage) return event.userMessage;
+      return '';
+    };
+
+    // V5.3: 跨 hook 共享变量 / Cross-hook shared variables (Layer 0 → Layer 1 → Phase 3)
+    let _lastAdvisoryContext = null; // Layer 1 → Phase 3 advisory 上下文传递
+    let _lastTurnId = null;          // Layer 0 → Layer 1 turnId 传递
+
+    // ━━━ before_prompt_build [V5.3: Layer 0 — 静默准备, priority: 20] ━━━
+    // SwarmAdvisor Layer 0: 刺激计算 + 轻量 recruit 信息素 (Dashboard 可见)
+    // SwarmAdvisor Layer 0: stimulus computation + lightweight recruit pheromone
+    // NOTE: OpenClaw priority 数字越大越先执行, Layer0(20) → Layer1(15) → Phase3(5)
+    api.on('before_prompt_build', async (event, ctx) => {
+      if (!swarmAdvisor) return;
+
+      try {
+        const userInput = _extractUserMessage(event);
+        if (!userInput) return; // 没有用户消息（如心跳），跳过 / No user message (e.g. heartbeat), skip
+        const turnId = event.turnId || ctx?.turnId || randomUUID();
+        _lastTurnId = turnId; // 传递给 Layer 1 / Pass to Layer 1
+
+        // handleLayer0 内部已调用 resetTurn(turnId)，无需重复 / handleLayer0 calls resetTurn internally
+        swarmAdvisor.handleLayer0(userInput, turnId);
+      } catch (err) {
+        logger.debug?.(`[Claw-Swarm] SwarmAdvisor Layer 0 error: ${err.message}`);
+      }
+    }, { priority: 20 });
+
+    // ━━━ before_prompt_build [V5.3: Layer 1 — 决策上下文赋能, priority: 15] ━━━
+    // SwarmAdvisor Layer 1: 计算赋能上下文并存储到 _lastAdvisoryContext
+    // Phase 3 通过 prependContext 注入用户消息 (强影响力)
+    // SwarmAdvisor Layer 1: compute advisory context and store in _lastAdvisoryContext
+    // Phase 3 injects via prependContext into user message (strong influence)
+    api.on('before_prompt_build', async (event, ctx) => {
+      _lastAdvisoryContext = null;
+      if (!swarmAdvisor) return;
+
+      try {
+        const userInput = _extractUserMessage(event);
+        if (!userInput) return; // 没有用户消息，跳过 / No user message, skip
+        // 使用 Layer 0 保存的 turnId，确保两层引用同一个 turn
+        // Use turnId saved by Layer 0 to ensure both layers reference the same turn
+        const turnId = event.turnId || ctx?.turnId || _lastTurnId;
+        const result = swarmAdvisor.handleLayer1(userInput, turnId);
+
+        if (result?.context) {
+          _lastAdvisoryContext = result.context;
+        }
+      } catch (err) {
+        logger.debug?.(`[Claw-Swarm] SwarmAdvisor Layer 1 error: ${err.message}`);
+      }
+    }, { priority: 15 });
+
     // ━━━ before_prompt_build [V5.1 新增] ━━━
-    // Phase 1: 工具失败提示注入 (priority: 5, prependContext)
-    // Phase 3: 蜂群上下文注入 (priority: 10, prependSystemContext — 当 ContextEngine 未启用时)
-    // Tool failure prompt injection + swarm context fallback
+    // Phase 1: 工具失败提示注入 (prependContext)
+    // Phase 3a: advisory 赋能注入 (prependContext — 用户消息注入, 强影响力)
+    // Phase 3b: 蜂群状态注入 (prependSystemContext — 环境信息)
+    //
+    // V5.3: advisory 通过 prependContext 注入用户消息, 不再走 prependSystemContext
+    // prependContext 注入用户消息开头, LLM 感知更强 (已在 toolResilience 中验证有效)
+    // prependSystemContext 注入系统提示词, 被 3000-8000 字符的基础提示词淹没 (已验证无效)
+    //
+    // V5.3: advisory injected via prependContext (user message, strong influence)
+    // prependContext prepends to user message — LLM perceives it strongly (proven in toolResilience)
+    // prependSystemContext prepends to system prompt — drowned by 3000-8000 char base prompt (proven ineffective)
     api.on('before_prompt_build', async (event) => {
       const result = {};
+      const prependParts = [];
 
       // Phase 1: 工具失败重试提示 / Tool failure retry prompts
       if (toolResilience) {
         try {
           const failureCtx = toolResilience.getFailureContext();
           if (failureCtx) {
-            result.prependContext = failureCtx;
+            prependParts.push(failureCtx);
           }
         } catch (err) {
           logger.warn?.(`[Claw-Swarm] before_prompt_build resilience error: ${err.message}`);
         }
       }
 
-      // Phase 3: 蜂群上下文（仅当 ContextEngine 未启用时）
-      // Phase 3: Swarm context (only when ContextEngine is NOT enabled)
+      // Phase 3a: advisory 赋能注入 (用户消息注入)
+      // V5.3: advisory 通过 prependContext 注入, 与 failureCtx 合并
+      // V5.3: advisory via prependContext, concatenated with failureCtx
+      if (_lastAdvisoryContext) {
+        prependParts.push(_lastAdvisoryContext);
+      }
+
+      if (prependParts.length > 0) {
+        result.prependContext = prependParts.join('\n\n');
+      }
+
+      // Phase 3b: 蜂群状态注入 (系统提示词 — 环境信息, 不含 advisory)
+      // Swarm status via prependSystemContext (ambient info, without advisory)
       if (!config.contextEngine?.enabled) {
         try {
           const swarmCtx = buildSwarmContextFallback({
@@ -740,6 +952,16 @@ export default {
         });
       } catch { /* 静默 / silent */ }
 
+      // V5.3: SwarmAdvisor 工具调用追踪 / SwarmAdvisor tool call tracking
+      if (swarmAdvisor && (toolName === 'swarm_spawn' || toolName === 'swarm_plan' || toolName === 'swarm_run')) {
+        try {
+          const turnId = event.turnId || ctx?.turnId;
+          if (turnId) {
+            swarmAdvisor.markSwarmToolUsed(turnId);
+          }
+        } catch { /* non-fatal */ }
+      }
+
       // V5.1 Phase 5: Skill 使用追踪 / Skill usage tracking
       const skillGovernor = adapter._engines?.skillGovernor;
       if (skillGovernor && config.skillGovernor?.enabled) {
@@ -807,6 +1029,11 @@ export default {
         // V5.2: 停止信息素响应矩阵 / Stop pheromone response matrix
         if (pheromoneResponseMatrix) {
           try { pheromoneResponseMatrix.stop?.(); } catch { /* non-fatal */ }
+        }
+
+        // V5.3: 清理 SwarmAdvisor turn 状态 / Cleanup SwarmAdvisor turn state
+        if (swarmAdvisor) {
+          try { swarmAdvisor.destroy(); } catch { /* non-fatal */ }
         }
 
         adapter.close();
@@ -981,9 +1208,10 @@ export default {
       // 检测是否有 swarm_spawn tool_call 在本轮输出中
       // Detect if swarm_spawn tool_call exists in this turn's output
       const toolCalls = event.toolCalls || event.tool_calls || [];
-      const hasSpawnToolCall = toolCalls.some(tc =>
-        (tc.name || tc.function?.name) === 'swarm_spawn'
-      );
+      const hasSpawnToolCall = toolCalls.some(tc => {
+        const n = tc.name || tc.function?.name;
+        return n === 'swarm_spawn' || n === 'swarm_run';
+      });
 
       if (hasSpawnToolCall && coordinator) {
         // 记录 tool_call 已检测, 后续文本解析将被抑制
@@ -1000,6 +1228,74 @@ export default {
     // ── 4. 注册 OpenClaw 工具 / Register OpenClaw Tools ─────────────────
     for (const tool of tools) {
       api.registerTool(tool);
+    }
+
+    // ── 4a. V5.3: 注册 /swarm 命令 (确定性入口) ────────────────────────
+    //    Register /swarm command (deterministic entry point)
+    //
+    //    解决核心问题: LLM 70%+ 概率跳过 swarm tools, /swarm 命令 100% 触发蜂群
+    //    Core problem: LLM skips swarm tools 70%+, /swarm command triggers 100%
+    //
+    //    用法 / Usage: /swarm 帮我分析A股大盘走势
+    //    → 自动调用 swarm_run (auto 模式) → 分解 + 角色推荐 + 派遣
+    if (api.registerCommand) {
+      try {
+        api.registerCommand({
+          name: 'swarm',
+          description: '启动蜂群协作: 自动分解任务、分配角色、派遣子代理执行。用法: /swarm <任务描述>',
+          acceptsArgs: true,
+          requireAuth: true,
+          handler: async (ctx) => {
+            const goal = ctx.args?.trim();
+            if (!goal) {
+              return {
+                text: '⚠️ 请提供任务描述。用法: `/swarm 帮我分析A股大盘走势`',
+              };
+            }
+
+            logger.info?.(`[Claw-Swarm] /swarm command: "${goal.substring(0, 80)}"`);
+
+            // 找到 swarm_run 工具并直接调用
+            // Find swarm_run tool and invoke directly
+            const swarmRunTool = tools.find(t => t.name === 'swarm_run');
+            if (!swarmRunTool) {
+              return { text: '⚠️ swarm_run 工具不可用 / swarm_run tool not available' };
+            }
+
+            try {
+              const result = await swarmRunTool.handler({ goal, mode: 'auto' });
+
+              if (!result.success) {
+                return { text: `⚠️ 蜂群启动失败: ${result.error}` };
+              }
+
+              // 构建人类可读的结果摘要 / Build human-readable result summary
+              const parts = [`✅ 蜂群协作已启动\n\n📋 计划: ${result.plan?.id || 'N/A'}`];
+
+              if (result.dispatched?.length > 0) {
+                parts.push(`\n🐝 已派遣 ${result.dispatched.length} 个子代理:`);
+                for (const d of result.dispatched) {
+                  parts.push(`  • ${d.roleName}: ${d.description?.substring(0, 60) || 'N/A'}`);
+                }
+              }
+
+              if (result.errors?.length > 0) {
+                parts.push(`\n⚠️ ${result.errors.length} 个阶段派遣失败`);
+              }
+
+              parts.push(`\n💡 使用 swarm_query 查看进度。`);
+
+              return { text: parts.join('\n') };
+            } catch (err) {
+              logger.error?.(`[Claw-Swarm] /swarm command error: ${err.message}`);
+              return { text: `⚠️ 蜂群执行出错: ${err.message}` };
+            }
+          },
+        });
+        logger.info?.('[Claw-Swarm] /swarm command registered');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] /swarm command registration failed: ${err.message}`);
+      }
     }
 
     // ── 4b. 注册 swarm_dispatch 拦截器 ──────────────────────────────────
@@ -1227,7 +1523,7 @@ export default {
       } catch { /* best-effort */ }
     });
 
-    const hookCount = 14; // V5.0(6) + V5.1(8)
+    const hookCount = 17; // V5.0(6) + V5.1(8) + V5.3(3: Layer0 + Layer1 + tool routing)
     logger.info?.(`[Claw-Swarm] V${VERSION} plugin registered — ${hookCount} hooks + ${tools.length} tools`);
   },
 };

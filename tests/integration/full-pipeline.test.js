@@ -140,9 +140,9 @@ describe('Full Pipeline Integration', () => {
 
   // ━━━ L5 工具集成 / L5 Tool Integration ━━━
 
-  it('L5: 7 工具全部可调用 / all 7 tools callable', async () => {
+  it('L5: 8 工具全部可调用 / all 8 tools callable', async () => {
     const tools = adapter.getTools();
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(8);
 
     // 逐一验证工具结构 / Verify each tool structure
     const names = tools.map((t) => t.name);
@@ -153,6 +153,7 @@ describe('Full Pipeline Integration', () => {
     expect(names).toContain('swarm_memory');
     expect(names).toContain('swarm_plan');
     expect(names).toContain('swarm_zone');
+    expect(names).toContain('swarm_run');
 
     // 调用 swarm_query.status / Call swarm_query.status
     const queryTool = tools.find((t) => t.name === 'swarm_query');

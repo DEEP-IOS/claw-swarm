@@ -88,6 +88,19 @@ export const EventTopics = {
   // ── V5.2: 响应阈值 / Response threshold ──
   THRESHOLD_ADJUSTED: 'threshold.adjusted',
   THRESHOLD_TRIGGERED: 'threshold.triggered',
+
+  // ── V5.3: 蜂群决策赋能 / Swarm decision empowerment ──
+  SWARM_ADVISORY_INJECTED: 'swarm.advisory.injected',
+
+  // ── V5.4: 证据纪律 / Evidence discipline ──
+  EVIDENCE_CLAIM_REGISTERED: 'evidence.claim.registered',
+  EVIDENCE_CLAIM_EVALUATED: 'evidence.claim.evaluated',
+
+  // ── V5.4: 协议语义 / Protocol semantics ──
+  PROTOCOL_MESSAGE_SENT: 'protocol.message.sent',
+
+  // ── V5.4: 预算追踪 / Budget tracking ──
+  BUDGET_TURN_COMPLETED: 'budget.turn.completed',
 };
 
 // ============================================================================

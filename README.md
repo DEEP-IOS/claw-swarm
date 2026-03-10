@@ -1,12 +1,12 @@
 [**中文**](README.zh-CN.md) | English
 
-# Claw-Swarm V5.2
+# Claw-Swarm V5.4
 
-**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 18+ algorithms, stigmergic coordination, failure vaccination, and real-time monitoring.**
+**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, adaptive 4-state arbitration, evidence discipline, protocol semantics, collaboration tax tracking, and unified observability.**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
-![Version](https://img.shields.io/badge/version-5.2.0-blue)
-![Tests](https://img.shields.io/badge/tests-659%20across%2043%20files-green)
+![Version](https://img.shields.io/badge/version-5.4.0-blue)
+![Tests](https://img.shields.io/badge/tests-902%20across%2049%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 <p align="center">
@@ -54,10 +54,16 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 | **Lotka-Volterra Ecology** | Species competition dynamics with carrying capacity and predator-prey equations | 种群竞争动力学 + 环境容量 + 捕食方程 |
 | **Response Threshold (FRTM)** | Per-agent adaptive thresholds with PI controller for homeostatic task allocation | 固定响应阈值 + PI 控制器自适应任务分配 |
 | **Skill Symbiosis** | Cosine-similarity based complementarity tracking for optimal agent pairing | 余弦相似度互补性追踪，最优 Agent 配对 |
+| **Swarm Decision Empowerment** | V5.3: 9-signal composite aggregation + PI-controller adaptive advisory context injection | V5.3: 9 信号源聚合 + PI 控制器自适应赋能上下文 |
+| **Adaptive Arbiter (4-State)** | V5.4: DIRECT/BIAS_SWARM/PREPLAN/BRAKE mode routing with environment-aware escalation | V5.4: 四态仲裁 + 环境感知升级 |
+| **Evidence Discipline** | V5.4: 3-tier evidence gate (PRIMARY/CORROBORATION/INFERENCE) with weighted scoring | V5.4: 三层证据纪律 + 加权评分 |
+| **Protocol Semantics** | V5.4: 9 typed messages (REQUEST/COMMIT/ACK/...) with conversation tracking and validation | V5.4: 9 种语义消息 + 会话追踪和协议验证 |
+| **Collaboration Tax** | V5.4: 5-dimension budget tracking with per-turn tax computation and per-mode ROI | V5.4: 五维预算追踪 + 协作税 + 按模式 ROI |
+| **Unified Observability** | V5.4: 4-category observation (decision/execution/repair/strategy) with ring buffer | V5.4: 四类观测数据 + 环形缓冲区 |
 | **5 Bee Personas** | scout, worker, guard, queen-messenger, designer — signal-driven behavior | 5 种蜜蜂人格：侦察蜂、工蜂、守卫蜂、女王信使、设计蜂 |
 | **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标 |
 | **Jaeger-lite Tracing** | Lightweight distributed tracing with trace spans and startup diagnostics | 轻量分布式追踪 + 启动诊断 |
-| **Plugin SDK Integration** | 14 OpenClaw hooks, 7 agent tools, `{ id, register(api) }` pattern | 14 个钩子、7 个工具，标准 Plugin SDK 模式 |
+| **Plugin SDK Integration** | 16 OpenClaw hooks, 8 agent tools, `{ id, register(api) }` pattern | 16 个钩子、8 个工具，标准 Plugin SDK 模式 |
 
 ---
 
@@ -67,7 +73,7 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 ┌─────────────────────────────────────────────────────────────┐
 │  L6  Monitoring        监控层                                │
 │      StateBroadcaster · MetricsCollector · DashboardService │
-│      HealthChecker · dashboard.html · dashboard-v2.html     │
+│      HealthChecker · ObservabilityCore · dashboard-v2.html  │
 │      (SSE, port 19100)                                      │
 ├─────────────────────────────────────────────────────────────┤
 │  L5  Application       应用层                                │
@@ -82,19 +88,19 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 │      ContractNet · ReplanEngine · ABCScheduler              │
 │      RoleDiscovery · RoleManager · ZoneManager              │
 │      HierarchicalCoordinator · TaskDAGEngine                │
-│      SpeciesEvolver (LV + ABC evolution)                    │
+│      SpeciesEvolver · SwarmAdvisor · BudgetTracker          │
 ├─────────────────────────────────────────────────────────────┤
 │  L3  Agent             智能体层                              │
 │      WorkingMemory · EpisodicMemory · SemanticMemory        │
 │      ContextCompressor · CapabilityEngine · PersonaEvolution│
 │      ReputationLedger · SoulDesigner · SwarmContextEngine   │
-│      ResponseThreshold · FailureVaccination                 │
+│      ResponseThreshold · FailureVaccination · EvidenceGate  │
 │      SkillSymbiosisTracker                                  │
 ├─────────────────────────────────────────────────────────────┤
 │  L2  Communication     通信层                                │
 │      MessageBus · PheromoneEngine · GossipProtocol          │
 │      PheromoneTypeRegistry · PheromoneResponseMatrix         │
-│      StigmergicBoard                                        │
+│      StigmergicBoard · ProtocolSemantics                    │
 ├─────────────────────────────────────────────────────────────┤
 │  L1  Infrastructure    基础设施层                             │
 │      DatabaseManager (SQLite, 44 tables) · ConfigManager    │
@@ -214,7 +220,7 @@ Claw-Swarm 要求模型具备强工具调用能力。完整指南见 [docs/model
 
 ## OpenClaw Hooks / OpenClaw 钩子
 
-14 hooks registered via Plugin SDK / 通过 Plugin SDK 注册 14 个钩子：
+16 hooks registered via Plugin SDK / 通过 Plugin SDK 注册 16 个钩子：
 
 | Hook | Trigger | Internal Mapping / 内部映射 |
 |---|---|---|
@@ -241,7 +247,7 @@ Sub-agent lifecycle is managed by the hierarchical coordinator: depth limits, co
 
 ## Tools / 工具
 
-7 agent tools registered via Plugin SDK / 通过 Plugin SDK 注册的 7 个智能体工具：
+8 agent tools registered via Plugin SDK / 通过 Plugin SDK 注册的 8 个智能体工具：
 
 | Tool | Purpose | 用途 |
 |---|---|---|
@@ -252,6 +258,7 @@ Sub-agent lifecycle is managed by the hierarchical coordinator: depth limits, co
 | `swarm_memory` | Read/write agent memory (working/episodic/semantic) | 读写智能体记忆 |
 | `swarm_plan` | Create and manage execution plans | 创建和管理执行计划 |
 | `swarm_zone` | Manage work zones and auto-assignment | 管理工作区与自动分配 |
+| `swarm_run` | V5.3: One-click execution (plan + spawn combined) | V5.3: 一键执行（计划+派生合一） |
 
 ---
 
@@ -273,7 +280,7 @@ Claw-Swarm 采用多层次测试策略确保生产可用性：
 
 | Level | Type | Coverage | 覆盖范围 |
 |-------|------|----------|----------|
-| Unit | 659 tests across 43 files (vitest) | All 6 layers, every module | 6 层全覆盖 |
+| Unit | 902 tests across 49 files (vitest) | All 6 layers, every module | 6 层全覆盖 |
 | Integration | End-to-end pipeline | Multi-tool workflows, memory persistence, zone governance | 跨工具流程、记忆持久化、Zone 治理 |
 | Stress | High-frequency & boundary | 20+ rapid calls, WAL concurrency, edge cases | 高频调用、并发写入、边界值 |
 | **Production** | **20 tests in live OpenClaw Gateway** | **Plugin load, tool invocation, MMAS, memory, quality gate, MoE, integration scenarios, stress** | **真实 Gateway 环境全链路验证** |
@@ -288,7 +295,7 @@ The install test was independently conducted on a clean Linux (Node.js v22, Open
 安装测试在干净 Linux 环境（Node.js v22, OpenClaw 2026.2.13）中独立执行 — 从 `git clone` 到 `swarm_query` 调用成功仅需 3 分钟，100% 通过率，零阻断性问题。报告见：**[安装测试报告](docs/install-test-report.md)**
 
 ```bash
-# All tests (659 tests, 43 files) / 全部测试
+# All tests (902 tests, 49 files) / 全部测试
 npm test
 
 # By category / 按类别
@@ -343,15 +350,16 @@ src/
 │       ├── database-schemas.js               # DB table schemas
 │       └── message-schemas.js                # Message format schemas
 │
-├── L2-communication/                         # 通信层 (6 files)
+├── L2-communication/                         # 通信层 (7 files)
 │   ├── message-bus.js                        # Pub/sub + wildcards + DLQ
 │   ├── pheromone-engine.js                   # MMAS bounds, typed decay
 │   ├── gossip-protocol.js                    # Epidemic broadcast + heartbeat
 │   ├── pheromone-type-registry.js            # Custom pheromone types
 │   ├── pheromone-response-matrix.js          # V5.2: Pressure gradient + auto-escalation
-│   └── stigmergic-board.js                   # V5.2: Persistent bulletin board
+│   ├── stigmergic-board.js                   # V5.2: Persistent bulletin board
+│   └── protocol-semantics.js                 # V5.4: 9 semantic message types
 │
-├── L3-agent/                                 # 智能体层 (12 files)
+├── L3-agent/                                 # 智能体层 (13 files)
 │   ├── memory/
 │   │   ├── working-memory.js                 # 3-tier: focus/context/scratchpad
 │   │   ├── episodic-memory.js                # Ebbinghaus forgetting curve
@@ -364,9 +372,10 @@ src/
 │   ├── swarm-context-engine.js               # V5.1: Rich context builder
 │   ├── response-threshold.js                 # V5.2: FRTM + PI controller
 │   ├── failure-vaccination.js                # V5.2: Pattern immunization
-│   └── skill-symbiosis.js                    # V5.2: Cosine complementarity
+│   ├── skill-symbiosis.js                    # V5.2: Cosine complementarity
+│   └── evidence-gate.js                      # V5.4: 3-tier evidence discipline
 │
-├── L4-orchestration/                         # 编排层 (15 files)
+├── L4-orchestration/                         # 编排层 (18 files)
 │   ├── orchestrator.js                       # DAG task decomposition
 │   ├── critical-path.js                      # CPM scheduling
 │   ├── quality-controller.js                 # Multi-rubric quality gate
@@ -381,9 +390,11 @@ src/
 │   ├── zone-manager.js                       # Jaccard auto-assign
 │   ├── hierarchical-coordinator.js           # V5.1: Hierarchical swarm
 │   ├── task-dag-engine.js                    # V5.1: DAG + work-stealing + DLQ
-│   └── species-evolver.js                    # V5.1+V5.2: Species evolution + GEP + LV + ABC
+│   ├── species-evolver.js                    # V5.1+V5.2: Species evolution + GEP + LV + ABC
+│   ├── swarm-advisor.js                      # V5.3+V5.4: Decision empowerment + 4-state arbiter
+│   └── budget-tracker.js                     # V5.4: 5-dimension collaboration tax
 │
-├── L5-application/                           # 应用层 (13 files)
+├── L5-application/                           # 应用层 (14 files)
 │   ├── plugin-adapter.js                     # Engine lifecycle manager
 │   ├── context-service.js                    # Rich LLM context builder
 │   ├── circuit-breaker.js                    # 3-state circuit breaker
@@ -397,26 +408,28 @@ src/
 │       ├── swarm-gate-tool.js
 │       ├── swarm-memory-tool.js
 │       ├── swarm-plan-tool.js
-│       └── swarm-zone-tool.js
+│       ├── swarm-zone-tool.js
+│       └── swarm-run-tool.js                 # V5.3: One-click execution
 │
-├── event-catalog.js                          # V5.1+V5.2: 37 EventTopics + schema
+├── event-catalog.js                          # V5.1-V5.4: 46 EventTopics + schema
 │
-└── L6-monitoring/                            # 监控层 (6 files)
+└── L6-monitoring/                            # 监控层 (7 files)
     ├── state-broadcaster.js                  # SSE push to clients
     ├── metrics-collector.js                  # RED metrics (Rate/Errors/Duration)
     ├── dashboard-service.js                  # Fastify HTTP + /v2 API + trace spans
     ├── dashboard.html                        # Dark theme web dashboard
     ├── dashboard-v2.html                     # V5.1: Hex hive + DAG + particles
-    └── health-checker.js                     # V5.1+V5.2: Health + idle detection
+    ├── health-checker.js                     # V5.1+V5.2: Health + idle detection
+    └── observability-core.js                 # V5.4: 4-category unified observability
 
 tests/
 ├── unit/
 │   ├── L1/   (4 files)                       # Infrastructure tests
-│   ├── L2/   (5 files)                       # Communication tests (+V5.2)
-│   ├── L3/   (8 files)                       # Agent tests (+V5.2)
-│   ├── L4/  (12 files)                       # Orchestration tests (+V5.2)
-│   ├── L5/   (4 files)                       # Application tests (+V5.2)
-│   └── L6/   (4 files)                       # Monitoring tests (+V5.2)
+│   ├── L2/   (6 files)                       # Communication tests (+V5.4)
+│   ├── L3/   (9 files)                       # Agent tests (+V5.4)
+│   ├── L4/  (15 files)                       # Orchestration tests (+V5.4)
+│   ├── L5/   (5 files)                       # Application tests (+V5.3)
+│   └── L6/   (5 files)                       # Monitoring tests (+V5.4)
 ├── integration/  (1 file)                    # Full pipeline tests
 └── stress/       (legacy)                    # Stress/edge-case tests
 ```

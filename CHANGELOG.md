@@ -4,7 +4,116 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
-## [5.2.0] - 2026-03-09
+## [5.4.0] - 2026-03-10
+
+### Enhancement: Main Path Convergence / 增强：主路径收敛
+
+Claw-Swarm V5.4 implements "main path convergence" — making existing capabilities form a real collaboration main path. Adds 4-state adaptive arbitration, evidence discipline, protocol semantics, collaboration tax tracking, and unified observability. 4 new source modules, 5 new event topics (total 46), 6 new test files (154 tests). 902 tests across 49 test files.
+
+Claw-Swarm V5.4 实现"主路径收敛"——让已有能力形成真正的协作主路径。新增四态自适应仲裁、证据纪律层、协议语义、协作税追踪和统一观测核心。4 个新源模块、5 个新事件主题（共 46 个）、6 个新测试文件（154 个测试）。49 测试文件共 902 个测试。
+
+### Adaptive Arbiter (4-State Routing) / 四态自适应仲裁
+
+Upgraded SwarmAdvisor from binary (force/don't force) to 4-state arbitration:
+
+将 SwarmAdvisor 从二元（强制/不强制）升级为四态仲裁：
+
+| Mode / 模式 | Condition / 条件 | Tool Routing / 工具路由 | Advisory / 建议 |
+|---|---|---|---|
+| **DIRECT** | stimulus ≤ threshold×0.7 | No constraints / 无约束 | Brief standby note / 简短待命 |
+| **BIAS_SWARM** | stimulus ≤ threshold | T2 tools blocked / 仅阻断 T2 | Mild suggestion with opt-out / 温和建议可跳过 |
+| **PREPLAN** | stimulus > threshold | T2 + EXTERNAL blocked / 阻断 T2+外部 | Strong recommendation / 强烈推荐 |
+| **BRAKE** | stimulus > threshold + ≥2 env alerts | T2 + EXTERNAL blocked / 阻断 T2+外部 | Environment alerts + urgent guidance / 环境警报 |
+
+### New Source Files (4) / 新增源文件
+
+#### L2 Communication / L2 通信层
+- **ProtocolSemantics** (`protocol-semantics.js`): 9 semantic message types (REQUEST/COMMIT/ACK/DELEGATE/ESCALATE/REJECT/REVISE/REPAIR/REPORT) with conversation tracking, reply chains, and protocol validation
+  9 种语义消息类型，会话追踪、回复链和协议验证
+
+#### L3 Agent / L3 智能体层
+- **EvidenceGate** (`evidence-gate.js`): 3-tier evidence discipline (PRIMARY/CORROBORATION/INFERENCE) with weighted scoring, multi-source corroboration bonus, and claim lifecycle management
+  三层证据纪律，加权评分、多源印证奖励、声明生命周期管理
+
+#### L4 Orchestration / L4 编排层
+- **BudgetTracker** (`budget-tracker.js`): 5-dimension budget tracking (latency/token/coordination/observability/repair) with collaboration tax computation `tax = (actual - baseline) / baseline`, per-mode averaging and ROI tracking
+  五维预算追踪 + 协作税计算，按仲裁模式统计和 ROI 追踪
+
+#### L6 Monitoring / L6 监控层
+- **ObservabilityCore** (`observability-core.js`): 4-category observation collection (decision/execution/repair/strategy) with ring buffer (500 events), MessageBus auto-subscription, timeline queries, and structured summaries
+  四类观测数据收集，环形缓冲区、事件总线自动订阅、时间线查询
+
+### Key Modifications / 重要修改
+
+- **swarm-advisor.js**: Upgraded to 4-state adaptive arbiter (DIRECT/BIAS_SWARM/PREPLAN/BRAKE). New `_computeArbiterMode()`, `_buildBrakeAlert()`. Mode-differentiated `checkToolRouting()` and `buildAdvisoryContext()`. Added `ARBITER_MODES` export and `arbiterModes` stats tracking
+  升级为四态自适应仲裁器，新增模式计算、环境警报构建、按模式区分的工具路由和赋能上下文
+- **event-catalog.js**: 5 new event topics (EVIDENCE_CLAIM_REGISTERED, EVIDENCE_CLAIM_EVALUATED, PROTOCOL_MESSAGE_SENT, BUDGET_TURN_COMPLETED, plus V5.3 SWARM_ADVISORY_INJECTED). Total 46 topics
+  5 个新事件主题，共 46 个
+
+### Test Coverage / 测试覆盖
+- 902 tests across 49 files (up from 748 in V5.3)
+  902 个测试（V5.3 为 748 个）
+- 6 new test files (154 tests): swarm-advisor V5.4 additions (+27), evidence-gate (45), protocol-semantics (34), budget-tracker (23), observability-core (25)
+  6 个新测试文件（154 个测试）
+
+---
+
+## [5.3.0] - 2026-03-10
+
+### Enhancement: Swarm Decision Empowerment / 增强：蜂群决策赋能
+
+Claw-Swarm V5.3 solves the core adoption problem: LLMs skip swarm tools 70-90% of the time because they lack context about when collaboration helps. V5.3 adds SwarmAdvisor — an "empowerment-first" architecture that provides structured intelligence (capability profiles, task analysis, action suggestions) so LLMs make informed decisions about swarm collaboration. Also adds `swarm_run` tool and 9-signal composite aggregation. 1 new source module, 1 new tool, 2 new hooks, 1 new event topic (total 41). 748 tests across 43 test files.
+
+Claw-Swarm V5.3 解决核心采用问题：LLM 70-90% 时间跳过蜂群工具，因为缺少协作价值的上下文信息。V5.3 新增 SwarmAdvisor——"赋能优先"架构，提供结构化情报（能力画像、任务分析、行动建议），让 LLM 做出知情的协作决策。同时新增 `swarm_run` 工具和 9 信号源聚合。1 个新源模块、1 个新工具、2 个新钩子、1 个新事件主题（共 41 个）。43 测试文件共 748 个测试。
+
+### New Source Files (1) / 新增源文件
+
+#### L4 Orchestration / L4 编排层
+- **SwarmAdvisor** (`swarm-advisor.js`): Empowerment-first swarm activation with 9-signal composite aggregation (S1-S9: text features, breaker signals, pheromone pressure, threshold proximity, failure patterns, board posts, symbiosis pairs, reputation variance, DAG complexity), PI-controller-adaptive suggestion strength, turn-isolated state management, structured advisory context injection
+  赋能优先蜂群激活，9 信号源聚合（文本特征、断路器信号、信息素压力、阈值接近度、失败模式、公告板、共生配对、声誉方差、DAG 复杂度），PI 控制器自适应建议强度，Turn 隔离状态管理，结构化赋能上下文注入
+
+### New Tool / 新增工具
+- **swarm_run** (`swarm-run-tool.js`): One-click task execution — combines swarm_plan + swarm_spawn into a single tool call with automatic agent selection and role assignment. Total tools: 8
+  一键执行工具——合并 swarm_plan + swarm_spawn，自动选择 agent 和分配角色。工具总数：8
+
+### Key Modifications / 重要修改
+
+- **index.js**: 2 new hooks (`before_prompt_build` priority 1 + 3 for Layer 0/Layer 1 advisory injection), `after_tool_call` swarm tool tracking. Total hooks: 16
+  2 个新钩子 + 工具调用追踪，钩子总数：16
+- **event-catalog.js**: 1 new event topic (SWARM_ADVISORY_INJECTED). Total 41 topics
+  1 个新事件主题，共 41 个
+- **swarm-context-engine.js**: Added `advisory` parameter to `buildSwarmContextFallback()` for merging empowerment text with existing swarm state
+  增加 advisory 参数，合并赋能文本和蜂群状态
+- **openclaw.plugin.json**: Added `swarmAdvisor` config schema
+  新增 swarmAdvisor 配置 schema
+
+### 9-Signal Composite Aggregation / 9 信号源聚合
+
+| Signal / 信号 | Source / 来源 | Weight / 权重 |
+|---|---|---|
+| S1 textSignal | Text feature analysis | 0.30 |
+| S2 breakerSignal | CircuitBreaker state | 0.10 |
+| S3 pressureSignal | PheromoneResponseMatrix | 0.10 |
+| S4 proximitySignal | ResponseThreshold | 0.05 |
+| S5 failureSignal | FailureVaccination | 0.10 |
+| S6 boardSignal | StigmergicBoard | 0.10 |
+| S7 symbiosisSignal | SkillSymbiosisTracker | 0.05 |
+| S8 reputationSignal | ReputationLedger | 0.05 |
+| S9 dagSignal | TaskDAGEngine | 0.15 |
+
+Weight redistribution: When source engines are absent, weights are proportionally redistributed to connected sources.
+
+权重再分配：当信号源引擎缺失时，权重按比例重分配到已连接的信号源。
+
+### Test Coverage / 测试覆盖
+- 748 tests across 43 files (up from 659 in V5.2)
+  748 个测试（V5.2 为 659 个）
+- New test files: swarm-advisor (70 tests), swarm-run-tool (19 tests), context-service additions
+  新测试文件：swarm-advisor、swarm-run-tool
+
+---
+
+
 
 ### Enhancement: Bio-Inspired Ecology, Stigmergic Coordination & Observability / 增强：仿生生态、间接协调与可观测性
 

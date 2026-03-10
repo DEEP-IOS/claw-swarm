@@ -7,13 +7,13 @@
  * 职责 / Responsibilities:
  * - 管理引擎生命周期 (init, close, cleanup)
  * - 注册 14 个 V5.0 内部钩子, 将生命周期事件路由到内部引擎
- * - 注册 7 个 OpenClaw 工具, 向 Agent 暴露蜂群能力
+ * - 注册 8 个 OpenClaw 工具, 向 Agent 暴露蜂群能力
  * - 提供 getHooks() / getTools() 供 src/index.js 的 register(api) 桥接使用
  * - 提供 findAgentRecord() / findTaskForAgent() 供工具驱动的子 Agent 生命周期使用
  *
  * - Manages engine lifecycle (init, close, cleanup)
  * - Registers 14 internal V5.0 hooks, routing lifecycle events to internal engines
- * - Registers 7 OpenClaw tools, exposing swarm capabilities to agents
+ * - Registers 8 OpenClaw tools, exposing swarm capabilities to agents
  * - Provides getHooks() / getTools() for src/index.js register(api) bridge
  * - Provides findAgentRecord() / findTaskForAgent() for tool-driven sub-agent lifecycle
  *
@@ -118,13 +118,14 @@ import { createGateTool } from './tools/swarm-gate-tool.js';
 import { createMemoryTool } from './tools/swarm-memory-tool.js';
 import { createPlanTool } from './tools/swarm-plan-tool.js';
 import { createZoneTool } from './tools/swarm-zone-tool.js';
+import { createRunTool } from './tools/swarm-run-tool.js';
 
 // ============================================================================
 // 常量 / Constants
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.2.0';
+const VERSION = '5.4.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;
@@ -1015,6 +1016,9 @@ export class PluginAdapter {
 
       // 7. swarm_zone: Zone 管理 / Zone management
       createZoneTool(toolDeps),
+
+      // 8. swarm_run: 一键执行 (V5.3) / One-click execution (V5.3)
+      createRunTool(toolDeps),
     ];
   }
 

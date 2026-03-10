@@ -28,7 +28,7 @@
 const TOOL_NAME = 'swarm_spawn';
 
 /** 工具描述 / Tool description */
-const TOOL_DESCRIPTION = 'Create and manage sub-agents with MoE-based role selection';
+const TOOL_DESCRIPTION = '创建专业子代理执行特定子任务(如API调研、代码实现、质量审查)。子代理拥有独立上下文和工具，完成后返回结果。适用于: 将已拆分的子任务委派给专长角色执行。';
 
 /** 默认 MoE Top-K / Default MoE Top-K */
 const DEFAULT_TOP_K = 3;

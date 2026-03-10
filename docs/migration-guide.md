@@ -1,5 +1,70 @@
 # Migration Guide / 迁移指南
 
+## From V5.2 to V5.4 / 从 V5.2 迁移到 V5.4
+
+### Overview / 概述
+
+V5.3 and V5.4 are **non-breaking upgrades** from V5.2. No database schema changes, no new tables, no configuration changes required. All V5.2 configuration, data, and APIs remain compatible.
+
+V5.3 和 V5.4 是 V5.2 的**非破坏性升级**。无数据库 schema 变更、无新表、无必需配置变更。所有 V5.2 配置、数据和 API 保持兼容。
+
+### What Changes / 变化内容
+
+| Aspect / 维度 | V5.2 | V5.4 |
+|---|---|---|
+| Source files | 75+ | 80+ (+6 new modules) |
+| Tests | 659 / 43 files | 902 / 49 files |
+| Event topics | 37 | 46 (+9) |
+| Hooks | 14 | 16 (+2) |
+| Tools | 7 | 8 (+1 swarm_run) |
+
+### New Modules (V5.3) / V5.3 新增
+
+- **SwarmAdvisor** (L4): Decision empowerment with 9-signal aggregation. Enabled by default via `swarmAdvisor.enabled`
+  蜂群决策赋能，9 信号源聚合。默认启用。
+- **swarm_run tool** (L5): One-click execution combining plan + spawn
+  一键执行工具
+
+### New Modules (V5.4) / V5.4 新增
+
+- **Adaptive Arbiter**: 4-state routing (DIRECT/BIAS_SWARM/PREPLAN/BRAKE) — integrated into SwarmAdvisor
+  四态仲裁路由——集成在 SwarmAdvisor 中
+- **EvidenceGate** (L3): 3-tier evidence discipline
+  三层证据纪律
+- **ProtocolSemantics** (L2): 9 semantic message types
+  9 种语义消息类型
+- **BudgetTracker** (L4): 5-dimension collaboration tax tracking
+  五维协作税追踪
+- **ObservabilityCore** (L6): 4-category unified observation
+  四类统一观测
+
+### Optional Config / 可选配置
+
+To disable SwarmAdvisor (the only new configurable feature):
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "claw-swarm": {
+        "config": {
+          "swarmAdvisor": { "enabled": false }
+        }
+      }
+    }
+  }
+}
+```
+
+### Verification / 验证
+
+```bash
+cd data/swarm
+npm test                    # Should show 902 tests, 49 files
+```
+
+---
+
 ## From V5.1 to V5.2 / 从 V5.1 迁移到 V5.2
 
 ### Overview / 概述

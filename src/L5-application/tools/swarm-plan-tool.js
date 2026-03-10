@@ -27,7 +27,7 @@
 // ============================================================================
 
 const TOOL_NAME = 'swarm_plan';
-const TOOL_DESCRIPTION = 'MoE-based self-organizing task planning';
+const TOOL_DESCRIPTION = '将复杂任务拆分为多阶段执行计划，自动分配给专业子代理(侦察/开发/审查)并行协作完成。适用于: 多步骤调研、对比分析、技术方案设计等需要多角色协作的任务。';
 
 /** 默认最大角色数 / Default maximum roles */
 const DEFAULT_MAX_ROLES = 5;

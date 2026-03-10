@@ -309,10 +309,16 @@ export function createSwarmContextEngineFactory(deps) {
  * @param {Object} deps.gossipProtocol
  * @param {Object} deps.pheromoneEngine
  * @param {Object} deps.capabilityEngine
+ * @param {string} [deps.advisory] - V5.3: 蜂群赋能上下文 / Swarm advisory context
  * @returns {string|undefined} 蜂群上下文文本
  */
-export function buildSwarmContextFallback({ gossipProtocol, pheromoneEngine, capabilityEngine }) {
+export function buildSwarmContextFallback({ gossipProtocol, pheromoneEngine, capabilityEngine, advisory }) {
   const parts = [];
+
+  // V5.3: 如果有赋能上下文，优先输出 / If advisory context available, prepend it
+  if (advisory) {
+    parts.push(advisory);
+  }
 
   try {
     const states = gossipProtocol?.getAllStates?.() || {};
