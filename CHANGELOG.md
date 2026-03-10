@@ -4,6 +4,56 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.6.0] - 2026-03-10
+
+### Enhancement: Structured Orchestration / 增强：结构化编排
+
+**Core Theme**: Bridge DAG engine to actual execution flow, activate dead code paths.
+
+核心主题：将 DAG 引擎桥接到实际执行流，激活死代码路径。
+
+#### New Module / 新模块
+
+| Module | Layer | Lines | Description |
+|--------|-------|-------|-------------|
+| `speculative-executor.js` | L4 | ~300 | Speculative execution engine — parallel candidate paths for critical-path tasks |
+
+#### Key Modifications / 关键修改
+
+| File | Change |
+|------|--------|
+| `swarm-run-tool.js` | DAG Bridge: shadow plan as DAG, CPM analysis, speculative execution on critical nodes |
+| `swarm-plan-tool.js` | CPM critical path analysis + bottleneck split suggestions in plan output |
+| `plugin-adapter.js` | SpeculativeExecutor initialization (requires dagEngine) + destroy lifecycle |
+| `index.js` | GlobalModulator injection into SpeculativeExecutor + DAGEngine; Work-Stealing in subagent_ended |
+| `task-dag-engine.js` | Modulator-aware cooldown (`_getEffectiveCooldown`), `checkAndPublishPartial()`, WORK_STEAL_COMPLETED event |
+| `event-catalog.js` | +6 topics (SPECULATIVE×3, WORK_STEAL, PIPELINE_PARTIAL, DAG_BRIDGE) → 62 total |
+| `observability-core.js` | +5 subscriptions for structured orchestration events |
+| `dashboard-service.js` | +2 REST endpoints: `/api/v1/dag-status`, `/api/v1/speculation` |
+| `startup-diagnostics.js` | `structuredOrchestration` section in diagnostic report |
+| `state-broadcaster.js` | Extended topic subscriptions (V5.5 + V5.6 additions) |
+| `metrics-collector.js` | Extended topic subscriptions (V5.5 + V5.6 additions) |
+
+#### Dead Code Paths Activated / 激活的死代码路径
+
+| Method | File | Previously | Now |
+|--------|------|-----------|-----|
+| `tryStealTask()` | task-dag-engine.js | Never called | Called on subagent_ended (success path) |
+| `_completionSet` | task-dag-engine.js | Never populated | Populated by SpeculativeExecutor |
+| `suggestBottleneckSplits()` | critical-path.js | Never called | Called by swarm_run + swarm_plan |
+| `publishPartialResult()` | task-dag-engine.js | Never called | Activated via checkAndPublishPartial() |
+| `propagateUpstreamFailure()` | task-dag-engine.js | Never called | Triggered by failed state transitions |
+
+#### Test Coverage / 测试覆盖
+
+| Metric | V5.5 | V5.6 |
+|--------|------|------|
+| Test files | 59 | 62 (+3) |
+| Total tests | 1021 | 1053 (+32) |
+| EventTopics | 56 | 62 (+6) |
+
+---
+
 ## [5.5.0] - 2026-03-10
 
 ### Enhancement: Host-Internal/External Minimum Closed Loop / 增强：宿主内外最小闭环

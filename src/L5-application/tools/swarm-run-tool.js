@@ -91,6 +91,10 @@ export function createRunTool({ engines, logger }) {
     messageBus,
     soulDesigner,
     hierarchicalCoordinator,
+    // V5.6: 结构化编排引擎 / Structured orchestration engines
+    dagEngine,
+    criticalPathAnalyzer,
+    speculativeExecutor,
   } = engines;
 
   // ━━━ 内部: 设计计划 / Internal: Design Plan ━━━
@@ -201,10 +205,77 @@ export function createRunTool({ engines, logger }) {
       }
     }
 
+    // ── V5.6: DAG Bridge — 影子化计划为 DAG ────────────────────────
+    // V5.6: DAG Bridge — shadow the plan as a DAG for CPM analysis
+    let dagBridge = null;
+    if (dagEngine) {
+      try {
+        const dagId = `run-${plan.id}-${Date.now().toString(36)}`;
+        const dagNodes = phases.map((phase, idx) => ({
+          id: `phase-${phase.order || idx}`,
+          agent: null,
+          deps: idx > 0 ? [`phase-${phases[idx - 1].order || (idx - 1)}`] : [],
+          estimatedDuration: phase.estimatedDuration || 60000,
+        }));
+
+        const dagResult = dagEngine.createDAG(dagId, {
+          nodes: dagNodes,
+          metadata: { planId: plan.id, goal: goal?.substring(0, 200), source: 'swarm-run' },
+        });
+
+        if (dagResult.success) {
+          // CPM 分析（如有 CriticalPathAnalyzer）/ CPM analysis if available
+          let cpmResult = null;
+          let bottleneckSuggestions = [];
+          if (criticalPathAnalyzer) {
+            try {
+              const cpmRoles = phases.map((phase, idx) => ({
+                name: `phase-${phase.order || idx}`,
+                duration: phase.estimatedDuration || 60000,
+                dependencies: idx > 0 ? [`phase-${phases[idx - 1].order || (idx - 1)}`] : [],
+              }));
+              cpmResult = criticalPathAnalyzer.analyze(cpmRoles);
+              bottleneckSuggestions = criticalPathAnalyzer.suggestBottleneckSplits();
+            } catch { /* non-fatal */ }
+          }
+
+          dagBridge = {
+            dagId,
+            nodeCount: dagNodes.length,
+            criticalPath: cpmResult?.criticalPath || [],
+            totalDuration: cpmResult?.totalDuration || 0,
+            parallelismFactor: cpmResult?.parallelismFactor || 1,
+            bottleneckSuggestions,
+          };
+
+          // 发布 DAG 桥接激活事件 / Publish DAG bridge activated event
+          if (messageBus) {
+            try {
+              messageBus.publish('dag.bridge.activated', {
+                dagId,
+                planId: plan.id,
+                nodeCount: dagNodes.length,
+                hasCPM: !!cpmResult,
+                source: 'swarm-run',
+              }, { senderId: 'swarm-run-tool' });
+            } catch { /* non-fatal */ }
+          }
+
+          logger.info?.(
+            `[SwarmRunTool] DAG Bridge activated: ${dagId}, ` +
+            `nodes=${dagNodes.length}, cpm=${!!cpmResult}`
+          );
+        }
+      } catch (err) {
+        logger.warn?.(`[SwarmRunTool] DAG Bridge failed: ${err.message}`);
+      }
+    }
+
     for (const phase of phases) {
       try {
         const roleName = phase.roleName || phase.role || 'developer';
         const phaseDesc = phase.description || `Phase ${phase.order}: ${roleName}`;
+        const phaseNodeId = `phase-${phase.order || 0}`;
 
         // 创建 Agent 记录 / Create agent record
         let agentId = null;
@@ -233,6 +304,16 @@ export function createRunTool({ engines, logger }) {
           if (agentId) {
             taskRepo.updateTaskStatus(taskId, 'running');
           }
+        }
+
+        // V5.6: DAG 状态同步 / DAG state synchronization
+        if (dagBridge && dagEngine) {
+          try {
+            dagEngine.transitionState(dagBridge.dagId, phaseNodeId, 'assigned', { agentId });
+            dagEngine.transitionState(dagBridge.dagId, phaseNodeId, 'executing');
+            // 对临界路径节点尝试推测执行 / Speculate on critical-path nodes
+            speculativeExecutor?.maybeSpeculate(dagBridge.dagId, phaseNodeId);
+          } catch { /* non-fatal */ }
         }
 
         // 发射招募信息素 / Emit recruit pheromone
@@ -269,7 +350,7 @@ export function createRunTool({ engines, logger }) {
       }
     }
 
-    return { dispatched, errors };
+    return { dispatched, errors, dag: dagBridge || undefined };
   }
 
   // ━━━ 模式处理器 / Mode Handlers ━━━
@@ -294,7 +375,7 @@ export function createRunTool({ engines, logger }) {
     }
 
     // Step 2: 派遣子代理 / Dispatch sub-agents
-    const { dispatched, errors } = dispatchPhases(planResult.plan, goal);
+    const { dispatched, errors, dag } = dispatchPhases(planResult.plan, goal);
 
     // 更新计划状态 / Update plan status
     if (planRepo && planResult.plan.id && dispatched.length > 0) {
@@ -326,6 +407,7 @@ export function createRunTool({ engines, logger }) {
       dispatched,
       errors: errors.length > 0 ? errors : undefined,
       roleScores: planResult.roleScores,
+      dag, // V5.6: DAG 桥接信息 / DAG bridge info
       summary: dispatched.length > 0
         ? `已启动蜂群协作: ${dispatched.map(d => `${d.roleName}(${d.description.substring(0, 40)})`).join(', ')}`
         : `计划设计成功但派遣失败: ${errors.map(e => e.error).join('; ')}`,

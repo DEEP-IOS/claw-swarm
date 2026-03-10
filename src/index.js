@@ -88,7 +88,7 @@ import { EventTopics, wrapEvent } from './event-catalog.js';
 // 常量 / Constants
 // ============================================================================
 
-const VERSION = '5.5.0';
+const VERSION = '5.6.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 
@@ -463,6 +463,17 @@ export default {
     // V5.5: Inject GlobalModulator into SwarmAdvisor (post-init)
     if (swarmAdvisor && globalModulator) {
       swarmAdvisor.setGlobalModulator(globalModulator);
+    }
+
+    // V5.6: 注入 GlobalModulator 到 SpeculativeExecutor + DAGEngine
+    // V5.6: Inject GlobalModulator into SpeculativeExecutor + DAGEngine
+    if (globalModulator) {
+      if (adapter._engines?.speculativeExecutor) {
+        adapter._engines.speculativeExecutor._globalModulator = globalModulator;
+      }
+      if (adapter._engines?.dagEngine) {
+        adapter._engines.dagEngine._globalModulator = globalModulator;
+      }
     }
 
     // ── 2g. V5.5: 治理三联指标 ──────────────────────────────────────
@@ -1208,18 +1219,47 @@ export default {
         logger.warn?.(`[Claw-Swarm] subagent_ended error: ${err.message}`);
       }
 
-      // DAG 引擎: 更新 DAG 任务状态 / DAG engine: update DAG task state
+      // V5.6: DAG 引擎 — 状态转换 + Work-Stealing + 推测解析
+      // V5.6: DAG engine — state transition + Work-Stealing + speculation resolution
       const dagEngine = adapter._engines?.dagEngine;
       if (dagEngine && config.dagEngine?.enabled !== false) {
         try {
           const childKey = event.targetSessionKey || ctx?.childSessionKey;
           const outcome = event.outcome || 'unknown';
-          // 查找关联的 DAG 任务并更新状态
-          // Find associated DAG task and update state
-          // (由调用方显式调用 dagEngine.transitionState，此处仅记录)
-          logger.debug?.(
-            `[Claw-Swarm] subagent_ended for DAG: child=${childKey}, outcome=${outcome}`
-          );
+          const agentId = event.agentId || childKey;
+          const success = outcome === 'success';
+
+          // 1. 遍历活跃 DAG，找到该 Agent 的 executing 节点并转换状态
+          // 1. Iterate active DAGs, find this agent's executing nodes and transition state
+          for (const [dagId, dag] of dagEngine._activeDags || []) {
+            for (const [nodeId, node] of dag.nodes || []) {
+              if (node.assignedAgent === agentId && node.state === 'executing') {
+                const newState = success ? 'completed' : 'failed';
+                dagEngine.transitionState(dagId, nodeId, newState, {
+                  result: event.result,
+                  error: event.error,
+                });
+
+                // 2. 推测执行解析 / Speculative execution resolution
+                const specExec = adapter._engines?.speculativeExecutor;
+                if (specExec?.isSpeculative(dagId, nodeId)) {
+                  specExec.resolveSpeculation(dagId, nodeId, event.result, agentId);
+                }
+              }
+            }
+          }
+
+          // 3. Work-Stealing: 空闲 Agent 尝试窃取任务
+          // 3. Work-Stealing: idle agent tries to steal tasks
+          if (success && config.workStealing?.enabled !== false) {
+            const stealResult = dagEngine.tryStealTask(agentId);
+            if (stealResult.stolen) {
+              logger.info?.(
+                `[Claw-Swarm] Work-Steal: ${agentId} stole ${stealResult.taskNodeId} ` +
+                `from ${stealResult.fromAgent}`
+              );
+            }
+          }
         } catch (err) {
           logger.warn?.(`[Claw-Swarm] subagent_ended DAG update error: ${err.message}`);
         }

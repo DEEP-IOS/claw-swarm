@@ -125,6 +125,14 @@ export const EventTopics = {
 
   // ── V5.5: 治理报告 / Governance report ──
   GOVERNANCE_REPORT: 'governance.report',
+
+  // ── V5.6: 结构化编排 / Structured orchestration ──
+  SPECULATIVE_TASK_STARTED: 'speculative.task.started',
+  SPECULATIVE_TASK_RESOLVED: 'speculative.task.resolved',
+  SPECULATIVE_TASK_CANCELLED: 'speculative.task.cancelled',
+  WORK_STEAL_COMPLETED: 'work.steal.completed',
+  PIPELINE_PARTIAL_RESULT: 'pipeline.partial_result',
+  DAG_BRIDGE_ACTIVATED: 'dag.bridge.activated',
 };
 
 // ============================================================================

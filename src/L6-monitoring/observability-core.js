@@ -114,6 +114,13 @@ export class ObservabilityCore {
     this._sub(EventTopics.MODE_SWITCHED, OBS_CATEGORIES.DECISION);
     this._sub(EventTopics.GOVERNANCE_REPORT, OBS_CATEGORIES.STRATEGY);
 
+    // V5.6: 结构化编排事件 / Structured orchestration events
+    this._sub(EventTopics.SPECULATIVE_TASK_STARTED, OBS_CATEGORIES.EXECUTION);
+    this._sub(EventTopics.SPECULATIVE_TASK_RESOLVED, OBS_CATEGORIES.EXECUTION);
+    this._sub(EventTopics.SPECULATIVE_TASK_CANCELLED, OBS_CATEGORIES.EXECUTION);
+    this._sub(EventTopics.WORK_STEAL_COMPLETED, OBS_CATEGORIES.EXECUTION);
+    this._sub(EventTopics.DAG_BRIDGE_ACTIVATED, OBS_CATEGORIES.DECISION);
+
     this._subscribed = true;
     this._logger.info?.(`[${SOURCE}] started — subscribing to observation events`);
   }

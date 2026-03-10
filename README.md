@@ -1,12 +1,12 @@
 [**中文**](README.zh-CN.md) | English
 
-# Claw-Swarm V5.5
+# Claw-Swarm V5.6
 
-**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, state-convergence layer, runtime global-modulator, three feedback loops, governance triple metrics, and full observability.**
+**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, structured DAG orchestration, speculative execution, work-stealing, state-convergence, runtime global-modulator, three feedback loops, governance triple metrics, and full observability.**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
-![Version](https://img.shields.io/badge/version-5.5.0-blue)
-![Tests](https://img.shields.io/badge/tests-1021%20across%2059%20files-green)
+![Version](https://img.shields.io/badge/version-5.6.0-blue)
+![Tests](https://img.shields.io/badge/tests-1053%20across%2062%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 <p align="center">
@@ -64,6 +64,9 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 | **Global Modulator** | V5.5: Runtime work-point controller (EXPLORE/EXPLOIT/RELIABLE/URGENT) with hysteresis switching | V5.5: 运行时工作点控制器，滞后切换 |
 | **Governance Metrics** | V5.5: Audit + Policy + ROI triple metrics for swarm governance | V5.5: 审计 + 策略 + ROI 三联治理指标 |
 | **Three Feedback Loops** | V5.5: Strategy/Repair/Environment reflux chains for continuous self-improvement | V5.5: 策略/修复/环境三条回流链 |
+| **Speculative Execution** | V5.6: Parallel candidate execution for critical-path tasks; first completion wins | V5.6: 临界路径任务并行候选执行 |
+| **DAG-Orchestrator Bridge** | V5.6: Shadow plans as DAGs with CPM analysis and bottleneck detection | V5.6: 计划影子化为 DAG + CPM 分析 |
+| **Work-Stealing** | V5.6: Idle agents auto-steal tasks with modulator-aware cooldown | V5.6: 空闲 Agent 自动窃取 + 调节器感知冷却 |
 | **5 Bee Personas** | scout, worker, guard, queen-messenger, designer — signal-driven behavior | 5 种蜜蜂人格：侦察蜂、工蜂、守卫蜂、女王信使、设计蜂 |
 | **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics, breaker status, trace timeline | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标、断路器状态、追踪时间线 |
 | **Jaeger-lite Tracing** | Lightweight distributed tracing with trace span collector and startup diagnostics | 轻量分布式追踪 span 收集器 + 启动诊断 |
@@ -93,7 +96,7 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 │      RoleDiscovery · RoleManager · ZoneManager              │
 │      HierarchicalCoordinator · TaskDAGEngine                │
 │      SpeciesEvolver · SwarmAdvisor · BudgetTracker          │
-│      GlobalModulator · GovernanceMetrics                    │
+│      GlobalModulator · GovernanceMetrics · SpeculativeExecutor│
 ├─────────────────────────────────────────────────────────────┤
 │  L3  Agent             智能体层                              │
 │      WorkingMemory · EpisodicMemory · SemanticMemory        │

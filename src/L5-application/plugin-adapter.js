@@ -100,6 +100,7 @@ import { ZoneManager } from '../L4-orchestration/zone-manager.js';
 import { HierarchicalCoordinator } from '../L4-orchestration/hierarchical-coordinator.js';
 import { TaskDAGEngine } from '../L4-orchestration/task-dag-engine.js';
 import { SpeciesEvolver } from '../L4-orchestration/species-evolver.js';
+import { SpeculativeExecutor } from '../L4-orchestration/speculative-executor.js';
 
 // ── L5 应用层 / L5 Application ──────────────────────────────────────────────
 import { ContextService } from './context-service.js';
@@ -125,7 +126,7 @@ import { createRunTool } from './tools/swarm-run-tool.js';
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.5.0';
+const VERSION = '5.6.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;
@@ -405,6 +406,24 @@ export class PluginAdapter {
       }
     }
 
+    // V5.6: 推测执行引擎（依赖 dagEngine）/ Speculative Execution Engine (requires dagEngine)
+    if (config.speculativeExecution?.enabled && this._engines.dagEngine) {
+      try {
+        const speculativeExecutor = new SpeculativeExecutor({
+          dagEngine: this._engines.dagEngine,
+          globalModulator: null, // 延迟注入 / Injected later from index.js
+          agentRepo,
+          messageBus,
+          logger,
+          config: config.speculativeExecution || {},
+        });
+        this._engines.speculativeExecutor = speculativeExecutor;
+        logger.info?.('[PluginAdapter] SpeculativeExecutor initialized');
+      } catch (err) {
+        logger.warn?.(`[PluginAdapter] SpeculativeExecutor init failed: ${err.message}`);
+      }
+    }
+
     // V5.1 Phase 4: 种群进化器（依赖 evolution.scoring）
     // V5.1 Phase 4: Species evolver (requires evolution.scoring)
     if (config.evolution?.scoring) {
@@ -533,6 +552,9 @@ export class PluginAdapter {
 
     // L4: V5.1 种群进化器销毁 / L4: V5.1 Species evolver destroy
     try { this._engines.speciesEvolver?.destroy?.(); } catch (e) { this._logCloseError('speciesEvolver', e); }
+
+    // L4: V5.6 推测执行引擎销毁 / L4: V5.6 Speculative executor destroy
+    try { this._engines.speculativeExecutor?.destroy?.(); } catch (e) { this._logCloseError('speculativeExecutor', e); }
 
     // L4: V5.1 DAG 引擎销毁 / L4: V5.1 DAG engine destroy
     try { this._engines.dagEngine?.destroy?.(); } catch (e) { this._logCloseError('dagEngine', e); }

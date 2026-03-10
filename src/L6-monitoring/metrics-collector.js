@@ -96,6 +96,10 @@ export class MetricsCollector {
     const topics = [
       'task.*', 'agent.*', 'pheromone.*', 'quality.*', 'memory.*',
       'system.*', 'tool.*', 'capability.*', 'persona.*', 'species.*',
+      // V5.5 新增 / V5.5 additions
+      'repair.*', 'convergence.*', 'modulator.*', 'governance.*',
+      // V5.6 新增 / V5.6 additions
+      'speculative.*', 'work.*', 'pipeline.*', 'dag.*',
     ];
 
     for (const topic of topics) {

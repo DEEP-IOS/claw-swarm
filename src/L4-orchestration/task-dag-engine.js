@@ -384,9 +384,9 @@ export class TaskDAGEngine {
       return { stolen: false };
     }
 
-    // 冷却期检查 / Cooldown check
+    // 冷却期检查（V5.6: 调节器感知）/ Cooldown check (V5.6: modulator-aware)
     const lastSteal = this._lastStealTime.get(agentId) || 0;
-    if (Date.now() - lastSteal < WORK_STEAL_COOLDOWN_MS) {
+    if (Date.now() - lastSteal < this._getEffectiveCooldown()) {
       return { stolen: false };
     }
 
@@ -445,6 +445,17 @@ export class TaskDAGEngine {
         `[WorkStealing] ${agentId} stole task ${taskNodeId} from ${longestQueue.agentId}`
       );
 
+      // V5.6: 发布窃取完成事件 / Publish work steal completed event
+      this._messageBus?.publish?.(
+        EventTopics.WORK_STEAL_COMPLETED || 'work.steal.completed',
+        wrapEvent(EventTopics.WORK_STEAL_COMPLETED || 'work.steal.completed', {
+          agentId,
+          taskNodeId,
+          fromAgent: longestQueue.agentId,
+          dagId: entry.dagId,
+        }, 'task-dag-engine')
+      );
+
       return {
         stolen: true,
         taskNodeId,
@@ -453,6 +464,21 @@ export class TaskDAGEngine {
     }
 
     return { stolen: false };
+  }
+
+  /**
+   * V5.6: 获取调节器感知的有效冷却期
+   * V5.6: Get modulator-aware effective cooldown
+   *
+   * @private
+   * @returns {number} 毫秒 / milliseconds
+   */
+  _getEffectiveCooldown() {
+    if (!this._globalModulator) return WORK_STEAL_COOLDOWN_MS;
+    const mode = this._globalModulator.getCurrentMode?.();
+    const multipliers = { EXPLORE: 0.4, EXPLOIT: 0.6, RELIABLE: 1.0, URGENT: 0.2 };
+    const mult = multipliers[mode] ?? 1.0;
+    return Math.round(WORK_STEAL_COOLDOWN_MS * mult);
   }
 
   // ━━━ 管道并行 / Pipeline Parallelism ━━━
@@ -472,6 +498,37 @@ export class TaskDAGEngine {
         dagId, nodeId, partialResult,
       }, 'task-dag-engine')
     );
+  }
+
+  /**
+   * V5.6: 检查并发布部分结果（仅对有下游依赖的 EXECUTING 节点）
+   * V5.6: Check and publish partial result (only for EXECUTING nodes with downstream deps)
+   *
+   * @param {string} dagId
+   * @param {string} nodeId
+   * @param {Object} intermediateOutput - 中间结果
+   * @returns {boolean} 是否发布了部分结果
+   */
+  checkAndPublishPartial(dagId, nodeId, intermediateOutput) {
+    const dag = this._activeDags.get(dagId);
+    if (!dag) return false;
+
+    const node = dag.nodes.get(nodeId);
+    if (!node || node.state !== 'executing') return false;
+
+    // 检查是否有下游节点 / Check for downstream dependents
+    let hasDownstream = false;
+    for (const [, n] of dag.nodes) {
+      if (n.deps?.includes(nodeId)) {
+        hasDownstream = true;
+        break;
+      }
+    }
+
+    if (!hasDownstream) return false;
+
+    this.publishPartialResult(dagId, nodeId, intermediateOutput);
+    return true;
   }
 
   /**

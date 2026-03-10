@@ -54,8 +54,8 @@ describe('MetricsCollector', () => {
   it('start 订阅主题 / start subscribes to topics', () => {
     collector.start();
     expect(collector.getStats().running).toBe(true);
-    // V5.1: 从 5 个扩展到 10 个主题 (新增 system.*, tool.*, capability.*, persona.*, species.*)
-    expect(bus._subs.length).toBe(10);
+    // V5.6: 从 10 个扩展到 18 个主题 (V5.5+V5.6 additions)
+    expect(bus._subs.length).toBe(18);
   });
 
   it('stop 取消所有订阅 / stop unsubscribes all', () => {

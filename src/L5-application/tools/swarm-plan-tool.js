@@ -97,6 +97,8 @@ export function createPlanTool({ engines, logger }) {
     executionPlanner,
     planRepo,
     messageBus,
+    // V5.6: CPM 分析 / CPM analysis
+    criticalPathAnalyzer,
   } = engines;
 
   /**
@@ -181,6 +183,30 @@ export function createPlanTool({ engines, logger }) {
         }
       }
 
+      // V5.6: CPM 关键路径分析 / CPM critical path analysis
+      let cpmAnalysis = undefined;
+      if (criticalPathAnalyzer && plan.phases?.length > 0) {
+        try {
+          const cpmRoles = plan.phases.map((phase, idx) => ({
+            name: phase.roleName || `phase-${phase.order || idx}`,
+            duration: phase.estimatedDuration || 60000,
+            dependencies: idx > 0
+              ? [plan.phases[idx - 1].roleName || `phase-${plan.phases[idx - 1].order || (idx - 1)}`]
+              : [],
+          }));
+          const cpmResult = criticalPathAnalyzer.analyze(cpmRoles);
+          const bottlenecks = criticalPathAnalyzer.suggestBottleneckSplits();
+          cpmAnalysis = {
+            criticalPath: cpmResult.criticalPath,
+            totalDuration: cpmResult.totalDuration,
+            parallelismFactor: cpmResult.parallelismFactor,
+            bottleneckSuggestions: bottlenecks.length > 0 ? bottlenecks : undefined,
+          };
+        } catch (cpmErr) {
+          logger.warn?.(`[SwarmPlanTool] CPM analysis failed: ${cpmErr.message}`);
+        }
+      }
+
       logger.info?.(
         `[SwarmPlanTool] 计划设计完成 / Plan design complete: planId=${persistedId}, ` +
         `roles=${roles.length}, maturity=${plan.maturityScore}`
@@ -206,6 +232,7 @@ export function createPlanTool({ engines, logger }) {
         },
         roleScores: scores.slice(0, maxRoles),
         fallbackUsed: fallback,
+        cpmAnalysis, // V5.6: 关键路径分析 / Critical path analysis
       };
     } catch (err) {
       return { success: false, error: `计划设计失败 / Plan design failed: ${err.message}` };

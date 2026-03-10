@@ -465,5 +465,45 @@ export class DashboardService {
         timestamp: Date.now(),
       });
     });
+
+    // V5.6: GET /api/v1/dag-status → DAG 执行快照 / DAG execution snapshot
+    server.get('/api/v1/dag-status', (req, reply) => {
+      const dagEngine = this._engines?.dagEngine;
+      if (!dagEngine) {
+        return reply.send({ note: 'DAGEngine not available', timestamp: Date.now() });
+      }
+      try {
+        const dags = [];
+        for (const [dagId, dag] of dagEngine._activeDags || []) {
+          const nodes = [];
+          for (const [nodeId, node] of dag.nodes || []) {
+            nodes.push({
+              id: nodeId,
+              state: node.state,
+              assignedAgent: node.assignedAgent,
+              isCritical: node.isCritical,
+              slack: node.slack,
+            });
+          }
+          dags.push({ dagId, status: dag.status, nodeCount: nodes.length, nodes });
+        }
+        reply.send({ dags, dagCount: dags.length, timestamp: Date.now() });
+      } catch {
+        reply.send({ note: 'Error reading DAG status', timestamp: Date.now() });
+      }
+    });
+
+    // V5.6: GET /api/v1/speculation → 推测执行统计 / Speculation statistics
+    server.get('/api/v1/speculation', (req, reply) => {
+      const specExec = this._engines?.speculativeExecutor;
+      if (!specExec) {
+        return reply.send({ note: 'SpeculativeExecutor not available', timestamp: Date.now() });
+      }
+      try {
+        reply.send({ speculation: specExec.getStats(), timestamp: Date.now() });
+      } catch {
+        reply.send({ note: 'Error reading speculation stats', timestamp: Date.now() });
+      }
+    });
   }
 }

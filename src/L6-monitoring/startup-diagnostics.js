@@ -223,6 +223,14 @@ export class StartupDiagnostics {
       },
       featureFlags: featureFlags || {},
       health: this._computeOverallHealth(dbCheck, emptyCount, activePipelines, readyModules, totalModules),
+
+      // V5.6: 结构化编排状态 / Structured orchestration status
+      structuredOrchestration: {
+        dagEngine: !!engines?.dagEngine,
+        speculativeExecutor: !!engines?.speculativeExecutor,
+        criticalPathAnalyzer: !!engines?.criticalPathAnalyzer,
+        workStealing: !!engines?.dagEngine?._config?.workStealing?.enabled,
+      },
     };
 
     return report;
