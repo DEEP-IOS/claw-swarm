@@ -1,20 +1,22 @@
 /**
- * Claw-Swarm V5.1 — 工具调用韧性增强层 / Tool Call Resilience Layer
+ * Claw-Swarm V5.5 — 工具调用韧性增强层 / Tool Call Resilience Layer
  *
  * 针对 Kimi K2.5 约 12% 的 tool_call 失败率，提供多层韧性保护:
  * 1. 参数预校验（before_tool_call）— AJV JSON Schema 校验 + 自动修复
  * 2. 失败检测 + 下轮提示注入 — 利用 LLM 自纠错重试
  * 3. per-tool 断路器 — 复用 CircuitBreaker，每工具独立状态
  * 4. 降级策略 — 文本意图解析 fallback
+ * 5. 自适应修复记忆 — 历史策略查询 + 修复结果沉淀 [V5.5]
  *
  * Addresses Kimi K2.5's ~12% tool_call failure rate with multi-layer resilience:
  * 1. Parameter pre-validation (before_tool_call) — AJV JSON Schema + auto-fix
  * 2. Failure detection + next-turn prompt injection — leverage LLM self-correction
  * 3. Per-tool circuit breaker — reuse CircuitBreaker, per-tool independent state
  * 4. Degradation strategy — text intent parsing fallback
+ * 5. Adaptive repair memory — historical strategy query + outcome persistence [V5.5]
  *
  * @module L5-application/tool-resilience
- * @version 5.1.0
+ * @version 5.5.0
  */
 
 import Ajv from 'ajv';
@@ -197,12 +199,48 @@ export class ToolResilience {
       // 成功：记录到断路器 / Success: record to circuit breaker
       cb.recordSuccess();
       this._logger.debug?.(`[ToolResilience] ${toolName} OK (${durationMs ?? '?'}ms)`);
+
+      // V5.5: 如果之前有修复策略被使用，记录成功结果
+      // V5.5: If a repair strategy was previously used, record successful outcome
+      const pendingRepair = this._pendingRepairs?.get(toolName);
+      if (pendingRepair) {
+        this.recordRepairOutcome(toolName, pendingRepair.errorSignature, pendingRepair.strategy, true);
+        this._pendingRepairs.delete(toolName);
+        this._messageBus?.publish?.('repair.strategy.outcome', {
+          toolName,
+          errorSignature: pendingRepair.errorSignature,
+          strategy: pendingRepair.strategy,
+          success: true,
+        });
+      }
       return;
     }
 
     // 失败：记录到断路器 + 缓冲区
     // Failure: record to circuit breaker + buffer
     cb.recordFailure();
+
+    // V5.5: 查询修复记忆寻找历史策略
+    // V5.5: Query repair memory for historical strategies
+    const errorMsg = error || 'unknown error';
+    const repairResult = this.findRepairStrategy(toolName, errorMsg);
+    let repairHint = null;
+    if (repairResult) {
+      repairHint = repairResult.strategy;
+      // 记录待验证的修复策略 / Track pending repair for outcome validation
+      if (!this._pendingRepairs) this._pendingRepairs = new Map();
+      this._pendingRepairs.set(toolName, {
+        errorSignature: errorMsg.substring(0, 200),
+        strategy: repairResult.strategy,
+        timestamp: Date.now(),
+      });
+      this._messageBus?.publish?.('repair.strategy.found', {
+        toolName,
+        errorSignature: errorMsg.substring(0, 200),
+        strategy: repairResult.strategy,
+        confidence: repairResult.confidence,
+      });
+    }
 
     // 生成幂等性 key / Generate idempotency key
     const idempotencyKey = toolCallId || this._hashToolCall(toolName, params);
@@ -212,8 +250,9 @@ export class ToolResilience {
     if (this._failedToolCalls.has(idempotencyKey)) {
       const existing = this._failedToolCalls.get(idempotencyKey);
       existing.retryCount++;
-      existing.error = error || 'unknown error';
+      existing.error = errorMsg;
       existing.timestamp = Date.now();
+      if (repairHint) existing.repairHint = repairHint;
       return;
     }
 
@@ -224,14 +263,16 @@ export class ToolResilience {
     this._failedToolCalls.set(idempotencyKey, {
       toolName,
       params: params || {},
-      error: error || 'unknown error',
+      error: errorMsg,
       retryCount: 0,
       timestamp: Date.now(),
+      repairHint, // V5.5: 附加修复建议 / Attach repair hint
     });
 
     this._logger.warn?.(
-      `[ToolResilience] ${toolName} FAILED: ${error || 'unknown'} ` +
-      `(breaker state: ${cb.getState()})`
+      `[ToolResilience] ${toolName} FAILED: ${errorMsg} ` +
+      `(breaker state: ${cb.getState()})` +
+      (repairHint ? ` [repair hint available]` : '')
     );
   }
 
@@ -253,15 +294,32 @@ export class ToolResilience {
 
     for (const [key, call] of this._failedToolCalls) {
       if (call.retryCount >= MAX_RETRY_ROUNDS) {
-        // 重试耗尽，标记清除 / Retry exhausted, mark for removal
+        // 重试耗尽，标记清除 + 记录失败修复结果
+        // Retry exhausted, mark for removal + record failed repair outcome
         toRemove.push(key);
+        // V5.5: 修复策略失败时记录 / Record when repair strategy failed
+        if (call.repairHint && this._pendingRepairs?.has(call.toolName)) {
+          const pending = this._pendingRepairs.get(call.toolName);
+          this.recordRepairOutcome(call.toolName, pending.errorSignature, pending.strategy, false);
+          this._pendingRepairs.delete(call.toolName);
+          this._messageBus?.publish?.('repair.strategy.outcome', {
+            toolName: call.toolName,
+            errorSignature: pending.errorSignature,
+            strategy: pending.strategy,
+            success: false,
+          });
+        }
         continue;
       }
 
-      parts.push(
-        `[TOOL_RETRY] 上次 ${call.toolName} 调用失败 (原因: ${call.error})。` +
-        `建议修正参数后重试。(重试 ${call.retryCount + 1}/${MAX_RETRY_ROUNDS})`
-      );
+      // V5.5: 如果有修复建议，包含在提示注入中
+      // V5.5: If repair hint available, include in prompt injection
+      let msg = `[TOOL_RETRY] 上次 ${call.toolName} 调用失败 (原因: ${call.error})。`;
+      if (call.repairHint) {
+        msg += `历史修复建议: ${call.repairHint}。`;
+      }
+      msg += `建议修正参数后重试。(重试 ${call.retryCount + 1}/${MAX_RETRY_ROUNDS})`;
+      parts.push(msg);
     }
 
     // 清除已耗尽的条目 / Remove exhausted entries
@@ -271,10 +329,10 @@ export class ToolResilience {
 
     if (parts.length === 0) return undefined;
 
-    // 硬限制 ≤ 100 tokens（约 200 个中文字符）
-    // Hard limit ≤ 100 tokens (~200 Chinese characters)
+    // 硬限制 ≤ 150 tokens（约 300 个中文字符）— V5.5 增加限制以容纳修复建议
+    // Hard limit ≤ 150 tokens (~300 Chinese characters) — V5.5 increased for repair hints
     const text = parts.join('\n');
-    return text.length > 400 ? text.substring(0, 400) + '...' : text;
+    return text.length > 600 ? text.substring(0, 600) + '...' : text;
   }
 
   // ============================================================================
@@ -394,7 +452,7 @@ export class ToolResilience {
   }
 
   // ============================================================================
-  // V5.2: 自适应修复记忆 / Adaptive Repair Memory
+  // V5.5: 自适应修复记忆 / Adaptive Repair Memory (activated)
   // ============================================================================
 
   /**
@@ -404,35 +462,36 @@ export class ToolResilience {
    * 当工具调用失败时，先查 repair_memory 表寻找历史成功修复策略，
    * 找到则返回修复建议，否则返回 null。
    *
+   * DB schema: error_signature TEXT, tool_name TEXT, strategy TEXT,
+   *            affinity REAL, hit_count INTEGER, last_hit_at INTEGER
+   *
    * @param {string} toolName - 失败的工具名
-   * @param {string} errorPattern - 错误信息模式
+   * @param {string} errorSignature - 错误信息签名
    * @returns {{ strategy: string, confidence: number } | null}
    */
-  findRepairStrategy(toolName, errorPattern) {
+  findRepairStrategy(toolName, errorSignature) {
     if (!this._db) return null;
 
     try {
-      const rows = this._db.prepare(
-        `SELECT strategy, success_count, attempt_count
+      const rows = this._db.all(
+        `SELECT strategy, affinity, hit_count
          FROM repair_memory
-         WHERE tool_name = ? AND error_pattern LIKE ?
-         ORDER BY success_count DESC LIMIT 3`
-      ).all(toolName, `%${errorPattern.substring(0, 50)}%`);
-
-      if (rows.length === 0) return null;
-
-      const best = rows[0];
-      const confidence = best.attempt_count > 0
-        ? best.success_count / best.attempt_count
-        : 0;
-
-      if (confidence < 0.3) return null; // 信心不足 / Insufficient confidence
-
-      this._logger.info?.(
-        `[ToolResilience] Repair strategy found for ${toolName}: confidence=${confidence.toFixed(2)}`
+         WHERE tool_name = ? AND error_signature LIKE ?
+         ORDER BY affinity DESC LIMIT 3`,
+        toolName, `%${errorSignature.substring(0, 50)}%`
       );
 
-      return { strategy: best.strategy, confidence };
+      if (!rows || rows.length === 0) return null;
+
+      const best = rows[0];
+      if (best.affinity < 0.3) return null; // 信心不足 / Insufficient confidence
+
+      this._logger.info?.(
+        `[ToolResilience] Repair strategy found for ${toolName}: ` +
+        `affinity=${best.affinity.toFixed(2)}, hits=${best.hit_count}`
+      );
+
+      return { strategy: best.strategy, confidence: best.affinity };
     } catch (err) {
       this._logger.debug?.(`[ToolResilience] Repair memory query failed: ${err.message}`);
       return null;
@@ -443,32 +502,42 @@ export class ToolResilience {
    * 记录修复策略结果（成功或失败）
    * Record repair strategy outcome (success or failure)
    *
+   * 使用 EMA (指数移动平均) 更新 affinity:
+   *   new_aff = 0.8 * old_aff + 0.2 * (success ? 1 : 0)
+   *
    * @param {string} toolName
-   * @param {string} errorPattern
-   * @param {string} strategy
-   * @param {boolean} success
+   * @param {string} errorSignature - 错误签名
+   * @param {string} strategy - 修复策略描述
+   * @param {boolean} success - 修复是否成功
    */
-  recordRepairOutcome(toolName, errorPattern, strategy, success) {
+  recordRepairOutcome(toolName, errorSignature, strategy, success) {
     if (!this._db) return;
 
     try {
-      const existing = this._db.prepare(
-        'SELECT id, success_count, attempt_count FROM repair_memory WHERE tool_name = ? AND error_pattern = ? AND strategy = ?'
-      ).get(toolName, errorPattern.substring(0, 200), strategy);
+      const existing = this._db.get(
+        'SELECT id, affinity, hit_count FROM repair_memory WHERE tool_name = ? AND error_signature = ? AND strategy = ?',
+        toolName, errorSignature.substring(0, 200), strategy
+      );
 
       if (existing) {
-        this._db.prepare(
+        // EMA 更新 affinity / EMA update affinity
+        const newAffinity = 0.8 * existing.affinity + 0.2 * (success ? 1 : 0);
+        this._db.run(
           `UPDATE repair_memory SET
-            success_count = success_count + ?,
-            attempt_count = attempt_count + 1,
-            updated_at = datetime('now')
-          WHERE id = ?`
-        ).run(success ? 1 : 0, existing.id);
+            affinity = ?,
+            hit_count = hit_count + 1,
+            last_hit_at = ?
+          WHERE id = ?`,
+          newAffinity, Date.now(), existing.id
+        );
       } else {
-        this._db.prepare(
-          `INSERT INTO repair_memory (tool_name, error_pattern, strategy, success_count, attempt_count, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
-        ).run(toolName, errorPattern.substring(0, 200), strategy, success ? 1 : 0);
+        // 新策略：成功初始 affinity=0.6, 失败初始=0.3
+        // New strategy: success initial affinity=0.6, failure=0.3
+        this._db.run(
+          `INSERT INTO repair_memory (error_signature, tool_name, strategy, affinity, hit_count, last_hit_at)
+          VALUES (?, ?, ?, ?, 1, ?)`,
+          errorSignature.substring(0, 200), toolName, strategy, success ? 0.6 : 0.3, Date.now()
+        );
       }
     } catch (err) {
       this._logger.debug?.(`[ToolResilience] Repair memory write failed: ${err.message}`);

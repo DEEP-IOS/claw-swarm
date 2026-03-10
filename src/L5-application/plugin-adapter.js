@@ -125,7 +125,7 @@ import { createRunTool } from './tools/swarm-run-tool.js';
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.4.0';
+const VERSION = '5.5.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;
@@ -396,6 +396,7 @@ export class PluginAdapter {
           capabilityEngine,
           logger,
           config: config.dagEngine || {},
+          db: dbManager, // V5.5: DLQ 持久化 / DLQ persistence
         });
         this._engines.dagEngine = dagEngine;
         logger.info?.('[PluginAdapter] TaskDAGEngine initialized');

@@ -10,7 +10,7 @@
  *   - Schema 校验仅做 typeof 检查（不用 AJV），保持零开销
  *
  * @module event-catalog
- * @version 5.1.0
+ * @version 5.5.0
  */
 
 import { randomUUID } from 'node:crypto';
@@ -101,6 +101,30 @@ export const EventTopics = {
 
   // ── V5.4: 预算追踪 / Budget tracking ──
   BUDGET_TURN_COMPLETED: 'budget.turn.completed',
+
+  // ── V5.5: 修复回流 / Repair feedback loop ──
+  REPAIR_STRATEGY_FOUND: 'repair.strategy.found',
+  REPAIR_STRATEGY_OUTCOME: 'repair.strategy.outcome',
+
+  // ── V5.5: 任务亲和度 / Task affinity ──
+  TASK_AFFINITY_UPDATED: 'task.affinity.updated',
+
+  // ── V5.5: 仲裁降级 / Arbiter degradation ──
+  ARBITER_MODE_DEGRADED: 'arbiter.mode.degraded',
+
+  // ── V5.5: 基准自调整 / Baseline adjustment ──
+  BASELINE_ADJUSTED: 'baseline.adjusted',
+
+  // ── V5.5: 状态收敛 / State convergence ──
+  CONVERGENCE_DRIFT: 'convergence.drift',
+  AGENT_SUSPECT: 'agent.suspect',
+  AGENT_CONFIRMED_DEAD: 'agent.confirmed.dead',
+
+  // ── V5.5: 全局调节器 / Global modulator ──
+  MODE_SWITCHED: 'modulator.mode.switched',
+
+  // ── V5.5: 治理报告 / Governance report ──
+  GOVERNANCE_REPORT: 'governance.report',
 };
 
 // ============================================================================

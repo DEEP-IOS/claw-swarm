@@ -4,6 +4,93 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [5.5.0] - 2026-03-10
+
+### Enhancement: Host-Internal/External Minimum Closed Loop / 增强：宿主内外最小闭环
+
+Claw-Swarm V5.5 implements "host-internal/external minimum closed loop" — upgrading from "kernel runnable" to "boundary-clear and reflowable". Adds state-convergence layer (SWIM failure detection + anti-entropy), runtime global-modulator (EXPLORE/EXPLOIT/RELIABLE/URGENT work points), three feedback loops (strategy/repair/environment), governance triple metrics (audit/policy/ROI), data pipeline activation (4 dormant tables now live), and startup diagnostics. 5 new source modules, 10 new event topics (total 56), 10 new test files (119 tests). 1021 tests across 59 test files.
+
+Claw-Swarm V5.5 实现"宿主内外最小闭环"——从"内核可运行"升级为"边界清晰且可回流"。新增状态收敛层（SWIM 故障探测 + 反熵同步）、运行时全局调节器（EXPLORE/EXPLOIT/RELIABLE/URGENT 四工作点）、三条回流链（策略/修复/环境）、治理三联指标（audit/policy/ROI）、数据管道激活（4 张休眠表激活）和启动诊断。5 个新源模块、10 个新事件主题（共 56 个）、10 个新测试文件（119 个测试）。59 测试文件共 1021 个测试。
+
+### New Source Files (5) / 新增源文件
+
+#### L2 Communication / L2 通信层
+- **StateConvergence** (`state-convergence.js`): SWIM-style failure detection (alive → suspect → confirmed dead) with anti-entropy synchronization. Periodic drift detection using DB as source of truth, convergence time tracking, and automatic state repair
+  SWIM 式故障探测（存活→疑似→确认死亡）+ 反熵同步，以 DB 为真相源的状态漂移检测
+
+#### L4 Orchestration / L4 编排层
+- **GlobalModulator** (`global-modulator.js`): Runtime work-point controller with 4 modes (EXPLORE/EXPLOIT/RELIABLE/URGENT). Hysteresis-based mode switching with minimum dwell time (3 turns), modulates SwarmAdvisor thresholds, BudgetTracker cost tolerance, and EvidenceGate strictness
+  运行时工作点控制器，4 种模式 + 滞后切换 + 最小停留 3 turns，调节阈值/成本容忍度/证据严格度
+- **GovernanceMetrics** (`governance-metrics.js`): Audit + Policy + ROI triple metrics for swarm governance. Decision traceability scoring, policy compliance tracking, collaboration ROI computation with periodic report publishing
+  审计 + 策略 + ROI 三联治理指标，决策可追溯性评分、策略合规追踪、协作 ROI 计算
+
+#### L6 Monitoring / L6 监控层
+- **TraceCollector** (`trace-collector.js`): Lightweight distributed trace span collector. Subscribes to MessageBus events, manages pending span pairing (start/end), batch writes to `trace_spans` table (every 5 spans)
+  轻量分布式追踪 span 收集器，事件订阅、pending span 配对、批量写入
+- **StartupDiagnostics** (`startup-diagnostics.js`): Modularized startup health check. DB connectivity, empty table detection, data pipeline health (strategy-feedback/repair-sedimentation/environment-signal/instant-observation), module readiness, overall health score
+  模块化启动诊断：DB 连通性、空表检测、数据管道健康、模块就绪度、整体健康评分
+
+### Key Modifications / 重要修改
+
+- **swarm-advisor.js**: Added GlobalModulator integration (`setGlobalModulator()`), degradation evaluation (`_evaluateDegradation()`), urgency indicators in stimulus computation, evidence/budget signal sources (S10/S11). ARBITER_MODE_DEGRADED event support
+  新增全局调节器集成、降级评估、紧急度指示器、证据/预算信号源
+- **tool-resilience.js**: Activated repair memory data pipeline — `findRepairStrategy()` now called on failures, `recordRepairOutcome()` records successful repairs. REPAIR_STRATEGY_FOUND/OUTCOME events
+  激活修复记忆数据管道——失败时查找修复策略，成功时记录修复结果
+- **budget-tracker.js**: Baseline self-adjustment support via config, collaboration tax feedback loop integration with GovernanceMetrics
+  基准自调整配置支持，协作税反馈闭环与治理指标集成
+- **evidence-gate.js**: Custom tier weight configuration, evidence quality tracking integration with GovernanceMetrics
+  自定义层级权重配置，证据质量追踪与治理指标集成
+- **task-dag-engine.js**: Dead letter tasks now persist to `dead_letter_tasks` SQLite table (previously in-memory only)
+  死信任务持久化到 SQLite（此前仅内存）
+- **index.js**: Task affinity UPSERT on `subagent_ended`, StateConvergence/GlobalModulator/GovernanceMetrics initialization, startup diagnostics integration. VERSION 5.5.0
+  task_affinity 写入、状态收敛/全局调节器/治理指标初始化、启动诊断集成
+- **event-catalog.js**: 10 new V5.5 event topics. Total 56 topics
+  10 个新事件主题，共 56 个
+- **observability-core.js**: Subscribed to all 10 V5.5 events across 4 observation categories
+  订阅全部 10 个 V5.5 事件
+- **dashboard-service.js**: 4 new REST endpoints (`/api/v1/governance`, `/api/v1/convergence`, `/api/v1/modulator`, `/api/v1/diagnostics`). Enhanced context-debug with SwarmAdvisor/GlobalModulator info
+  4 个新 REST 端点 + 增强的上下文调试
+- **dashboard-v2.html**: GlobalModulator mode badge, Governance triple metric bars, Circuit Breaker status dots, Trace Timeline gantt chart, Task Affinity color-coded grid
+  全局调节器模式标签、治理三联指标柱、断路器状态点、追踪时间线甘特图、任务亲和颜色网格
+
+### Data Pipeline Activation / 数据管道激活
+
+4 previously dormant DB tables now have active write paths:
+
+4 张此前休眠的 DB 表已激活写入管道：
+
+| Table / 表 | Pipeline / 管道 | Description / 说明 |
+|---|---|---|
+| `repair_memory` | Strategy feedback / 策略回流 | Tool failure → find strategy → record outcome |
+| `trace_spans` | Instant observation / 即时观测 | MessageBus events → TraceCollector → batch INSERT |
+| `dead_letter_tasks` | Repair sedimentation / 修复沉淀 | Failed tasks → DLQ persist → future retry |
+| `task_affinity` | Environment signal / 环境信号 | Subagent completion → affinity UPSERT |
+
+### Three Feedback Loops / 三条回流链
+
+| Loop / 回流链 | Flow / 流程 |
+|---|---|
+| **Strategy** / 策略 | repair_memory → findRepairStrategy() → route influence → recordOutcome() |
+| **Repair** / 修复 | ToolResilience failure → repair → FailureVaccination vaccine → future immunity |
+| **Environment** / 环境 | Pheromone/breaker/board signals → routing → execution → signal update |
+
+### Event Topics (10 new, total 56) / 事件主题
+
+```
+REPAIR_STRATEGY_FOUND, REPAIR_STRATEGY_OUTCOME,
+TASK_AFFINITY_UPDATED, ARBITER_MODE_DEGRADED, BASELINE_ADJUSTED,
+CONVERGENCE_DRIFT, AGENT_SUSPECT, AGENT_CONFIRMED_DEAD,
+MODE_SWITCHED, GOVERNANCE_REPORT
+```
+
+### Test Coverage / 测试覆盖
+- 1021 tests across 59 files (up from 902 in V5.4)
+  1021 个测试（V5.4 为 902 个）
+- 10 new test files (119 tests): state-convergence (13), global-modulator (13), governance-metrics (11), trace-collector (10), startup-diagnostics (15), version-consistency (6), repair-memory-v55 (7), swarm-advisor-v55 (14), budget-tracker-v55 (14), evidence-gate-v55 (16)
+  10 个新测试文件（119 个测试）
+
+---
+
 ## [5.4.0] - 2026-03-10
 
 ### Enhancement: Main Path Convergence / 增强：主路径收敛

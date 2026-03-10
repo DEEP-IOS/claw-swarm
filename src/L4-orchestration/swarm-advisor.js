@@ -172,6 +172,9 @@ export class SwarmAdvisor {
     this._failureVaccination = failureVaccination || null;
     this._toolResilience = toolResilience || null;
 
+    /** @type {Object|null} V5.5: GlobalModulator for threshold adjustment */
+    this._globalModulator = null;
+
     this._agentId = DEFAULT_AGENT_ID;
 
     // Turn 级状态: Map<turnId, TurnState> (D1 并发安全修正)
@@ -541,10 +544,27 @@ export class SwarmAdvisor {
    * @returns {boolean}
    */
   isHighStimulus(stimulus) {
+    // V5.5: GlobalModulator 调节阈值 / GlobalModulator threshold adjustment
+    let threshold = DEFAULT_THRESHOLD;
+    if (this._globalModulator) {
+      const factors = this._globalModulator.getModulationFactors();
+      threshold = DEFAULT_THRESHOLD * (factors.thresholdMult || 1.0);
+    }
+
     if (!this._responseThreshold) {
-      return stimulus > DEFAULT_THRESHOLD;
+      return stimulus > threshold;
     }
     return this._responseThreshold.shouldRespond(this._agentId, TASK_TYPE, stimulus);
+  }
+
+  /**
+   * V5.5: 设置 GlobalModulator 引用（初始化后注入）
+   * V5.5: Set GlobalModulator reference (injected post-init)
+   *
+   * @param {Object} globalModulator
+   */
+  setGlobalModulator(globalModulator) {
+    this._globalModulator = globalModulator;
   }
 
   /**

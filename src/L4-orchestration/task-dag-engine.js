@@ -81,7 +81,7 @@ export class TaskDAGEngine {
    * @param {Object} deps.logger - 日志器
    * @param {Object} [deps.config] - 配置项
    */
-  constructor({ messageBus, pheromoneEngine, agentRepo, taskRepo, capabilityEngine, logger, config = {} }) {
+  constructor({ messageBus, pheromoneEngine, agentRepo, taskRepo, capabilityEngine, logger, config = {}, db }) {
     this._messageBus = messageBus;
     this._pheromoneEngine = pheromoneEngine;
     this._agentRepo = agentRepo;
@@ -89,6 +89,8 @@ export class TaskDAGEngine {
     this._capabilityEngine = capabilityEngine;
     this._logger = logger || console;
     this._config = config;
+    /** @type {Object|null} V5.5: DatabaseManager for DLQ persistence */
+    this._db = db || null;
 
     this._auctionTimeoutMs = config.auctionTimeoutMs || DEFAULT_AUCTION_TIMEOUT_MS;
 
@@ -1040,6 +1042,23 @@ export class TaskDAGEngine {
     // 容量控制 / Capacity control
     if (this._deadLetterQueue.length > MAX_DLQ_SIZE) {
       this._deadLetterQueue.shift();
+    }
+
+    // V5.5: 持久化到 SQLite / Persist to SQLite
+    if (this._db) {
+      try {
+        this._db.run(
+          `INSERT OR REPLACE INTO dead_letter_tasks
+            (id, dag_id, task_node_id, agent_id, original_params, failure_category, error_summary, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          entry.id, dagId, nodeId, entry.agentId || null,
+          JSON.stringify(node.params || node.input || {}),
+          entry.failureCategory, (entry.error || '').substring(0, 500),
+          entry.createdAt
+        );
+      } catch (err) {
+        this._logger.debug?.(`[TaskDAGEngine] DLQ persistence error: ${err.message}`);
+      }
     }
 
     // 发布 DLQ 事件 / Publish DLQ event

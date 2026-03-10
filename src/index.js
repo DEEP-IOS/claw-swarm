@@ -78,13 +78,17 @@ import { FailureVaccination } from './L3-agent/failure-vaccination.js';
 import { SkillSymbiosisTracker } from './L3-agent/skill-symbiosis.js';
 // V5.3 模块导入 / V5.3 module imports
 import { SwarmAdvisor } from './L4-orchestration/swarm-advisor.js';
+// V5.5 模块导入 / V5.5 module imports
+import { StateConvergence } from './L2-communication/state-convergence.js';
+import { GlobalModulator } from './L4-orchestration/global-modulator.js';
+import { GovernanceMetrics } from './L4-orchestration/governance-metrics.js';
 import { EventTopics, wrapEvent } from './event-catalog.js';
 
 // ============================================================================
 // 常量 / Constants
 // ============================================================================
 
-const VERSION = '5.4.0';
+const VERSION = '5.5.0';
 const NAME = 'claw-swarm';
 const DB_FILENAME = 'claw-swarm.db';
 
@@ -300,6 +304,7 @@ export default {
           logger,
           config: config.toolResilience || {},
           messageBus: adapter._engines?.messageBus,
+          db: adapter._engines?.dbManager, // V5.5: 传入 DB 以激活修复记忆
         });
         logger.info?.('[Claw-Swarm] ToolResilience layer initialized');
       } catch (err) {
@@ -392,6 +397,26 @@ export default {
       logger.warn?.(`[Claw-Swarm] SkillSymbiosisTracker init failed: ${err.message}`);
     }
 
+    // ── 2e. V5.5: 状态收敛层 ──────────────────────────────────────────
+    //    V5.5: State Convergence Layer (SWIM + Anti-Entropy)
+    let stateConvergence = null;
+    if (config.stateConvergence?.enabled !== false) {
+      try {
+        stateConvergence = new StateConvergence({
+          messageBus: adapter._engines?.messageBus,
+          healthChecker,
+          pheromoneEngine: adapter._engines?.pheromoneEngine,
+          db: adapter._engines?.dbManager,
+          logger,
+          config: config.stateConvergence || {},
+        });
+        stateConvergence.startHeartbeat();
+        logger.info?.('[Claw-Swarm] StateConvergence initialized (SWIM + Anti-Entropy)');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] StateConvergence init failed: ${err.message}`);
+      }
+    }
+
     // ── 2d. V5.4: 蜂群主路径路由引擎 ──────────────────────────────────
     //    V5.4: Swarm Main-Path Routing Engine (multi-signal aggregation)
     let swarmAdvisor = null;
@@ -414,6 +439,56 @@ export default {
       } catch (err) {
         logger.warn?.(`[Claw-Swarm] SwarmAdvisor init failed: ${err.message}`);
       }
+    }
+
+    // ── 2f. V5.5: 全局工作点调节器 ──────────────────────────────────
+    //    V5.5: Global Modulator (explore/exploit/reliable/urgent)
+    let globalModulator = null;
+    if (config.globalModulator?.enabled !== false) {
+      try {
+        globalModulator = new GlobalModulator({
+          swarmAdvisor,
+          toolResilience,
+          healthChecker,
+          messageBus: adapter._engines?.messageBus,
+          logger,
+        });
+        logger.info?.('[Claw-Swarm] GlobalModulator initialized (4 work points)');
+      } catch (err) {
+        logger.warn?.(`[Claw-Swarm] GlobalModulator init failed: ${err.message}`);
+      }
+    }
+
+    // V5.5: 注入 GlobalModulator 到 SwarmAdvisor (后初始化)
+    // V5.5: Inject GlobalModulator into SwarmAdvisor (post-init)
+    if (swarmAdvisor && globalModulator) {
+      swarmAdvisor.setGlobalModulator(globalModulator);
+    }
+
+    // ── 2g. V5.5: 治理三联指标 ──────────────────────────────────────
+    //    V5.5: Governance Triple Metrics (audit + policy + ROI)
+    let governanceMetrics = null;
+    try {
+      governanceMetrics = new GovernanceMetrics({
+        swarmAdvisor,
+        globalModulator,
+        messageBus: adapter._engines?.messageBus,
+        db: adapter._engines?.dbManager,
+        logger,
+      });
+      logger.info?.('[Claw-Swarm] GovernanceMetrics initialized (audit/policy/ROI)');
+    } catch (err) {
+      logger.warn?.(`[Claw-Swarm] GovernanceMetrics init failed: ${err.message}`);
+    }
+
+    // V5.5: 存储模块到 engines 以供 Dashboard 访问
+    // V5.5: Store modules to engines for Dashboard access
+    if (adapter._engines) {
+      if (stateConvergence) adapter._engines.stateConvergence = stateConvergence;
+      if (globalModulator) adapter._engines.globalModulator = globalModulator;
+      if (governanceMetrics) adapter._engines.governanceMetrics = governanceMetrics;
+      if (swarmAdvisor) adapter._engines.swarmAdvisor = swarmAdvisor;
+      if (toolResilience) adapter._engines.toolResilience = toolResilience;
     }
 
     // 获取内部钩子处理器和工具定义 / Get internal hook handlers and tool definitions
@@ -512,6 +587,8 @@ export default {
           abc: !!config.evolution?.abc,
           swarmAdvisor: !!swarmAdvisor,
           signalAggregation: !!swarmAdvisor, // V5.4: multi-signal routing
+          stateConvergence: !!stateConvergence, // V5.5
+          globalModulator: !!globalModulator,   // V5.5
         },
         startedAt: Date.now(),
       };
@@ -1110,6 +1187,12 @@ export default {
       } catch (err) {
         logger.warn?.(`[Claw-Swarm] subagent_spawned error: ${err.message}`);
       }
+
+      // V5.5: StateConvergence 心跳记录 / Record heartbeat for state convergence
+      if (stateConvergence) {
+        const childKey = event.targetSessionKey || ctx?.childSessionKey;
+        if (childKey) stateConvergence.recordHeartbeat(childKey);
+      }
     }, { priority: 10 });
 
     // ━━━ subagent_ended [V5.1 新增] ━━━
@@ -1182,6 +1265,54 @@ export default {
         logger.debug?.(`[Claw-Swarm] Phase 4 subagent_ended scoring error: ${err.message}`);
       }
     }, { priority: 20 });
+
+    // ━━━ subagent_ended [V5.5: Task Affinity 写入] ━━━
+    // 子 Agent 完成后，UPSERT task_affinity 表更新亲和度
+    // After subagent completes, UPSERT task_affinity table to update affinity
+    api.on('subagent_ended', async (event, ctx) => {
+      const dbManager = adapter._engines?.dbManager;
+      if (!dbManager) return;
+
+      try {
+        const coordinator = adapter._engines?.hierarchicalCoordinator;
+        const childKey = event.targetSessionKey || ctx?.childSessionKey;
+        const outcome = event.outcome || 'unknown';
+        const success = outcome === 'success';
+
+        // 获取 agent 元数据 / Get agent metadata
+        const meta = coordinator?.getMetadata?.(childKey);
+        const agentId = meta?.agentId || childKey;
+        const taskType = meta?.role || meta?.taskType || event.role || 'general';
+
+        if (!agentId || !taskType) return;
+
+        // UPSERT task_affinity / UPSERT task_affinity
+        dbManager.run(
+          `INSERT INTO task_affinity (agent_id, task_type, affinity, total_tasks, successes, last_updated)
+           VALUES (?, ?, ?, 1, ?, ?)
+           ON CONFLICT(agent_id, task_type) DO UPDATE SET
+             total_tasks = total_tasks + 1,
+             successes = successes + ?,
+             affinity = CAST((successes + ?) AS REAL) / CAST((total_tasks + 1) AS REAL),
+             last_updated = ?`,
+          agentId, taskType, success ? 1.0 : 0.0, success ? 1 : 0, Date.now(),
+          success ? 1 : 0, success ? 1 : 0, Date.now()
+        );
+
+        // 发布 TASK_AFFINITY_UPDATED 事件
+        adapter._engines?.messageBus?.publish?.('task.affinity.updated',
+          wrapEvent('task.affinity.updated', {
+            agentId, taskType, success, timestamp: Date.now(),
+          }, 'index')
+        );
+
+        logger.debug?.(
+          `[Claw-Swarm] Task affinity updated: ${agentId}/${taskType} success=${success}`
+        );
+      } catch (err) {
+        logger.debug?.(`[Claw-Swarm] Task affinity write error: ${err.message}`);
+      }
+    }, { priority: 25 });
 
     // ━━━ llm_output [V5.1 新增] ━━━
     // SOUL.md 双阶段迁移 — "派遣"文本解析 → swarm_spawn tool_call 转换
@@ -1523,7 +1654,7 @@ export default {
       } catch { /* best-effort */ }
     });
 
-    const hookCount = 17; // V5.0(6) + V5.1(8) + V5.3(3: Layer0 + Layer1 + tool routing)
+    const hookCount = 18; // V5.0(6) + V5.1(8) + V5.3(3: Layer0 + Layer1 + tool routing) + V5.5(1: task_affinity)
     logger.info?.(`[Claw-Swarm] V${VERSION} plugin registered — ${hookCount} hooks + ${tools.length} tools`);
   },
 };
@@ -1565,18 +1696,50 @@ async function _startDashboard(adapter, config, logger) {
     const { StateBroadcaster } = await import('./L6-monitoring/state-broadcaster.js');
     const { MetricsCollector } = await import('./L6-monitoring/metrics-collector.js');
     const { DashboardService } = await import('./L6-monitoring/dashboard-service.js');
+    const { TraceCollector } = await import('./L6-monitoring/trace-collector.js');
+    const { StartupDiagnostics } = await import('./L6-monitoring/startup-diagnostics.js');
 
     const engines = adapter._engines;
     if (!engines.messageBus) return;
 
     const broadcaster = new StateBroadcaster({ messageBus: engines.messageBus, logger });
     const metricsCollector = new MetricsCollector({ messageBus: engines.messageBus, logger });
+
+    // V5.5: 生成启动诊断报告 / Generate startup diagnostics report
+    const startupDiag = new StartupDiagnostics({
+      db: engines.dbManager,
+      messageBus: engines.messageBus,
+      logger,
+    });
+    const diagnosticsReport = startupDiag.publishReport({
+      version: VERSION,
+      featureFlags: config,
+      engines,
+    });
+
     const dashboard = new DashboardService({
       stateBroadcaster: broadcaster,
       metricsCollector,
       logger,
       port: config.dashboard?.port || 19100,
+      db: engines.dbManager,
+      toolResilience: engines.toolResilience,
+      governanceMetrics: engines.governanceMetrics,
+      stateConvergence: engines.stateConvergence,
+      globalModulator: engines.globalModulator,
+      swarmAdvisor: engines.swarmAdvisor,
+      startupDiagnosticsReport: diagnosticsReport,
     });
+
+    // V5.5: TraceCollector — 激活 trace_spans 数据管道
+    // V5.5: TraceCollector — activate trace_spans data pipeline
+    const traceCollector = new TraceCollector({
+      messageBus: engines.messageBus,
+      db: engines.dbManager,
+      logger,
+    });
+    traceCollector.start();
+    engines.traceCollector = traceCollector;
 
     broadcaster.start();
     metricsCollector.start();

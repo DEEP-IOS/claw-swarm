@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Claw-Swarm V5.4 — Hive Dashboard</title>
+<title>Claw-Swarm V5.5 — Hive Dashboard</title>
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
-   CSS — Claw-Swarm V5.4 Bee Swarm Intelligence Dashboard
+   CSS — Claw-Swarm V5.5 Bee Swarm Intelligence Dashboard
    Single-file, no external dependencies, production-quality dark theme
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -365,6 +365,59 @@ header{
   padding:1px 5px;border-radius:3px;border:1px solid var(--border);
   font-family:var(--font-mono);
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   V5.5: BREAKER STATUS / TRACE TIMELINE / AFFINITY / GOVERNANCE
+   ══════════════════════════════════════════════════════════════════ */
+.breaker-row{
+  display:flex;align-items:center;gap:8px;padding:4px 0;
+  font-size:11px;border-bottom:1px solid rgba(42,42,74,0.3);
+}
+.breaker-row:last-child{border-bottom:none}
+.breaker-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+}
+.breaker-dot.closed{background:var(--emerald)}
+.breaker-dot.open{background:var(--red);box-shadow:0 0 6px var(--red)}
+.breaker-dot.half-open{background:var(--amber);box-shadow:0 0 4px var(--amber)}
+.breaker-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim)}
+.breaker-state{font-weight:700;font-size:10px;text-transform:uppercase}
+
+.trace-bar{
+  display:flex;align-items:center;gap:6px;padding:3px 0;
+  font-size:10px;font-family:var(--font-mono);
+}
+.trace-bar .tb-op{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim)}
+.trace-bar .tb-dur{color:var(--amber);font-weight:600;min-width:40px;text-align:right}
+.trace-bar .tb-gantt{
+  width:60px;height:6px;background:var(--bg-primary);border-radius:3px;
+  overflow:hidden;flex-shrink:0;
+}
+.trace-bar .tb-gantt-fill{height:100%;border-radius:3px;background:var(--blue);transition:width 0.3s}
+
+.affinity-cell{
+  display:inline-block;width:24px;height:24px;border-radius:4px;
+  margin:1px;font-size:9px;line-height:24px;text-align:center;
+  font-weight:700;cursor:default;
+}
+.governance-metric{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:5px 0;font-size:12px;border-bottom:1px solid rgba(42,42,74,0.3);
+}
+.governance-metric:last-child{border-bottom:none}
+.gm-bar{
+  width:60px;height:6px;background:var(--bg-primary);border-radius:3px;
+  overflow:hidden;
+}
+.gm-bar-fill{height:100%;border-radius:3px;transition:width 0.3s}
+.mode-badge{
+  display:inline-block;padding:2px 8px;border-radius:10px;
+  font-size:10px;font-weight:700;letter-spacing:0.5px;
+}
+.mode-badge.explore{background:rgba(59,130,246,0.2);color:var(--blue)}
+.mode-badge.exploit{background:rgba(139,92,246,0.2);color:var(--purple)}
+.mode-badge.reliable{background:rgba(16,185,129,0.2);color:var(--emerald)}
+.mode-badge.urgent{background:rgba(239,68,68,0.2);color:var(--red)}
 </style>
 </head>
 <body>
@@ -586,6 +639,14 @@ const state = {
   // Connection
   sseConnected: false,
   sseRetryDelay: SSE_BASE_DELAY,
+
+  // V5.5: observability state
+  breakerStatus: {},        // toolName -> state (CLOSED/OPEN/HALF_OPEN)
+  traceSpans: [],           // recent trace spans
+  affinityMatrix: [],       // task affinity rows
+  governance: null,         // governance triple metrics
+  modulatorMode: 'RELIABLE', // global modulator mode
+  convergence: null,        // convergence stats
 };
 
 // ============================================================================
@@ -1758,6 +1819,77 @@ function renderAggregateView(titleEl, contentEl) {
   }
   html += '</div>';
 
+  // V5.5: Global Modulator mode
+  const modeClass = state.modulatorMode.toLowerCase();
+  html += `
+    <div class="aggregate-section">
+      <h4>Global Modulator</h4>
+      <div class="agg-row"><span>Work Mode</span><span class="mode-badge ${modeClass}">${state.modulatorMode}</span></div>
+    </div>`;
+
+  // V5.5: Governance triple metrics
+  if (state.governance) {
+    const g = state.governance;
+    const auditPct = ((g.audit?.score || 0) * 100).toFixed(0);
+    const policyPct = ((g.policy?.compliance || 0) * 100).toFixed(0);
+    const roiVal = (g.roi?.roi || 0).toFixed(2);
+    const auditColor = g.audit?.score >= 0.8 ? 'var(--emerald)' : (g.audit?.score >= 0.5 ? 'var(--amber)' : 'var(--red)');
+    const policyColor = g.policy?.compliance >= 0.8 ? 'var(--emerald)' : (g.policy?.compliance >= 0.5 ? 'var(--amber)' : 'var(--red)');
+    html += `
+    <div class="aggregate-section">
+      <h4>Governance</h4>
+      <div class="governance-metric"><span>Audit</span><div class="gm-bar"><div class="gm-bar-fill" style="width:${auditPct}%;background:${auditColor}"></div></div><span class="ar-val" style="color:${auditColor}">${auditPct}%</span></div>
+      <div class="governance-metric"><span>Policy</span><div class="gm-bar"><div class="gm-bar-fill" style="width:${policyPct}%;background:${policyColor}"></div></div><span class="ar-val" style="color:${policyColor}">${policyPct}%</span></div>
+      <div class="governance-metric"><span>ROI</span><span class="ar-val" style="color:var(--amber)">${roiVal}</span></div>
+    </div>`;
+  }
+
+  // V5.5: Circuit Breaker status
+  const breakerEntries = Object.entries(state.breakerStatus);
+  if (breakerEntries.length > 0) {
+    html += '<div class="aggregate-section"><h4>Circuit Breakers</h4>';
+    for (const [name, bState] of breakerEntries) {
+      const dotClass = bState === 'CLOSED' ? 'closed' : (bState === 'OPEN' ? 'open' : 'half-open');
+      const stateColor = bState === 'CLOSED' ? 'var(--emerald)' : (bState === 'OPEN' ? 'var(--red)' : 'var(--amber)');
+      html += `<div class="breaker-row"><span class="breaker-dot ${dotClass}"></span><span class="breaker-name">${shortId(name)}</span><span class="breaker-state" style="color:${stateColor}">${bState}</span></div>`;
+    }
+    html += '</div>';
+  }
+
+  // V5.5: Trace Timeline (compact Gantt bars)
+  if (state.traceSpans.length > 0) {
+    const spans = state.traceSpans.slice(0, 8);
+    const maxDur = Math.max(...spans.map(s => s.duration_ms || 1), 1);
+    html += '<div class="aggregate-section"><h4>Recent Traces</h4>';
+    for (const s of spans) {
+      const pct = Math.max(5, ((s.duration_ms || 0) / maxDur) * 100);
+      const statusColor = s.status === 'ok' ? 'var(--emerald)' : (s.status === 'error' ? 'var(--red)' : 'var(--blue)');
+      html += `<div class="trace-bar"><span class="tb-op">${shortId(s.operation || '?')}</span><div class="tb-gantt"><div class="tb-gantt-fill" style="width:${pct}%;background:${statusColor}"></div></div><span class="tb-dur">${fmtDuration(s.duration_ms)}</span></div>`;
+    }
+    html += '</div>';
+  }
+
+  // V5.5: Task Affinity (color-coded compact grid)
+  if (state.affinityMatrix.length > 0) {
+    html += '<div class="aggregate-section"><h4>Task Affinity</h4>';
+    const grouped = {};
+    for (const row of state.affinityMatrix) {
+      if (!grouped[row.agent_id]) grouped[row.agent_id] = [];
+      grouped[row.agent_id].push(row);
+    }
+    for (const [agentId, rows] of Object.entries(grouped).slice(0, 6)) {
+      html += `<div style="margin-bottom:4px"><span style="font-size:10px;color:var(--text-dim)">${shortId(agentId)}</span><div>`;
+      for (const r of rows.slice(0, 5)) {
+        const aff = r.affinity || 0;
+        const bg = aff >= 0.8 ? 'rgba(16,185,129,0.3)' : (aff >= 0.5 ? 'rgba(245,166,35,0.3)' : 'rgba(239,68,68,0.2)');
+        const fg = aff >= 0.8 ? 'var(--emerald)' : (aff >= 0.5 ? 'var(--amber)' : 'var(--red)');
+        html += `<span class="affinity-cell" style="background:${bg};color:${fg}" title="${r.task_type}: ${(aff*100).toFixed(0)}%">${(aff*100).toFixed(0)}</span>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+  }
+
   // Keyboard shortcuts
   html += `
     <div class="aggregate-section">
@@ -1821,6 +1953,14 @@ function summarizeEventData(topic, data) {
   if (topic === 'quality.evaluated') return `${shortId(data.agentId)} scored ${((data.score || 0) * 100).toFixed(0)}% - ${data.passed ? 'PASS' : 'FAIL'}`;
   if (topic.startsWith('memory.')) return `${data.action || topic.split('.')[1]} on ${data.layer || '?'}`;
   if (topic.startsWith('species.')) return `${data.speciesName || '?'}`;
+  // V5.5 events
+  if (topic === 'modulator.mode.switched') return `${data.from || '?'} \u2192 ${data.to || '?'} (turn ${data.turn || '?'})`;
+  if (topic === 'agent.suspect') return `${shortId(data.agentId)} suspected`;
+  if (topic === 'agent.confirmed.dead') return `${shortId(data.agentId)} CONFIRMED DEAD`;
+  if (topic === 'convergence.drift') return `drift: ${data.type || '?'}`;
+  if (topic === 'governance.report') return `audit=${((data.audit?.score||0)*100).toFixed(0)}% ROI=${(data.roi?.roi||0).toFixed(2)}`;
+  if (topic === 'repair.strategy.found') return `${shortId(data.toolName)} \u2192 strategy found`;
+  if (topic === 'task.affinity.updated') return `${shortId(data.agentId)} ${data.taskType || '?'} aff=${((data.affinity||0)*100).toFixed(0)}%`;
   // Generic
   const s = JSON.stringify(data);
   return s.length > 80 ? s.slice(0, 77) + '\u2026' : s;
@@ -1869,6 +2009,25 @@ async function pollMetrics() {
 
     refreshLeftPanel();
     if (!state.selectedAgentId && !state.selectedTaskId) refreshRightPanel();
+  } catch (_) {}
+
+  // V5.5: fetch breaker status, traces, affinity, governance, modulator
+  try {
+    const [bk, tr, af, gv, md] = await Promise.allSettled([
+      fetch('/api/v1/breaker-status').then(r => r.json()),
+      fetch('/api/v1/trace-spans?limit=20').then(r => r.json()),
+      fetch('/api/v1/affinity').then(r => r.json()),
+      fetch('/api/v1/governance').then(r => r.json()),
+      fetch('/api/v1/modulator').then(r => r.json()),
+    ]);
+    if (bk.status === 'fulfilled' && bk.value.breakers) state.breakerStatus = bk.value.breakers;
+    if (tr.status === 'fulfilled' && tr.value.spans) state.traceSpans = tr.value.spans;
+    if (af.status === 'fulfilled' && af.value.matrix) state.affinityMatrix = af.value.matrix;
+    if (gv.status === 'fulfilled' && gv.value.governance) state.governance = gv.value.governance;
+    if (md.status === 'fulfilled' && md.value.modulator) {
+      state.modulatorMode = md.value.modulator.currentMode || 'RELIABLE';
+      state.convergence = md.value.modulator;
+    }
   } catch (_) {}
 }
 

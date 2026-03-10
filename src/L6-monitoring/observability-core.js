@@ -102,6 +102,18 @@ export class ObservabilityCore {
     this._sub(EventTopics.PROTOCOL_MESSAGE_SENT, OBS_CATEGORIES.EXECUTION);
     this._sub(EventTopics.BUDGET_TURN_COMPLETED, OBS_CATEGORIES.STRATEGY);
 
+    // ── V5.5 新事件 ──
+    this._sub(EventTopics.REPAIR_STRATEGY_FOUND, OBS_CATEGORIES.REPAIR);
+    this._sub(EventTopics.REPAIR_STRATEGY_OUTCOME, OBS_CATEGORIES.REPAIR);
+    this._sub(EventTopics.TASK_AFFINITY_UPDATED, OBS_CATEGORIES.STRATEGY);
+    this._sub(EventTopics.ARBITER_MODE_DEGRADED, OBS_CATEGORIES.DECISION);
+    this._sub(EventTopics.BASELINE_ADJUSTED, OBS_CATEGORIES.STRATEGY);
+    this._sub(EventTopics.CONVERGENCE_DRIFT, OBS_CATEGORIES.REPAIR);
+    this._sub(EventTopics.AGENT_SUSPECT, OBS_CATEGORIES.REPAIR);
+    this._sub(EventTopics.AGENT_CONFIRMED_DEAD, OBS_CATEGORIES.REPAIR);
+    this._sub(EventTopics.MODE_SWITCHED, OBS_CATEGORIES.DECISION);
+    this._sub(EventTopics.GOVERNANCE_REPORT, OBS_CATEGORIES.STRATEGY);
+
     this._subscribed = true;
     this._logger.info?.(`[${SOURCE}] started — subscribing to observation events`);
   }

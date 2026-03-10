@@ -18,6 +18,10 @@
  * - GET /api/v1/breaker-status  → 断路器状态 (V5.2) / Circuit breaker status
  * - GET /api/v1/trace-spans     → 追踪 spans (V5.2) / Trace spans
  * - GET /api/v1/startup-summary → 启动摘要 (V5.2) / Startup summary
+ * - GET /api/v1/governance       → 治理三联指标 (V5.5) / Governance triple metrics
+ * - GET /api/v1/convergence      → 状态收敛统计 (V5.5) / State convergence stats
+ * - GET /api/v1/modulator        → 全局调节器状态 (V5.5) / Global modulator state
+ * - GET /api/v1/diagnostics      → 启动诊断报告 (V5.5) / Startup diagnostics report
  *
  * 注意: Fastify 为可选依赖, 不可用时服务优雅降级。
  * Note: Fastify is optional; service degrades gracefully if unavailable.
@@ -51,7 +55,7 @@ export class DashboardService {
    * @param {number} [deps.port=19100]
    * @param {Object} [deps.db] - better-sqlite3 database instance for V5.1 queries
    */
-  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port, db, toolResilience, startupSummary }) {
+  constructor({ stateBroadcaster, metricsCollector, messageBus, logger, port, db, toolResilience, startupSummary, governanceMetrics, stateConvergence, globalModulator, swarmAdvisor, startupDiagnosticsReport }) {
     this._broadcaster = stateBroadcaster;
     this._metrics = metricsCollector;
     this._messageBus = messageBus || null;
@@ -63,6 +67,16 @@ export class DashboardService {
     this._toolResilience = toolResilience || null;
     /** @type {Object | null} V5.2: Startup summary cache */
     this._startupSummary = startupSummary || null;
+    /** @type {Object | null} V5.5: GovernanceMetrics instance */
+    this._governanceMetrics = governanceMetrics || null;
+    /** @type {Object | null} V5.5: StateConvergence instance */
+    this._stateConvergence = stateConvergence || null;
+    /** @type {Object | null} V5.5: GlobalModulator instance */
+    this._globalModulator = globalModulator || null;
+    /** @type {Object | null} V5.5: SwarmAdvisor instance */
+    this._swarmAdvisor = swarmAdvisor || null;
+    /** @type {Object | null} V5.5: Startup diagnostics report */
+    this._diagnosticsReport = startupDiagnosticsReport || null;
 
     /** @type {Object | null} Fastify 实例 / Fastify instance */
     this._server = null;
@@ -304,11 +318,11 @@ export class DashboardService {
 
     // ━━━ V5.2 REST API 端点 / V5.2 REST API Endpoints ━━━
 
-    // GET /api/v1/context-debug → 上下文调试（脱敏）/ Context debug (sanitized)
+    // GET /api/v1/context-debug → 上下文调试（脱敏）/ Context debug (sanitized, V5.5 enhanced)
     server.get('/api/v1/context-debug', (req, reply) => {
       const snapshot = this._metrics.getSnapshot();
       // 仅返回结构信息，不泄露实际文本 / Return structure only, no actual text
-      reply.send({
+      const result = {
         agents: (snapshot.agents || []).map(a => ({
           id: a.agentId || a.id,
           role: a.role,
@@ -325,7 +339,29 @@ export class DashboardService {
           note: 'Token counts and segment lengths — no actual content exposed',
         },
         timestamp: Date.now(),
-      });
+      };
+
+      // V5.5: 增强调试信息 / Enhanced debug info
+      if (this._swarmAdvisor) {
+        try {
+          const turns = this._swarmAdvisor._turns;
+          result.swarmAdvisor = {
+            activeTurns: turns ? turns.size : 0,
+            currentMode: this._swarmAdvisor.getCurrentMode?.() || 'unknown',
+          };
+        } catch { /* non-critical */ }
+      }
+
+      if (this._globalModulator) {
+        try {
+          result.globalModulator = {
+            currentMode: this._globalModulator.getCurrentMode(),
+            factors: this._globalModulator.getModulationFactors(),
+          };
+        } catch { /* non-critical */ }
+      }
+
+      reply.send(result);
     });
 
     // GET /api/v1/breaker-status → 断路器状态 / Circuit breaker status
@@ -369,6 +405,63 @@ export class DashboardService {
     server.get('/api/v1/startup-summary', (req, reply) => {
       reply.send({
         summary: this._startupSummary || { note: 'No startup summary available' },
+        timestamp: Date.now(),
+      });
+    });
+
+    // ━━━ V5.5 REST API 端点 / V5.5 REST API Endpoints ━━━
+
+    // GET /api/v1/governance → 治理三联指标 / Governance triple metrics
+    server.get('/api/v1/governance', (req, reply) => {
+      if (!this._governanceMetrics) {
+        return reply.send({ note: 'GovernanceMetrics not available', timestamp: Date.now() });
+      }
+      try {
+        reply.send({
+          governance: this._governanceMetrics.getGovernanceSummary(),
+          timestamp: Date.now(),
+        });
+      } catch {
+        reply.send({ note: 'Error reading governance metrics', timestamp: Date.now() });
+      }
+    });
+
+    // GET /api/v1/convergence → 状态收敛统计 / State convergence stats
+    server.get('/api/v1/convergence', (req, reply) => {
+      if (!this._stateConvergence) {
+        return reply.send({ note: 'StateConvergence not available', timestamp: Date.now() });
+      }
+      try {
+        reply.send({
+          convergence: this._stateConvergence.getConvergenceStats(),
+          suspects: this._stateConvergence.getSuspects(),
+          deadAgents: this._stateConvergence.getDeadAgents(),
+          timestamp: Date.now(),
+        });
+      } catch {
+        reply.send({ note: 'Error reading convergence stats', timestamp: Date.now() });
+      }
+    });
+
+    // GET /api/v1/modulator → 全局调节器状态 / Global modulator state
+    server.get('/api/v1/modulator', (req, reply) => {
+      if (!this._globalModulator) {
+        return reply.send({ note: 'GlobalModulator not available', timestamp: Date.now() });
+      }
+      try {
+        reply.send({
+          modulator: this._globalModulator.getStats(),
+          timestamp: Date.now(),
+        });
+      } catch {
+        reply.send({ note: 'Error reading modulator state', timestamp: Date.now() });
+      }
+    });
+
+    // GET /api/v1/diagnostics → 启动诊断报告 / Startup diagnostics report
+    server.get('/api/v1/diagnostics', (req, reply) => {
+      reply.send({
+        diagnostics: this._diagnosticsReport || { note: 'No diagnostics report available' },
         timestamp: Date.now(),
       });
     });

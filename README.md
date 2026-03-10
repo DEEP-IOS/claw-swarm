@@ -1,12 +1,12 @@
 [**中文**](README.zh-CN.md) | English
 
-# Claw-Swarm V5.4
+# Claw-Swarm V5.5
 
-**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, adaptive 4-state arbitration, evidence discipline, protocol semantics, collaboration tax tracking, and unified observability.**
+**Bio-inspired swarm intelligence plugin for OpenClaw with 6-layer architecture, 20+ algorithms, state-convergence layer, runtime global-modulator, three feedback loops, governance triple metrics, and full observability.**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen)
-![Version](https://img.shields.io/badge/version-5.4.0-blue)
-![Tests](https://img.shields.io/badge/tests-902%20across%2049%20files-green)
+![Version](https://img.shields.io/badge/version-5.5.0-blue)
+![Tests](https://img.shields.io/badge/tests-1021%20across%2059%20files-green)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
 <p align="center">
@@ -60,9 +60,13 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 | **Protocol Semantics** | V5.4: 9 typed messages (REQUEST/COMMIT/ACK/...) with conversation tracking and validation | V5.4: 9 种语义消息 + 会话追踪和协议验证 |
 | **Collaboration Tax** | V5.4: 5-dimension budget tracking with per-turn tax computation and per-mode ROI | V5.4: 五维预算追踪 + 协作税 + 按模式 ROI |
 | **Unified Observability** | V5.4: 4-category observation (decision/execution/repair/strategy) with ring buffer | V5.4: 四类观测数据 + 环形缓冲区 |
+| **State Convergence** | V5.5: SWIM failure detection (alive→suspect→dead) + anti-entropy sync with DB as truth source | V5.5: SWIM 故障探测 + 反熵同步 |
+| **Global Modulator** | V5.5: Runtime work-point controller (EXPLORE/EXPLOIT/RELIABLE/URGENT) with hysteresis switching | V5.5: 运行时工作点控制器，滞后切换 |
+| **Governance Metrics** | V5.5: Audit + Policy + ROI triple metrics for swarm governance | V5.5: 审计 + 策略 + ROI 三联治理指标 |
+| **Three Feedback Loops** | V5.5: Strategy/Repair/Environment reflux chains for continuous self-improvement | V5.5: 策略/修复/环境三条回流链 |
 | **5 Bee Personas** | scout, worker, guard, queen-messenger, designer — signal-driven behavior | 5 种蜜蜂人格：侦察蜂、工蜂、守卫蜂、女王信使、设计蜂 |
-| **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标 |
-| **Jaeger-lite Tracing** | Lightweight distributed tracing with trace spans and startup diagnostics | 轻量分布式追踪 + 启动诊断 |
+| **Real-Time Dashboard** | Fastify + SSE, hex hive view, DAG graph, pheromone particles, RED metrics, breaker status, trace timeline | 实时仪表盘：六边形蜂巢、DAG 图、信息素粒子、RED 指标、断路器状态、追踪时间线 |
+| **Jaeger-lite Tracing** | Lightweight distributed tracing with trace span collector and startup diagnostics | 轻量分布式追踪 span 收集器 + 启动诊断 |
 | **Plugin SDK Integration** | 16 OpenClaw hooks, 8 agent tools, `{ id, register(api) }` pattern | 16 个钩子、8 个工具，标准 Plugin SDK 模式 |
 
 ---
@@ -74,7 +78,7 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 │  L6  Monitoring        监控层                                │
 │      StateBroadcaster · MetricsCollector · DashboardService │
 │      HealthChecker · ObservabilityCore · dashboard-v2.html  │
-│      (SSE, port 19100)                                      │
+│      TraceCollector · StartupDiagnostics (SSE, port 19100)  │
 ├─────────────────────────────────────────────────────────────┤
 │  L5  Application       应用层                                │
 │      PluginAdapter · ContextService · CircuitBreaker        │
@@ -89,6 +93,7 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 │      RoleDiscovery · RoleManager · ZoneManager              │
 │      HierarchicalCoordinator · TaskDAGEngine                │
 │      SpeciesEvolver · SwarmAdvisor · BudgetTracker          │
+│      GlobalModulator · GovernanceMetrics                    │
 ├─────────────────────────────────────────────────────────────┤
 │  L3  Agent             智能体层                              │
 │      WorkingMemory · EpisodicMemory · SemanticMemory        │
@@ -100,7 +105,7 @@ The 4-layer V4.0 architecture became bloated after adding DAG orchestration, Con
 │  L2  Communication     通信层                                │
 │      MessageBus · PheromoneEngine · GossipProtocol          │
 │      PheromoneTypeRegistry · PheromoneResponseMatrix         │
-│      StigmergicBoard · ProtocolSemantics                    │
+│      StigmergicBoard · ProtocolSemantics · StateConvergence │
 ├─────────────────────────────────────────────────────────────┤
 │  L1  Infrastructure    基础设施层                             │
 │      DatabaseManager (SQLite, 44 tables) · ConfigManager    │
