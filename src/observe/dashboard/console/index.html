@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claw-Swarm Console</title>
+  <style>
+    body { margin: 0; padding: 0; background: #0F0F23; overflow: hidden; }
+    #root { width: 100vw; height: 100vh; }
+    .loading-splash {
+      display: flex; align-items: center; justify-content: center;
+      width: 100vw; height: 100vh; background: #0F0F23;
+      color: #F5A623; font-family: 'Segoe UI', sans-serif; font-size: 18px;
+    }
+    .loading-splash .bee { font-size: 48px; animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.4; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.1); } }
+  </style>
+  <script type="module" crossorigin src="/v6/console/assets/index-CWwDSk2W.js"></script>
+  <link rel="modulepreload" crossorigin href="/v6/console/assets/vendor-DyijHb0D.js">
+  <link rel="modulepreload" crossorigin href="/v6/console/assets/canvas-BTfBo9oe.js">
+  <link rel="modulepreload" crossorigin href="/v6/console/assets/store-Dpqs6yhd.js">
+  <link rel="modulepreload" crossorigin href="/v6/console/assets/views-H2FMQ6SD.js">
+  <link rel="modulepreload" crossorigin href="/v6/console/assets/panels-NJSQnBDG.js">
+  <link rel="stylesheet" crossorigin href="/v6/console/assets/index-RSGqeUAJ.css">
+</head>
+<body>
+  <div id="root">
+    <div class="loading-splash">
+      <div><span class="bee">🐝</span><br/>Loading Swarm Console...</div>
+    </div>
+  </div>
+</body>
+</html>
