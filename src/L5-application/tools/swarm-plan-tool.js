@@ -1,4 +1,5 @@
 /**
+ * @deprecated V6.3 — 功能已吸收到 auto-hooks + swarm_query / Absorbed into auto-hooks + swarm_query
  * SwarmPlanTool -- 执行计划工具 / Swarm Plan Tool
  *
  * V5.0 L5 应用层工具: 基于 MoE 的自组织任务规划。

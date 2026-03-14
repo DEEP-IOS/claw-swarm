@@ -1,4 +1,5 @@
 /**
+ * @deprecated V6.3 — 功能已吸收到 auto-hooks + swarm_query / Absorbed into auto-hooks + swarm_query
  * SwarmGateTool -- 质量门控工具 / Swarm Quality Gate Tool
  *
  * V5.0 L5 应用层工具: 任务输出的质量门控评审。

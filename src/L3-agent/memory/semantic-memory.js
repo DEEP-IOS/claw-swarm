@@ -35,6 +35,17 @@ export class SemanticMemory {
 
     /** @type {Object} */
     this._logger = logger || console;
+
+    /** @type {import('../hybrid-retrieval.js').HybridRetrieval|null} V6.0 */
+    this._hybridRetrieval = null;
+  }
+
+  /**
+   * V6.0: 注入混合检索 / Inject hybrid retrieval
+   * @param {import('../hybrid-retrieval.js').HybridRetrieval} hr
+   */
+  setHybridRetrieval(hr) {
+    this._hybridRetrieval = hr;
   }
 
   // ━━━ 概念管理 / Concept Management ━━━
@@ -107,6 +118,38 @@ export class SemanticMemory {
    */
   query(label, { nodeType, limit = 20 } = {}) {
     return this._repo.searchNodes(label, nodeType, limit);
+  }
+
+  /**
+   * V6.0: 混合语义查询 / Hybrid semantic query
+   *
+   * 向量预筛选 + BFS 精排。Fallback 到标准 query。
+   * Vector pre-filtering + BFS re-ranking. Fallback to standard query.
+   *
+   * @param {string} queryText - 自然语言查询
+   * @param {Object} [options]
+   * @param {string[]} [options.contextNodeIds] - 上下文节点
+   * @param {number} [options.limit=20]
+   * @returns {Promise<Array<Object>>}
+   */
+  async hybridQuery(queryText, { contextNodeIds = [], limit = 20 } = {}) {
+    if (!this._hybridRetrieval || !queryText) {
+      return this.query(queryText, { limit });
+    }
+
+    try {
+      const results = await this._hybridRetrieval.search({
+        query: queryText,
+        contextNodeIds,
+        topK: limit * 2,
+        finalK: limit,
+        filter: { sourceTable: 'knowledge_nodes' },
+      });
+      return results;
+    } catch (err) {
+      this._logger.debug?.(`[SemanticMemory] Hybrid query failed, fallback: ${err.message}`);
+      return this.query(queryText, { limit });
+    }
   }
 
   // ━━━ 知识发现 / Knowledge Discovery ━━━

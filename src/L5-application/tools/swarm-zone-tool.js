@@ -1,4 +1,5 @@
 /**
+ * @deprecated V6.3 — 功能已吸收到 auto-hooks + swarm_query / Absorbed into auto-hooks + swarm_query
  * SwarmZoneTool -- Zone 治理工具 / Swarm Zone Tool
  *
  * V5.0 L5 应用层工具: Zone 分区治理和管理。

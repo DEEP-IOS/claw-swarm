@@ -68,21 +68,13 @@ const TASK_TYPE = 'advisory';
  * T2_PRIVILEGED — 高权限操作, 低 confidence 时强制引导到 swarm_run
  */
 const TOOL_SAFETY_CLASS = {
+  // V6.3: 9→3 工具精简 / 9→3 tool consolidation
   // T0: 只读, 始终放行 / Read-only, always allow
-  swarm_status: 'T0_READONLY',
-  swarm_query:  'T0_READONLY',
-  swarm_memory: 'T0_READONLY',
+  swarm_query:    'T0_READONLY',
 
   // T1: 有限范围, 根据信号强度路由 / Scoped, route by signal strength
-  swarm_plan:      'T1_SCOPED',
-  swarm_run:       'T1_SCOPED',
-  swarm_pheromone: 'T1_SCOPED',
-  swarm_gate:      'T1_SCOPED',
-  swarm_zone:      'T1_SCOPED',
-
-  // T2: 高权限, 低信号时强制引导 / Privileged, force guidance on low signal
-  swarm_spawn:   'T2_PRIVILEGED',
-  swarm_dispatch:'T2_PRIVILEGED',
+  swarm_run:      'T1_SCOPED',
+  swarm_dispatch: 'T1_SCOPED',
 };
 
 /**
@@ -177,6 +169,12 @@ export class SwarmAdvisor {
 
     // V5.7: 共生技能引擎 / Skill symbiosis engine
     this._skillSymbiosis = skillSymbiosis || null;
+
+    /** @type {Object|null} V6.1: DualProcessRouter for System 1/2 routing */
+    this._dualProcessRouter = null;
+
+    /** @type {string} V6.3: 最近一次仲裁模式 (用于条件上下文注入) / Last arbiter mode (for conditional context injection) */
+    this._lastArbiterMode = ARBITER_MODES.DIRECT;
 
     /** @type {Object|null} V5.5: GlobalModulator for threshold adjustment */
     this._globalModulator = null;
@@ -336,6 +334,19 @@ export class SwarmAdvisor {
   getTurnState(turnId) {
     const state = this._turns.get(turnId);
     return state ? { ...state } : undefined;
+  }
+
+  /**
+   * V6.3: 获取最近一次仲裁模式 (用于条件上下文注入 §9)
+   * Get last arbiter mode (for conditional context injection §9)
+   *
+   * 仅用于内部上下文注入优化, 不参与入口路由判断。
+   * Used only for internal context injection optimization, not for entry routing.
+   *
+   * @returns {string} ARBITER_MODES.* — 'DIRECT' | 'BIAS_SWARM' | 'PREPLAN' | 'BRAKE'
+   */
+  getLastRouteLevel() {
+    return this._lastArbiterMode;
   }
 
   /**
@@ -512,13 +523,33 @@ export class SwarmAdvisor {
   _computeArbiterMode(composite, signals) {
     const threshold = this._responseThreshold?.getThreshold?.(this._agentId, TASK_TYPE) ?? DEFAULT_THRESHOLD;
 
-    // 低于阈值下界 → DIRECT (简单任务)
-    if (composite <= threshold * 0.7) {
-      return ARBITER_MODES.DIRECT;
+    // V6.1: DualProcessRouter 协同决策 / DualProcessRouter co-decision
+    // System 2 (PREPLAN) 信号增强 composite, System 1 (DIRECT) 信号减弱
+    let dualProcessBias = 0;
+    if (this._dualProcessRouter && signals) {
+      try {
+        const dpResult = this._dualProcessRouter.route({
+          taskType: signals.textStimulus > 0.5 ? 'complex' : 'simple',
+          hasVaccine: signals.failureSignal > 0.3,
+          breakerState: signals.breakerSignal > 0.3 ? 'HALF_OPEN' : 'CLOSED',
+          successRate: 1 - (signals.failureSignal || 0),
+          alarmDensity: signals.pressureSignal > 0.5 ? 3 : 0,
+          modulatorMode: this._globalModulator?.getMode?.() || 'RELIABLE',
+          qualityFailCount: signals.failureSignal > 0.4 ? 2 : 0,
+        });
+        // System 2 → bias toward PREPLAN; System 1 → bias toward DIRECT
+        dualProcessBias = dpResult.system === 2 ? 0.1 : -0.05;
+      } catch { /* non-fatal */ }
     }
 
-    // 超过阈值 → 判断 PREPLAN 还是 BRAKE
-    if (composite > threshold) {
+    const adjustedComposite = Math.max(0, Math.min(1, composite + dualProcessBias));
+
+    // 低于阈值下界 → DIRECT (简单任务)
+    let mode;
+    if (adjustedComposite <= threshold * 0.7) {
+      mode = ARBITER_MODES.DIRECT;
+    } else if (adjustedComposite > threshold) {
+      // 超过阈值 → 判断 PREPLAN 还是 BRAKE
       // BRAKE: 需要同时满足 composite > threshold 且 ≥2 个环境信号超过警戒线
       if (signals) {
         const envAlerts = [
@@ -528,15 +559,18 @@ export class SwarmAdvisor {
           signals.boardSignal > 0.5,      // 公告板活跃度高
         ].filter(Boolean).length;
 
-        if (envAlerts >= 2) {
-          return ARBITER_MODES.BRAKE;
-        }
+        mode = envAlerts >= 2 ? ARBITER_MODES.BRAKE : ARBITER_MODES.PREPLAN;
+      } else {
+        mode = ARBITER_MODES.PREPLAN;
       }
-      return ARBITER_MODES.PREPLAN;
+    } else {
+      // 接近阈值 → BIAS_SWARM (中等复杂, 注入引导但不强制)
+      mode = ARBITER_MODES.BIAS_SWARM;
     }
 
-    // 接近阈值 → BIAS_SWARM (中等复杂, 注入引导但不强制)
-    return ARBITER_MODES.BIAS_SWARM;
+    // V6.3: 追踪最近仲裁模式 / Track last arbiter mode
+    this._lastArbiterMode = mode;
+    return mode;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -586,6 +620,16 @@ export class SwarmAdvisor {
    */
   setGlobalModulator(globalModulator) {
     this._globalModulator = globalModulator;
+  }
+
+  /**
+   * V6.1: 设置 DualProcessRouter 引用
+   * V6.1: Set DualProcessRouter reference
+   *
+   * @param {import('./dual-process-router.js').DualProcessRouter} dualProcessRouter
+   */
+  setDualProcessRouter(dualProcessRouter) {
+    this._dualProcessRouter = dualProcessRouter;
   }
 
   /**

@@ -82,6 +82,17 @@ export class ToolResilience {
     // ── 每工具修复统计 / Per-tool coercion stats ──
     /** @type {Map<string, { total: number, coerced: number }>} */
     this._coercionStats = new Map();
+
+    /** @type {import('../L3-agent/failure-mode-analyzer.js').FailureModeAnalyzer|null} V6.0 */
+    this._failureModeAnalyzer = null;
+  }
+
+  /**
+   * V6.0: 注入失败模式分析器 / Inject failure mode analyzer
+   * @param {import('../L3-agent/failure-mode-analyzer.js').FailureModeAnalyzer} fma
+   */
+  setFailureModeAnalyzer(fma) {
+    this._failureModeAnalyzer = fma;
   }
 
   // ============================================================================
@@ -200,17 +211,18 @@ export class ToolResilience {
       cb.recordSuccess();
       this._logger.debug?.(`[ToolResilience] ${toolName} OK (${durationMs ?? '?'}ms)`);
 
-      // V5.5: 如果之前有修复策略被使用，记录成功结果
-      // V5.5: If a repair strategy was previously used, record successful outcome
+      // V5.5+V6.0: 如果之前有修复策略被使用，记录成功结果 (含 errorCategory)
+      // V5.5+V6.0: If a repair strategy was previously used, record successful outcome (with errorCategory)
       const pendingRepair = this._pendingRepairs?.get(toolName);
       if (pendingRepair) {
-        this.recordRepairOutcome(toolName, pendingRepair.errorSignature, pendingRepair.strategy, true);
+        this.recordRepairOutcome(toolName, pendingRepair.errorSignature, pendingRepair.strategy, true, pendingRepair.errorCategory);
         this._pendingRepairs.delete(toolName);
         this._messageBus?.publish?.('repair.strategy.outcome', {
           toolName,
           errorSignature: pendingRepair.errorSignature,
           strategy: pendingRepair.strategy,
           success: true,
+          errorCategory: pendingRepair.errorCategory,
         });
       }
       return;
@@ -220,10 +232,17 @@ export class ToolResilience {
     // Failure: record to circuit breaker + buffer
     cb.recordFailure();
 
-    // V5.5: 查询修复记忆寻找历史策略
-    // V5.5: Query repair memory for historical strategies
+    // V6.0: 失败根因分类 / Failure root cause classification
     const errorMsg = error || 'unknown error';
-    const repairResult = this.findRepairStrategy(toolName, errorMsg);
+    let errorCategory = null;
+    if (this._failureModeAnalyzer) {
+      const classification = this._failureModeAnalyzer.classify(errorMsg, { toolName });
+      errorCategory = classification.category;
+    }
+
+    // V5.5+V6.0: 查询修复记忆 (优先按 error_category 精确匹配)
+    // V5.5+V6.0: Query repair memory (prefer exact error_category match)
+    const repairResult = this.findRepairStrategy(toolName, errorMsg, errorCategory);
     let repairHint = null;
     if (repairResult) {
       repairHint = repairResult.strategy;
@@ -232,6 +251,7 @@ export class ToolResilience {
       this._pendingRepairs.set(toolName, {
         errorSignature: errorMsg.substring(0, 200),
         strategy: repairResult.strategy,
+        errorCategory,
         timestamp: Date.now(),
       });
       this._messageBus?.publish?.('repair.strategy.found', {
@@ -239,6 +259,7 @@ export class ToolResilience {
         errorSignature: errorMsg.substring(0, 200),
         strategy: repairResult.strategy,
         confidence: repairResult.confidence,
+        errorCategory,
       });
     }
 
@@ -354,6 +375,7 @@ export class ToolResilience {
         successThreshold: this._config.breakerSuccessThreshold || CB_DEFAULTS.successThreshold,
         resetTimeoutMs: this._config.breakerResetTimeoutMs || CB_DEFAULTS.resetTimeoutMs,
         logger: this._logger,
+        messageBus: this._messageBus,
       });
       this._circuitBreakers.set(toolName, cb);
     }
@@ -467,19 +489,35 @@ export class ToolResilience {
    *
    * @param {string} toolName - 失败的工具名
    * @param {string} errorSignature - 错误信息签名
+   * @param {string} [errorCategory] - V6.0: 失败根因分类 / Failure root cause category
    * @returns {{ strategy: string, confidence: number } | null}
    */
-  findRepairStrategy(toolName, errorSignature) {
+  findRepairStrategy(toolName, errorSignature, errorCategory) {
     if (!this._db) return null;
 
     try {
-      const rows = this._db.all(
-        `SELECT strategy, affinity, hit_count
-         FROM repair_memory
-         WHERE tool_name = ? AND error_signature LIKE ?
-         ORDER BY affinity DESC LIMIT 3`,
-        toolName, `%${errorSignature.substring(0, 50)}%`
-      );
+      // V6.0: 优先按 (tool_name, error_type) 精确匹配 / Prefer exact (tool_name, error_type) match
+      let rows = null;
+      if (errorCategory) {
+        rows = this._db.all(
+          `SELECT strategy, affinity, hit_count
+           FROM repair_memory
+           WHERE tool_name = ? AND error_type = ?
+           ORDER BY affinity DESC LIMIT 3`,
+          toolName, errorCategory
+        );
+      }
+
+      // 无分类结果或无匹配 → 降级到签名模糊匹配 / Fallback to signature fuzzy match
+      if (!rows || rows.length === 0) {
+        rows = this._db.all(
+          `SELECT strategy, affinity, hit_count
+           FROM repair_memory
+           WHERE tool_name = ? AND error_signature LIKE ?
+           ORDER BY affinity DESC LIMIT 3`,
+          toolName, `%${errorSignature.substring(0, 50)}%`
+        );
+      }
 
       if (!rows || rows.length === 0) return null;
 
@@ -509,8 +547,9 @@ export class ToolResilience {
    * @param {string} errorSignature - 错误签名
    * @param {string} strategy - 修复策略描述
    * @param {boolean} success - 修复是否成功
+   * @param {string} [errorCategory] - V6.0: 失败根因分类 / Failure root cause category
    */
-  recordRepairOutcome(toolName, errorSignature, strategy, success) {
+  recordRepairOutcome(toolName, errorSignature, strategy, success, errorCategory) {
     if (!this._db) return;
 
     try {
@@ -522,21 +561,35 @@ export class ToolResilience {
       if (existing) {
         // EMA 更新 affinity / EMA update affinity
         const newAffinity = 0.8 * existing.affinity + 0.2 * (success ? 1 : 0);
-        this._db.run(
-          `UPDATE repair_memory SET
-            affinity = ?,
-            hit_count = hit_count + 1,
-            last_hit_at = ?
-          WHERE id = ?`,
-          newAffinity, Date.now(), existing.id
-        );
+        // V6.0: 同时更新 error_type (如果有分类) / Also update error_type if classified
+        if (errorCategory) {
+          this._db.run(
+            `UPDATE repair_memory SET
+              affinity = ?,
+              hit_count = hit_count + 1,
+              last_hit_at = ?,
+              error_type = ?
+            WHERE id = ?`,
+            newAffinity, Date.now(), errorCategory, existing.id
+          );
+        } else {
+          this._db.run(
+            `UPDATE repair_memory SET
+              affinity = ?,
+              hit_count = hit_count + 1,
+              last_hit_at = ?
+            WHERE id = ?`,
+            newAffinity, Date.now(), existing.id
+          );
+        }
       } else {
         // 新策略：成功初始 affinity=0.6, 失败初始=0.3
         // New strategy: success initial affinity=0.6, failure=0.3
         this._db.run(
-          `INSERT INTO repair_memory (error_signature, tool_name, strategy, affinity, hit_count, last_hit_at)
-          VALUES (?, ?, ?, ?, 1, ?)`,
-          errorSignature.substring(0, 200), toolName, strategy, success ? 0.6 : 0.3, Date.now()
+          `INSERT INTO repair_memory (error_signature, tool_name, strategy, affinity, hit_count, last_hit_at, error_type)
+          VALUES (?, ?, ?, ?, 1, ?, ?)`,
+          errorSignature.substring(0, 200), toolName, strategy, success ? 0.6 : 0.3, Date.now(),
+          errorCategory || null
         );
       }
     } catch (err) {

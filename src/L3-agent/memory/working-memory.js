@@ -47,7 +47,7 @@ export class WorkingMemory {
    * @param {number} [options.maxScratch=30] - Scratch Pad 最大容量
    * @param {Object} [options.logger]
    */
-  constructor({ maxFocus = 5, maxContext = 15, maxScratch = 30, logger } = {}) {
+  constructor({ maxFocus = 5, maxContext = 15, maxScratch = 30, logger, onEvict } = {}) {
     /** @type {number} */
     this._maxFocus = maxFocus;
     /** @type {number} */
@@ -56,6 +56,9 @@ export class WorkingMemory {
     this._maxScratch = maxScratch;
     /** @type {Object} */
     this._logger = logger || console;
+
+    /** @type {Function|null} 驱逐回调 / Eviction callback */
+    this._onEvict = onEvict || null;
 
     /**
      * 按 key 索引的扁平存储 / Flat storage indexed by key
@@ -346,9 +349,13 @@ export class WorkingMemory {
         evicted.layer = nextLayer;
         this._enforceCapacity(nextLayer); // 递归检查下层容量
       } else {
-        // 已无更低层, 彻底丢弃 / No lower layer, discard entirely
+        // 已无更低层: 高重要性项通知 LTM promotion, 然后丢弃
+        // No lower layer: notify LTM promotion for high-importance items, then discard
+        if (this._onEvict && evicted.importance > 0.7) {
+          try { this._onEvict(evicted); } catch { /* non-fatal */ }
+        }
         this._entries.delete(evicted.key);
-        this._logger.debug?.(`[WorkingMemory] Discarded entry: ${evicted.key}`);
+        this._logger.debug?.(`[WorkingMemory] Discarded entry: ${evicted.key} (importance=${evicted.importance})`);
       }
     }
   }

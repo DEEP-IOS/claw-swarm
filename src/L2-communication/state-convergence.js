@@ -408,4 +408,66 @@ export class StateConvergence {
       suspectSince: info.suspectSince,
     };
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // V7.0 §3: CRDT 分布式状态 — LWW (Last-Writer-Wins) 合并
+  // V7.0 §3: CRDT distributed state — LWW (Last-Writer-Wins) merge
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * V7.0 §3: 写入共享状态 (LWW-Register)
+   * Write to shared state using LWW-Register CRDT semantics
+   *
+   * @param {string} key - 状态键 / State key
+   * @param {*} value - 状态值 / State value
+   * @param {string} [writerId] - 写入者 ID / Writer ID
+   * @returns {{ key: string, timestamp: number, writerId: string }}
+   */
+  putSharedState(key, value, writerId = 'unknown') {
+    if (!this._sharedState) {
+      /** @type {Map<string, { value: any, timestamp: number, writerId: string }>} */
+      this._sharedState = new Map();
+    }
+    const ts = Date.now();
+    const existing = this._sharedState.get(key);
+
+    // LWW: 仅当时间戳更新才写入 / Only write if timestamp is newer
+    if (!existing || ts >= existing.timestamp) {
+      this._sharedState.set(key, { value, timestamp: ts, writerId });
+    }
+    return { key, timestamp: ts, writerId };
+  }
+
+  /**
+   * V7.0 §3: 读取共享状态
+   * Read shared state
+   *
+   * @param {string} key - 状态键 / State key
+   * @returns {{ value: any, timestamp: number, writerId: string } | null}
+   */
+  getSharedState(key) {
+    return this._sharedState?.get(key) || null;
+  }
+
+  /**
+   * V7.0 §3: 合并远端状态 (LWW 语义)
+   * Merge remote state with LWW semantics
+   *
+   * @param {Map<string, { value: any, timestamp: number, writerId: string }>} remoteState
+   * @returns {number} 合并的条目数 / Number of entries merged
+   */
+  mergeState(remoteState) {
+    if (!this._sharedState) this._sharedState = new Map();
+    let merged = 0;
+
+    for (const [key, remote] of remoteState) {
+      const local = this._sharedState.get(key);
+      if (!local || remote.timestamp > local.timestamp) {
+        this._sharedState.set(key, remote);
+        merged++;
+      }
+    }
+
+    return merged;
+  }
 }

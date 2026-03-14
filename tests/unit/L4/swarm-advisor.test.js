@@ -512,19 +512,18 @@ describe('SwarmAdvisor', () => {
       const state = advisor.getTurnState('turn-r1');
       expect(state.swarmPlanRequired).toBe(true);
 
-      // T0: 只读工具放行
+      // V6.3: T0 只读工具放行
       expect(advisor.checkToolRouting('turn-r1', 'swarm_query')).toBeUndefined();
-      expect(advisor.checkToolRouting('turn-r1', 'swarm_memory')).toBeUndefined();
-      // T1: swarm_plan, swarm_run 放行
-      expect(advisor.checkToolRouting('turn-r1', 'swarm_plan')).toBeUndefined();
+      // V6.3: T1 swarm_run, swarm_dispatch 放行
       expect(advisor.checkToolRouting('turn-r1', 'swarm_run')).toBeUndefined();
+      expect(advisor.checkToolRouting('turn-r1', 'swarm_dispatch')).toBeUndefined();
     });
 
     it('T2 工具在 swarm 未完成时被引导 / T2 tools guided when swarm not completed', () => {
       advisor.handleLayer0('帮我分析复杂的多步骤API任务并首先调研文档然后统计评估', 'turn-t2');
       expect(advisor.getTurnState('turn-t2').swarmPlanRequired).toBe(true);
 
-      // T2: swarm_spawn 在 swarmPlanCompleted=false 时被引导到 swarm_run
+      // V6.3: swarm_spawn 已废弃为 EXTERNAL, 在 PREPLAN/BRAKE 中被 block
       const result = advisor.checkToolRouting('turn-t2', 'swarm_spawn');
       expect(result).toBeDefined();
       expect(result.block).toBe(true);
@@ -737,19 +736,22 @@ describe('SwarmAdvisor', () => {
 
   describe('tool safety classification', () => {
     it('T0 只读工具正确分类 / T0 read-only tools classified correctly', () => {
+      // V6.3: 9→3 工具精简 / 9→3 tool consolidation
       expect(SwarmAdvisor.getToolSafetyClass('swarm_query')).toBe('T0_READONLY');
-      expect(SwarmAdvisor.getToolSafetyClass('swarm_memory')).toBe('T0_READONLY');
     });
 
     it('T1 有限范围工具正确分类 / T1 scoped tools classified correctly', () => {
-      expect(SwarmAdvisor.getToolSafetyClass('swarm_plan')).toBe('T1_SCOPED');
+      // V6.3: 9→3 工具精简
       expect(SwarmAdvisor.getToolSafetyClass('swarm_run')).toBe('T1_SCOPED');
-      expect(SwarmAdvisor.getToolSafetyClass('swarm_pheromone')).toBe('T1_SCOPED');
+      expect(SwarmAdvisor.getToolSafetyClass('swarm_dispatch')).toBe('T1_SCOPED');
     });
 
-    it('T2 高权限工具正确分类 / T2 privileged tools classified correctly', () => {
-      expect(SwarmAdvisor.getToolSafetyClass('swarm_spawn')).toBe('T2_PRIVILEGED');
-      expect(SwarmAdvisor.getToolSafetyClass('swarm_dispatch')).toBe('T2_PRIVILEGED');
+    it('废弃工具返回 EXTERNAL / deprecated tools return EXTERNAL', () => {
+      // V6.3: 已废弃工具不再有安全分级, 返回 EXTERNAL
+      expect(SwarmAdvisor.getToolSafetyClass('swarm_spawn')).toBe('EXTERNAL');
+      expect(SwarmAdvisor.getToolSafetyClass('swarm_memory')).toBe('EXTERNAL');
+      expect(SwarmAdvisor.getToolSafetyClass('swarm_plan')).toBe('EXTERNAL');
+      expect(SwarmAdvisor.getToolSafetyClass('swarm_pheromone')).toBe('EXTERNAL');
     });
 
     it('未知工具返回 EXTERNAL / unknown tools return EXTERNAL', () => {
@@ -940,37 +942,25 @@ describe('SwarmAdvisor', () => {
         });
       });
 
-      it('BIAS_SWARM 仅 block T2 工具 / BIAS_SWARM only blocks T2 tools', () => {
-        // 手动构造一个 BIAS_SWARM turn
+      it('BIAS_SWARM 模式: T0/T1/EXTERNAL 全部放行 / BIAS_SWARM: T0/T1/EXTERNAL all pass', () => {
+        // V6.3: 9→3 精简后无 T2 工具, BIAS_SWARM 仅影响概念上的 T2
+        // BIAS_SWARM 下 T0, T1, EXTERNAL 全放行
         const turnId = biasAdvisor.resetTurn('turn-bias');
         const state = biasAdvisor._turns.get(turnId);
         state.arbiterMode = ARBITER_MODES.BIAS_SWARM;
         state.swarmPlanRequired = false;
 
-        // EXTERNAL 放行
+        // EXTERNAL 放行 (V6.3: 废弃工具也是 EXTERNAL)
         expect(biasAdvisor.checkToolRouting(turnId, 'Read')).toBeUndefined();
         expect(biasAdvisor.checkToolRouting(turnId, 'Bash')).toBeUndefined();
+        expect(biasAdvisor.checkToolRouting(turnId, 'swarm_spawn')).toBeUndefined();
 
         // T0 放行
         expect(biasAdvisor.checkToolRouting(turnId, 'swarm_query')).toBeUndefined();
 
         // T1 放行
         expect(biasAdvisor.checkToolRouting(turnId, 'swarm_run')).toBeUndefined();
-
-        // T2 被引导
-        const result = biasAdvisor.checkToolRouting(turnId, 'swarm_spawn');
-        expect(result).toBeDefined();
-        expect(result.block).toBe(true);
-        expect(result.blockReason).toContain('建议先调用');
-      });
-
-      it('BIAS_SWARM T2 在 swarm 完成后放行 / BIAS_SWARM T2 passes after swarm done', () => {
-        const turnId = biasAdvisor.resetTurn('turn-bias2');
-        const state = biasAdvisor._turns.get(turnId);
-        state.arbiterMode = ARBITER_MODES.BIAS_SWARM;
-
-        biasAdvisor.markSwarmToolUsed(turnId);
-        expect(biasAdvisor.checkToolRouting(turnId, 'swarm_spawn')).toBeUndefined();
+        expect(biasAdvisor.checkToolRouting(turnId, 'swarm_dispatch')).toBeUndefined();
       });
     });
 
@@ -981,12 +971,13 @@ describe('SwarmAdvisor', () => {
         state.arbiterMode = ARBITER_MODES.BRAKE;
         state.userInput = '紧急任务';
 
-        // T2 blocked with BRAKE prefix
+        // V6.3: swarm_spawn 现为 EXTERNAL, 与 Read 走相同路径
+        // swarm_spawn (EXTERNAL) blocked in BRAKE
         const t2Result = advisor.checkToolRouting(turnId, 'swarm_spawn');
         expect(t2Result.block).toBe(true);
-        expect(t2Result.blockReason).toContain('环境异常');
+        expect(t2Result.blockReason).toContain('环境信号异常');
 
-        // EXTERNAL blocked with BRAKE prefix
+        // Read (EXTERNAL) blocked with BRAKE prefix
         const extResult = advisor.checkToolRouting(turnId, 'Read');
         expect(extResult.block).toBe(true);
         expect(extResult.blockReason).toContain('环境信号异常');

@@ -4,6 +4,314 @@ All notable changes to Claw-Swarm are documented here.
 
 本文件记录 Claw-Swarm 的所有重要变更。
 
+## [7.0.0] - 2026-03-12
+
+### Architecture: Closed-Loop Actuation & Console SPA / 架构升级：闭环执行与控制台 SPA
+
+**Core Theme**: Transform from thin-shell plugin to closed-loop swarm brain with DirectSpawnClient relay, real parent-child subagent lifecycle, React SPA monitoring console (6 views), negative selection anomaly detection, and human-in-the-loop checkpoint mechanism.
+
+核心主题：从薄壳插件转变为闭环蜂群大脑——DirectSpawnClient 中继实现真实父子代理生命周期、React SPA 监控控制台（6 视图）、负选择异常检测与人机交互检查点机制。
+
+#### New Source Files / 新增源文件
+
+| Module | Layer | Lines | Description |
+|--------|-------|-------|-------------|
+| `swarm-relay-client.js` | L2 | 940 | DirectSpawnClient: WebSocket relay to Gateway for real subagent spawning with two-phase async delivery / WS 中继实现真实子代理生成 |
+| `negative-selection.js` | L3 | 239 | Immune-inspired anomaly detection for agent output patterns / 免疫负选择异常检测 |
+| `swarm-checkpoint-tool.js` | L5 | 135 | Human-in-the-loop STOP gate: subagents pause at critical decisions, parent resolves + respawns / 人机交互检查点 |
+| `user-checkpoint-repo.js` | L1 | — | Repository: create/getPending/resolve/expireOld for checkpoint persistence / 检查点持久化 |
+| `console/src/**` (98 files) | L6 | — | React SPA: 6 views, CommandPalette, EventTimeline, Inspector, i18n (en/zh) / 控制台前端 |
+
+#### Key Architectural Changes / 关键架构变更
+
+| Change / 变更 | Detail / 细节 |
+|-------|---------|
+| DirectSpawnClient | Replaces HTTP POST /hooks/agent → WebSocket `callGateway({method:'agent', lane:'subagent'})` for real parent-child lifecycle (`src/L2-communication/swarm-relay-client.js`) |
+| Two-phase async | `swarm_run` returns `{status:'dispatched'}` immediately; result injected via `chat.inject` within 30s IPC window (`src/L5-application/tools/swarm-run-tool.js`) |
+| Closed-loop actuation | Shapley credit ranking + upstream discovery injected into agent prompts (`src/swarm-core.js` V7.0 §8, §2+§5) |
+| Warm start | Import existing DB reputation on startup for returning agents (`src/swarm-core.js`) |
+| v70FullLanding | Feature flag framework for gradual V7 feature activation (`src/swarm-core.js`) |
+
+#### Console SPA (6 Views) / 控制台 SPA（6 视图）
+
+| View | Component | Description |
+|------|-----------|-------------|
+| Hive | `HiveOverlay.jsx` | Hex grid visualization of agent swarm state / 蜂巢六角网格 |
+| Pipeline | `PipelineOverlay.jsx` | DAG task pipeline with phase tracking / DAG 任务流水线 |
+| Cognition | `CognitionOverlay.jsx` | Agent cognitive state & memory inspector / 认知状态检视 |
+| Ecology | `EcologyOverlay.jsx` | Species population dynamics / 种群生态动力学 |
+| Network | `NetworkOverlay.jsx` | Inter-agent communication topology / 代理间通信拓扑 |
+| Control | `ControlOverlay.jsx` | Manual control panel & settings / 手动控制面板 |
+
+#### Database Schema / 数据库模式
+
+- SCHEMA_VERSION: 8 → 9
+- New table: `swarm_user_checkpoints` (checkpoint persistence for human-in-the-loop)
+- Total tables: 52
+
+#### Event Topics / 事件主题
+
+- V6.2 baseline: 98 → V7.0: 122 (+24 topics)
+- Key additions: `negative_selection.triggered`, `budget.degradation.applied`, `session.patched`, `speculation.real.spawned`, `dream.consolidation.completed`, `evidence.gate.rejected`, `persona.evolution.promoted`
+
+#### Hooks / 钩子
+
+- V6.2 baseline: 14 registrations → V7.0: 19 registrations (+5)
+- New: V7.0 two-phase async delivery hooks, subagent lifecycle hooks
+
+#### Test Coverage / 测试覆盖
+
+| Metric / 指标 | V6.2 | V7.0 |
+|--------|------|------|
+| Source files / 源文件 | 111 | 173 |
+| Test files / 测试文件 | 93 | 105 |
+| Test cases / 测试用例 | — | 1463 |
+| EventTopics / 事件主题 | 98 | 122 |
+| Console modules / 控制台模块 | — | 106 |
+
+#### Tools / 工具
+
+- Total tool files: 10 (4 public: `swarm_run`, `swarm_query`, `swarm_dispatch`, `swarm_checkpoint`)
+- New: `swarm_checkpoint` — STOP instruction mechanism for human-in-the-loop review
+
+---
+
+## [6.2.0] - 2026-03-11
+
+### Enhancement: Audit Optimization — Complete P1/P2/P3 Implementation / 增强：审计优化 — 完整实施 P1/P2/P3
+
+**Core Theme**: Implement all remaining optimization items from the 17-batch cross-LLM audit roadmap: conflict resolution with consensus voting, agent lifecycle FSM, episodic-to-semantic memory consolidation, gossip memory sharing and pheromone sync, anomaly detection, Holling resilience metrics, evidence-dual process integration, parasite detection, and zone supervisor election.
+
+核心主题：实施17批交叉 LLM 审计路线图的全部剩余优化项：冲突解决与共识投票、Agent 生命周期状态机、情景到语义记忆巩固、Gossip 记忆共享与信息素同步、异常检测、Holling 韧性指标、证据-双过程集成、寄生检测和 Zone 主管选举。
+
+#### New Source Files (3) / 新增源文件
+
+| Module | Layer | Description |
+|--------|-------|-------------|
+| `conflict-resolver.js` | L4 | 3-level conflict resolution: P2P negotiation → weighted voting (multi-round consensus) → reputation arbitration / 三级冲突解决 |
+| `agent-lifecycle.js` | L3 | 8-state FSM: INIT→IDLE→ACTIVE→BUSY→PAUSED→STANDBY→MAINTENANCE→RETIRED / 8态生命周期状态机 |
+| `anomaly-detector.js` | L3 | Negative selection anomaly detection with σ-threshold deviation and baseline tracking / 阴性选择异常检测 |
+
+#### Key Modifications (10) / 关键修改
+
+| File | Change / 变更 |
+|------|---------------|
+| `episodic-memory.js` | +`extractPatterns()` for episodic→semantic consolidation (P1-5); +`setSemanticMemory()` / 情景→语义巩固 |
+| `gossip-protocol.js` | +Memory sharing (P2-1): top-3 high-importance memories per heartbeat; +Pheromone snapshot (P2-2): top-10 sync with max-merge / 记忆共享+信息素快照 |
+| `governance-metrics.js` | +Holling resilience (P2-4): recoveryTime, resistance, ecologicalResilience; +CircuitBreaker subscription / 韧性三维指标 |
+| `evidence-gate.js` | +DualProcessRouter integration (P2-5): System 2→strict(0.6), System 1→relaxed(0.2); +`getClaimScoreForQuality()` / 双过程证据集成 |
+| `reputation-ledger.js` | +`detectParasites()` (P2-6): parasiteScore = (1-collab)*competence*activity; +`getContributionProfile()` / 寄生检测 |
+| `zone-manager.js` | +Lifecycle-aware election (P3-2): filter by IDLE/ACTIVE; +`demoteLeader()`; +auto-demotion on MAINTENANCE/RETIRED / 生命周期感知选举 |
+| `event-catalog.js` | +14 V6.2 event topics → 99 total / 14个新事件主题 |
+| `swarm-core.js` | +ConflictResolver/AgentLifecycle/AnomalyDetector instantiation + lifecycle hooks + anomaly wiring + featureFlags / 新模块接入 |
+| `plugin-adapter.js` | +GossipProtocol pheromone injection; +EpisodicMemory→SemanticMemory bridge; +GovernanceMetrics circuitBreaker / 跨模块桥接 |
+| `startup-diagnostics.js` | +`auditOptimization` diagnostic section (10 V6.2 feature checks) / 审计优化诊断 |
+
+#### Optimization Items Completed / 完成的优化项
+
+| Item | Category | Impact |
+|------|----------|--------|
+| P1-2 | Conflict Resolver | Governance 28%→45% |
+| P1-3 | Agent Lifecycle FSM | Governance +15% |
+| P1-5 | Episodic→Semantic Consolidation | Memory shaping 60%→70% |
+| P2-1 | Memory Sharing Protocol | Neuroscience 75%→80% |
+| P2-2 | Gossip Pheromone Snapshot | Communication 60%→70% |
+| P2-3 | Anomaly Detection | Bionics 56%→65% |
+| P2-4 | Holling Resilience Metrics | Ecology 81%→87% |
+| P2-5 | Evidence + DualProcess | Psychology 71%→76% |
+| P2-6 | Parasite Agent Detection | Ecology +5% |
+| P3-1 | Consensus Voting | Governance +10% |
+| P3-2 | Zone Supervisor Election | Governance +5% |
+
+#### Event Topics (13 new, total 98) / 事件主题
+
+```
+CONFLICT_DETECTED, CONFLICT_RESOLVED, CONFLICT_ESCALATED,
+CONSENSUS_VOTE_STARTED, CONSENSUS_VOTE_COMPLETED,
+AGENT_LIFECYCLE_TRANSITION, MEMORY_PATTERN_EXTRACTED,
+ANOMALY_DETECTED, ANOMALY_BASELINE_UPDATED,
+GOSSIP_SYNC_MERGED, PARASITE_DETECTED,
+ZONE_LEADER_ELECTED, ZONE_LEADER_DEMOTED
+```
+
+#### Test Coverage / 测试覆盖
+
+| Metric / 指标 | V6.1 | V6.2 |
+|--------|------|------|
+| Source files / 源文件 | 108 | 111 (+3) |
+| Test files / 测试文件 | 83 | 93 (+10) |
+| EventTopics / 事件主题 | 85 | 98 (+13) |
+
+---
+
+## [6.1.0] - 2026-03-10
+
+### Enhancement: Cross-Audit Fixes + Dead Code Activation / 增强：交叉审计修复 + 死代码激活
+
+**Core Theme**: Activate dormant pipelines identified by cross-LLM audit (3×Opus + GPT-5.4); fix memory subsystem formulas; wire Shapley/SNA/DualProcess into live event flows; add pheromone propagation and MessageBus request-reply.
+
+核心主题：激活交叉 LLM 审计（3×Opus + GPT-5.4）发现的休眠管道；修复记忆子系统公式；将 Shapley/SNA/双过程路由接入实时事件流；新增信息素传播和消息总线请求-回复模式。
+
+#### P0 Critical Fixes / 关键修复
+
+- **P0-1 Vector Pipeline Activation / 向量检索管线激活**: Wire EmbeddingEngine → VectorIndex → HybridRetrieval in `plugin-adapter.js`; connect to EpisodicMemory + SemanticMemory via `setHybridRetrieval()` / 在 plugin-adapter.js 中实例化完整向量管道并注入记忆系统
+- **P0-2 Ebbinghaus Decay Fix / 记忆衰减公式修复**: `episodic-memory.js` timeDecay `1/(1+ageDays)` → `Math.exp(-ageDays/30)` (Ebbinghaus λ=30) / 修正为指数衰减曲线
+- **P0-3 LTM Promotion / 长期记忆晋升**: `working-memory.js` eviction callback — high-importance items (>0.7) auto-consolidate to EpisodicMemory / 工作记忆驱逐时高重要性项自动晋升到 LTM
+
+#### Dead Code Activation / 死代码激活
+
+- **ShapleyCredit**: Instantiated in `swarm-core.js`; wired `DAG_COMPLETED` → `compute()` → `ReputationLedger.recordShapleyCredit()` / Shapley 信用计算接入事件流
+- **SNAAnalyzer**: Instantiated in `swarm-core.js`; wired `TASK_COMPLETED` → `recordCollaboration()` + `tick()` → `ReputationLedger.updateSNAScores()` / 社会网络分析接入事件流
+- **DualProcessRouter**: Instantiated in `swarm-core.js`; integrated into `SwarmAdvisor._computeArbiterMode()` via `setDualProcessRouter()` / 双过程路由集成到仲裁决策
+
+#### New Capabilities / 新增能力
+
+- **Pheromone Propagation / 信息素传播**: `pheromone-engine.js` `propagate()` — BFS hop-by-hop with `spreadFactor^hop` intensity decay + scope hierarchy expansion / 信息素逐跳传播
+- **MessageBus Request-Reply / 消息总线请求-回复**: `message-bus.js` `requestReply()` — correlationId-based one-shot reply pattern with timeout / 基于关联 ID 的请求-回复模式
+
+#### Files Modified (9) / 修改文件
+
+| File | Change |
+|------|--------|
+| `plugin-adapter.js` | +EmbeddingEngine/VectorIndex/HybridRetrieval instantiation, +WorkingMemory onEvict |
+| `swarm-core.js` | +ShapleyCredit/SNAAnalyzer/DualProcessRouter instantiation + event wiring |
+| `swarm-advisor.js` | +setDualProcessRouter() + DualProcess bias in _computeArbiterMode() |
+| `episodic-memory.js` | timeDecay formula fix (Ebbinghaus exponential) |
+| `working-memory.js` | +onEvict callback for LTM promotion |
+| `pheromone-engine.js` | +propagate() method |
+| `message-bus.js` | +requestReply() method |
+| `index.js` | VERSION 6.0.0 → 6.1.0 |
+| `openclaw.plugin.json` | version 6.0.0 → 6.1.0 |
+
+---
+
+## [6.0.0] - 2026-03-10
+
+### Enhancement: Hybrid Architecture + Intelligent Perception / 增强：混合架构 + 智能感知
+
+**Core Theme**: Escape single-process bottleneck via `fork()` child process isolation + worker thread parallelization; activate dormant modules; close data pipelines; wire adaptive closed-loop intelligence (signal auto-calibration, failure root-cause analysis, budget forecasting, quality audit); land swarm-base research (vector embeddings, HNSW, Shapley credit, SNA, dual-process routing).
+
+核心主题：通过 `fork()` 子进程隔离 + Worker 线程并行化突破单进程瓶颈；激活休眠模块；闭合数据管道；接入自适应闭环智能（信号自校准、失败根因分析、预算预测、质量审计链）；落地 swarm-base 研究成果（向量嵌入、HNSW、Shapley 信用、SNA、双过程路由）。
+
+#### Architecture Leap / 架构跃迁
+
+- **Process Model / 进程模型**: Single-process → Hybrid (`index.js` thin shell + `swarm-core.js` fork() child + IPCBridge bidirectional RPC) / 单进程 → 混合进程（瘦壳 + 子进程 + IPC 桥）
+- **Compute Parallelization / 计算并行化**: WorkerPool (4 threads) with specialized workers: ACO, compute, vector, Shapley / Worker 线程池 + 4 种专用 Worker
+- **Communication / 通信层**: Pluggable transports (EventEmitter → BroadcastChannel → NATS reserved) / 可插拔传输层
+- **Dashboard / 仪表板**: Monolithic HTML → ESM modular panels (`dashboard/index.html` + `core.js` + `panels/*.js`) / 单文件 → ESM 模块化面板
+
+#### New Source Files (19) / 新增源文件
+
+| Module | Layer | Description |
+|--------|-------|-------------|
+| `swarm-core.js` | — | Fork() child process entry; hosts all L1–L6 engines + IPC dispatcher / 子进程入口，承载全部引擎 |
+| `ipc-bridge.js` | L1 | RPC-over-IPC bidirectional communication with timeout + pending guard / IPC 双端 RPC 通信 |
+| `worker-pool.js` | L1 | Worker thread pool manager with SharedArrayBuffer + auto-restart / Worker 线程池 + 共享内存 |
+| `workers/aco-worker.js` | L1 | ACO roulette selection in worker thread / ACO 轮盘选择 Worker |
+| `workers/compute-worker.js` | L1 | Generic compute tasks (k-means, CPM, MI) / 通用计算 Worker |
+| `workers/shapley-worker.js` | L1 | Monte Carlo Shapley credit assignment / 蒙特卡洛 Shapley Worker |
+| `workers/vector-worker.js` | L1 | Vector operations (dot product, cosine, HNSW) / 向量运算 Worker |
+| `transports/transport-interface.js` | L2 | Abstract transport base class / 传输层抽象接口 |
+| `transports/event-emitter-transport.js` | L2 | Default EventEmitter transport (V5.x compatible) / 默认传输实现 |
+| `transports/broadcast-channel-transport.js` | L2 | Cross-worker BroadcastChannel transport / 跨 Worker 传输 |
+| `transports/nats-transport.js` | L2 | V7.0 reserved NATS stub / V7.0 预留 NATS 接口 |
+| `embedding-engine.js` | L3 | Dual-mode text embeddings (local Xenova 384D / API 1536D) / 双模式文本嵌入 |
+| `vector-index.js` | L3 | HNSW hierarchical navigable small-world index / HNSW 向量索引 |
+| `hybrid-retrieval.js` | L3 | 6-dimensional retrieval fusion (semantic+temporal+importance+confidence+frequency+context) / 六维混合检索 |
+| `sna-analyzer.js` | L3 | Social Network Analysis (betweenness, closeness, clustering coefficient) / 社交网络分析 |
+| `failure-mode-analyzer.js` | L3 | 5-category root-cause classification (INPUT/TIMEOUT/LLM/NETWORK/RESOURCE) / 五类失败根因分类 |
+| `signal-calibrator.js` | L4 | MI-based signal auto-calibration with 3-phase cold start / 互信息信号自校准 |
+| `dual-process-router.js` | L4 | System 1/2 bounded rationality routing / 双过程路由决策 |
+| `shapley-credit.js` | L4 | Monte Carlo Shapley value for fair multi-agent credit / 蒙特卡洛 Shapley 信用分配 |
+| `budget-forecaster.js` | L4 | Linear regression token budget prediction / 线性回归预算预测 |
+
+#### Dashboard V6.0 Panels / 仪表板面板
+
+| File | Purpose / 用途 |
+|------|----------------|
+| `dashboard/index.html` | Modular workspace layout / 模块化主壳 |
+| `dashboard/core.js` | SSE data bus + rendering utilities / SSE 数据总线 |
+| `dashboard/styles.css` | Dark theme + CSS variables / 暗色主题 |
+| `dashboard/panels/v6-overview.js` | V6.0 summary metrics / 概览指标面板 |
+| `dashboard/panels/quality-timeline.js` | Quality audit trail / 质量审计时间线 |
+| `dashboard/panels/sna-topology.js` | Social network graph / SNA 拓扑图 |
+| `dashboard/panels/worker-pool.js` | Worker thread pool monitor / Worker 线程池监控 |
+
+#### Key Modifications / 关键修改
+
+| File | Change / 变更 |
+|------|---------------|
+| `index.js` | Major refactor: 1798→~400 lines; thin plugin shell + fork() child process lifecycle / 重构为瘦壳 + 子进程生命周期管理 |
+| `database-schemas.js` | +6 tables (failure_mode_log, quality_audit, vector_index_meta, shapley_credits, sna_snapshots, ipc_call_stats); SCHEMA_VERSION 7→8 / 6 张新表 |
+| `message-bus.js` | Pluggable transport abstraction (constructor accepts Transport) / 可插拔传输抽象 |
+| `pheromone-engine.js` | Worker pool delegation for `acoSelect()` + `decayPass()` / 计算委托到 Worker |
+| `reputation-ledger.js` | Exponential half-life decay (`e^(-t/halfLife)`, default 14 days) + 4D→6D dimensions (+centrality, +influence) / 半衰期衰减 + 6D 声誉 |
+| `contract-net.js` | +6th award weight: affinityScore (0.06) from task_affinity / 第6权重：亲和度 |
+| `execution-planner.js` | +5th MoE expert: `_affinityExpert()` / 第5专家：亲和度 |
+| `quality-controller.js` | Quality audit trail writes to `quality_audit` table / 质量审计记录 |
+| `governance-metrics.js` | Reads quality audit chain for policy compliance / 读取审计链 |
+| `species-evolver.js` | Evolution clustering activation + Silhouette stability score / 聚类激活 + 轮廓系数 |
+| `task-dag-engine.js` | DLQ retry orchestration with exponential backoff (maxRetries=3) / 死信重试编排 |
+| `circuit-breaker.js` | State persistence: `restoreState()` / `persistState()` / 状态持久化 |
+| `tool-resilience.js` | Failure mode integration: calls FailureModeAnalyzer on errors / 失败模式集成 |
+| `critical-path.js` | Worker pool delegation for CPM analysis / CPM 委托 Worker |
+| `role-discovery.js` | Worker pool delegation for k-means++ / k-means++ 委托 Worker |
+| `plugin-adapter.js` | Bridge to SwarmCore child; `getToolManifests()` / 桥接子进程 |
+| `dashboard-service.js` | +4 REST endpoints (sna-metrics, vector-search, signal-weights, alerts); modular dashboard serving / 4 新端点 + 模块化面板服务 |
+| `trace-collector.js` | `analyzeLatency()` p50/p95/p99 + `detectBottlenecks()` / 延迟分析 + 瓶颈检测 |
+| `metrics-collector.js` | Full V6.0 topic subscription + threshold alerting (error rate, latency, DLQ) / 全量订阅 + 阈值告警 |
+| `event-catalog.js` | +19 V6.0 event topics → 85 total / 19 个新事件主题 |
+| `episodic-memory.js` | Temporal decay weighting integration / 时间衰减加权 |
+| `semantic-memory.js` | Hybrid retrieval scoring integration / 混合检索评分 |
+
+#### Dormant Modules Activated / 激活的休眠模块
+
+| Module | Previously / 之前 | Now / 现在 |
+|--------|-------------------|------------|
+| SkillGovernor | `enabled: false` by default | Default enabled with graceful degradation / 默认启用 + 优雅降级 |
+| ContextEngine | Fallback-only via hook | Default enabled, integrated with SkillGovernor + GovernanceMetrics / 默认启用 |
+| Evolution Clustering | `evolution.clustering: false` | Default enabled + Silhouette stability score / 默认启用 + 稳定性评估 |
+
+#### Data Pipelines Closed / 闭合的数据管道
+
+| Table / 表 | Before / 之前 | After / 之后 |
+|------------|---------------|-------------|
+| `dead_letter_tasks` | Write-only | +DLQ retry with exponential backoff / 重试编排 |
+| `task_affinity` | Write-only | +ContractNet 6th weight + ExecutionPlanner 5th expert / 亲和度调度 |
+| `breaker_state` | No persistence | +Restore on startup + persist on change / 启动恢复 + 变更持久化 |
+| `trace_spans` | Batch write only | +`analyzeLatency()` + `detectBottlenecks()` / 延迟分析 + 瓶颈检测 |
+| `repair_memory` | Coarse matching | +`error_category` dimension matching / 细粒度策略匹配 |
+
+#### Algorithm Additions (6 new, total 25) / 新增算法
+
+| # | Algorithm / 算法 | Layer | Purpose / 用途 |
+|---|---|---|---|
+| 20 | **HNSW** (Hierarchical Navigable Small-World) | L3 | Approximate nearest neighbor in vector space / 向量近邻搜索 |
+| 21 | **Mutual Information** | L4 | Signal-success correlation for auto-calibration / 信号自校准 |
+| 22 | **Monte Carlo Shapley** | L4 | Fair credit assignment in multi-agent coalitions / 联盟公平信用 |
+| 23 | **Bounded Rationality** (System 1/2) | L4 | Fast/slow dual-process task routing / 快慢双过程路由 |
+| 24 | **Regex Pattern Classification** | L3 | Failure root-cause categorization / 失败根因分类 |
+| 25 | **Linear Regression Forecasting** | L4 | Token budget exhaustion prediction / 预算耗尽预测 |
+
+#### New Feature Flags (20+) / 新增特性标志
+
+`architecture.mode`, `architecture.workerPoolSize`, `embedding.enabled`, `embedding.mode`, `vectorIndex.enabled`, `signalCalibrator.enabled`, `shapley.enabled`, `sna.enabled`, `dualProcess.enabled`, `hybridRetrieval.enabled`, `failureModeAnalyzer.enabled`, `budgetForecaster.enabled`, `qualityAudit.enabled`, `reputationDecay.halfLifeDays`, `metricsAlerting.errorRateThreshold`, `metricsAlerting.latencyP95Threshold`, `metricsAlerting.dlqThreshold`, + more
+
+#### Test Coverage / 测试覆盖
+
+| Metric / 指标 | V5.7 | V6.0 |
+|--------|------|------|
+| Source files / 源文件 | ~75 | 108 (+33) |
+| Test files / 测试文件 | 65 | 83 (+18) |
+| Total tests / 测试数 | 1097 | 1257 (+160) |
+| EventTopics / 事件主题 | 66 | 85 (+19) |
+| DB tables / 数据库表 | 44 | 50 (+6) |
+| Schema version | 7 | 8 |
+| Algorithms / 算法 | 19 | 25 (+6) |
+| Feature flags / 特性标志 | ~15 | ~35 (+20) |
+
+---
+
 ## [5.7.0] - 2026-03-10
 
 ### Enhancement: Skill Symbiosis + Multi-Type Pheromones / 增强：共生调度 + 多类型信息素

@@ -107,10 +107,11 @@ describe('ContractNet V5.7', () => {
 
     const scoreWithSymbiosis = cn._computeAwardScore(bid);
 
-    // 基础 award_score = 0.8*0.4 + 0.7*0.3 + 0.6*0.2 + 0.5*0.1 = 0.32+0.21+0.12+0.05 = 0.70
+    // V6.3 新权重: cap=0.30 + rep=0.25 + res=0.15 + load=0.10 + costFactor(0.5)*0.12 + pheromone(0)*0.08
+    // base = 0.24 + 0.175 + 0.09 + 0.05 + 0.06 + 0 = 0.615
     // 共生权重 = 0.08 (默认)
-    // 最终 = 0.70 * (1 - 0.08) + 0.9 * 0.08 = 0.70 * 0.92 + 0.072 = 0.644 + 0.072 = 0.716
-    expect(scoreWithSymbiosis).toBeCloseTo(0.716, 2);
+    // 最终 = 0.615 * (1 - 0.08) + 0.9 * 0.08 = 0.615 * 0.92 + 0.072 = 0.5658 + 0.072 = 0.6378
+    expect(scoreWithSymbiosis).toBeCloseTo(0.6378, 2);
     expect(scoreWithSymbiosis).toBeGreaterThanOrEqual(0);
     expect(scoreWithSymbiosis).toBeLessThanOrEqual(1);
   });
@@ -133,8 +134,9 @@ describe('ContractNet V5.7', () => {
 
     const score = cnNoSymbiosis._computeAwardScore(bid);
 
-    // 纯 award_score = 0.8*0.4 + 0.7*0.3 + 0.6*0.2 + 0.5*0.1 = 0.70
-    expect(score).toBeCloseTo(0.70, 2);
+    // V6.3 新权重: cap=0.30 + rep=0.25 + res=0.15 + load=0.10 + costFactor(0.5)*0.12 + pheromone(0)*0.08
+    // = 0.24 + 0.175 + 0.09 + 0.05 + 0.06 + 0 = 0.615
+    expect(score).toBeCloseTo(0.615, 2);
 
     cnNoSymbiosis.destroy();
   });

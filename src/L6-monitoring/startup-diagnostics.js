@@ -164,6 +164,10 @@ export class StartupDiagnostics {
       { key: 'hierarchicalCoordinator', name: 'HierarchicalCoordinator', required: false },
       { key: 'speciesEvolver', name: 'SpeciesEvolver', required: false },
       { key: 'traceCollector', name: 'TraceCollector', required: false },
+      // V6.2: 审计优化模块 / Audit optimization modules
+      { key: 'conflictResolver', name: 'ConflictResolver', required: false },
+      { key: 'agentLifecycle', name: 'AgentLifecycle', required: false },
+      { key: 'anomalyDetector', name: 'AnomalyDetector', required: false },
     ];
 
     return modules.map(m => {
@@ -244,6 +248,20 @@ export class StartupDiagnostics {
         dangerType: true,
         typedDecay: true,
         typeRegistryLoaded: !!engines?.pheromoneTypeRegistry?._loaded,
+      },
+
+      // V6.2: 审计优化特性 / Audit optimization features
+      auditOptimization: {
+        conflictResolver: !!engines?.conflictResolver,
+        agentLifecycle: !!engines?.agentLifecycle,
+        anomalyDetector: !!engines?.anomalyDetector,
+        memoryConsolidation: !!engines?.episodicMemory?._semanticMemory,
+        gossipMemorySharing: !!engines?.gossipProtocol?._episodicMemory,
+        gossipPheromoneSync: !!engines?.gossipProtocol?._pheromoneEngine,
+        hollingResilience: !!engines?.governanceMetrics?._circuitBreaker,
+        evidenceDualProcess: !!engines?.evidenceGate?._dualProcessRouter,
+        parasiteDetection: typeof engines?.reputationLedger?.detectParasites === 'function',
+        zoneElection: typeof engines?.zoneManager?.demoteLeader === 'function',
       },
     };
 

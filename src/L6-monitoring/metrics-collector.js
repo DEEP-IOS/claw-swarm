@@ -81,6 +81,22 @@ export class MetricsCollector {
     // ── 时间序列 / Time series ──────────────────────────
     /** @type {Map<string, Array<{ timestamp: number, value: number }>>} */
     this._timeSeries = new Map();
+
+    // ── V6.0: 告警阈值 / Alert thresholds ──────────────
+    /** @type {Object} */
+    this._alertThresholds = {
+      errorRate: 0.30,        // 错误率 > 30% / Error rate > 30%
+      latencyP95: 10000,      // p95 延迟 > 10s / p95 latency > 10s
+      dlqPending: 20,         // DLQ 堆积 > 20 / DLQ backlog > 20
+    };
+    /** @type {number} 上次告警时间 / Last alert timestamp */
+    this._lastAlertAt = 0;
+
+    // ── O1: 钩子触发统计 / Hook trigger stats ───────────
+    this._hookStats = {
+      promptBuildInject: { triggered: 0, success: 0 },
+      toolCallGuard: { triggered: 0, blocked: 0 },
+    };
   }
 
   // ━━━ 生命周期 / Lifecycle ━━━
@@ -102,6 +118,14 @@ export class MetricsCollector {
       'speculative.*', 'work.*', 'pipeline.*', 'dag.*',
       // V5.7 新增 / V5.7 additions
       'symbiosis.*',
+      // V6.0+ 新增: 新引擎事件订阅 / V6.0+: New engine event subscriptions
+      'sna.*', 'shapley.*', 'dual_process.*', 'signal.*', 'budget.*',
+      'vector.*', 'worker.*', 'contract.*', 'swarm.*', 'abc.*', 'reputation.*',
+      // V6.2+ 新增 / V6.2+ additions
+      'conflict.*', 'consensus.*', 'anomaly.*',
+      'relay.*', 'session.*', 'pi.*', 'cross_agent.*',
+      // O1: hook 触发统计 / Hook trigger stats
+      'hook.*',
     ];
 
     for (const topic of topics) {
@@ -337,12 +361,34 @@ export class MetricsCollector {
     } else if (topic.startsWith('capability.')) {
       // V5.1: 能力更新事件 / Capability update events
       this._appendTimeSeries('capability', 1);
+    } else if (topic.startsWith('hook.')) {
+      // O1: hook 触发统计
+      if (topic === 'hook.prompt_inject.triggered') {
+        this._hookStats.promptBuildInject.triggered++;
+      } else if (topic === 'hook.prompt_inject.success') {
+        this._hookStats.promptBuildInject.success++;
+      } else if (topic === 'hook.tool_guard.blocked') {
+        this._hookStats.toolCallGuard.blocked++;
+        this._hookStats.toolCallGuard.triggered++;
+      }
     }
 
     // 如果消息包含 duration, 记录 / If message has duration, record it
     if (msg.data?.duration) {
       this._durations.push(msg.data.duration);
+      // V7.2: 限制 _durations 数组大小 / Cap _durations array size
+      if (this._durations.length > 1000) {
+        this._durations = this._durations.slice(-500);
+      }
     }
+  }
+
+  /**
+   * 获取钩子触发统计 / Get hook trigger stats
+   * @returns {Object}
+   */
+  getHookStats() {
+    return { ...this._hookStats };
   }
 
   /**
@@ -356,6 +402,66 @@ export class MetricsCollector {
   _pushCapped(arr, item) {
     arr.push(item);
     if (arr.length > MAX_DETAIL_ENTRIES) arr.shift();
+  }
+
+  // ━━━ V6.0: 告警 / Alerting ━━━
+
+  /**
+   * 检查指标阈值并触发告警
+   * Check metric thresholds and trigger alerts
+   *
+   * @param {Object} [dlqStats] - DLQ 统计 { pending: number }
+   */
+  checkAlerts(dlqStats) {
+    const now = Date.now();
+    // 最小告警间隔 60s / Min alert interval 60s
+    if (now - this._lastAlertAt < 60000) return;
+
+    const alerts = [];
+    const snapshot = this.getSnapshot();
+
+    // 错误率告警 / Error rate alert
+    if (snapshot.red.errorRate > this._alertThresholds.errorRate) {
+      alerts.push({
+        metric: 'errorRate',
+        value: snapshot.red.errorRate,
+        threshold: this._alertThresholds.errorRate,
+        message: `Error rate ${(snapshot.red.errorRate * 100).toFixed(1)}% exceeds ${this._alertThresholds.errorRate * 100}%`,
+      });
+    }
+
+    // p95 延迟告警 / p95 latency alert
+    const durations = this._durations.slice(-100).sort((a, b) => a - b);
+    if (durations.length >= 10) {
+      const p95 = durations[Math.floor(durations.length * 0.95)];
+      if (p95 > this._alertThresholds.latencyP95) {
+        alerts.push({
+          metric: 'latencyP95',
+          value: p95,
+          threshold: this._alertThresholds.latencyP95,
+          message: `p95 latency ${p95}ms exceeds ${this._alertThresholds.latencyP95}ms`,
+        });
+      }
+    }
+
+    // DLQ 堆积告警 / DLQ backlog alert
+    if (dlqStats?.pending > this._alertThresholds.dlqPending) {
+      alerts.push({
+        metric: 'dlqPending',
+        value: dlqStats.pending,
+        threshold: this._alertThresholds.dlqPending,
+        message: `DLQ pending ${dlqStats.pending} exceeds ${this._alertThresholds.dlqPending}`,
+      });
+    }
+
+    if (alerts.length > 0) {
+      this._lastAlertAt = now;
+      this._messageBus?.publish?.('metrics.alert.triggered', {
+        alerts,
+        timestamp: now,
+      });
+      this._logger.warn?.(`[MetricsCollector] ${alerts.length} alert(s) triggered`);
+    }
   }
 
   /**

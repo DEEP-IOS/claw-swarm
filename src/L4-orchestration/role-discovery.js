@@ -105,6 +105,19 @@ export class RoleDiscovery {
 
     /** @type {Object} */
     this._logger = logger || console;
+
+    /** @type {import('../L1-infrastructure/worker-pool.js').WorkerPool | null} V6.0 Worker 委托 */
+    this._workerPool = null;
+  }
+
+  /**
+   * V6.0: 设置 Worker 线程池
+   * V6.0: Set worker pool for k-means delegation
+   *
+   * @param {import('../L1-infrastructure/worker-pool.js').WorkerPool} pool
+   */
+  setWorkerPool(pool) {
+    this._workerPool = pool;
   }
 
   // ━━━ 核心 API / Core API ━━━
@@ -282,6 +295,33 @@ export class RoleDiscovery {
     }
 
     return { centroids, assignments, converged, iterations };
+  }
+
+  /**
+   * V6.0: Worker 委托版 K-means (异步)
+   * V6.0: Worker-delegated K-means clustering (async)
+   *
+   * @param {number[][]} vectors
+   * @param {number} k
+   * @param {Object} [options]
+   * @returns {Promise<ClusteringResult>}
+   */
+  async kMeansClusteringAsync(vectors, k, options = {}) {
+    if (!this._workerPool) {
+      return this.kMeansClustering(vectors, k, options);
+    }
+
+    try {
+      return await this._workerPool.submit('kMeans', {
+        vectors,
+        k,
+        maxIterations: options.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        threshold: options.threshold ?? DEFAULT_CONVERGENCE_THRESHOLD,
+      });
+    } catch (err) {
+      this._logger.warn?.(`[RoleDiscovery] Worker kMeans failed, fallback to sync: ${err.message}`);
+      return this.kMeansClustering(vectors, k, options);
+    }
   }
 
   /**

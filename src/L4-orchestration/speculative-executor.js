@@ -50,12 +50,14 @@ export class SpeculativeExecutor {
    * @param {number} [deps.config.maxSpeculativePaths=2]
    * @param {number} [deps.config.speculationBudget=3]
    */
-  constructor({ dagEngine, globalModulator, agentRepo, messageBus, logger, config = {} } = {}) {
+  constructor({ dagEngine, globalModulator, agentRepo, messageBus, logger, relayClient, config = {} } = {}) {
     this._dagEngine = dagEngine;
     this._globalModulator = globalModulator || null;
     this._agentRepo = agentRepo;
     this._messageBus = messageBus || null;
     this._logger = logger || console;
+    /** V7.0 §16: relayClient for real speculative spawning */
+    this._relayClient = relayClient || null;
 
     this._maxPaths = config.maxSpeculativePaths || DEFAULT_MAX_SPECULATIVE_PATHS;
     this._budget = config.speculationBudget || DEFAULT_SPECULATION_BUDGET;
@@ -167,12 +169,38 @@ export class SpeculativeExecutor {
       });
     }
 
-    // 为每条推测路径启动拍卖 / Auction for each speculative path
-    for (const path of paths) {
-      try {
-        this._dagEngine.auctionTask?.(dagId, nodeId);
-      } catch {
-        path.status = 'cancelled';
+    // V7.0 §16: 真实推测执行 — 通过 relayClient 实际 spawn 多个 agent
+    // V7.0 §16: Real speculative execution — spawn multiple agents via relayClient
+    const relayClient = this._relayClient;
+    if (relayClient) {
+      for (const path of paths) {
+        try {
+          const taskDesc = `[Speculative] ${dagId}:${nodeId} — path ${path.agentId}`;
+          relayClient.spawnAndMonitor({
+            agentId: path.agentId,
+            task: taskDesc,
+            timeoutSeconds: 300,
+            label: `spec:${dagId}:${nodeId}:${path.agentId}`,
+            onEnded: (evt) => {
+              if (evt.outcome === 'ok' || evt.outcome === 'success') {
+                this.resolveSpeculation(dagId, nodeId, evt.result, path.agentId);
+              } else {
+                path.status = 'cancelled';
+              }
+            },
+          }).catch(() => { path.status = 'cancelled'; });
+        } catch {
+          path.status = 'cancelled';
+        }
+      }
+    } else {
+      // Fallback: 仅拍卖 (无真实 spawn) / Fallback: auction only (no real spawn)
+      for (const path of paths) {
+        try {
+          this._dagEngine.auctionTask?.(dagId, nodeId);
+        } catch {
+          path.status = 'cancelled';
+        }
       }
     }
 

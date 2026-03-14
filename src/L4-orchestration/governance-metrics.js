@@ -21,6 +21,9 @@
 /** 最大事件缓冲 / Max event buffer */
 const MAX_EVENT_BUFFER = 500;
 
+/** V6.2: 韧性缓冲最大容量 / Max resilience buffer capacity */
+const MAX_RESILIENCE_BUFFER = 100;
+
 /** 报告间隔 turn 数 / Report interval in turns */
 const REPORT_INTERVAL_TURNS = 20;
 
@@ -38,8 +41,9 @@ export class GovernanceMetrics {
    * @param {Object} [deps.messageBus] - MessageBus 实例
    * @param {Object} [deps.db] - DatabaseManager 实例
    * @param {Object} [deps.logger] - Logger 实例
+   * @param {Object} [deps.circuitBreaker] - V6.2: CircuitBreaker 实例 (可选)
    */
-  constructor({ swarmAdvisor, globalModulator, budgetTracker, observabilityCore, messageBus, db, logger } = {}) {
+  constructor({ swarmAdvisor, globalModulator, budgetTracker, observabilityCore, messageBus, db, logger, circuitBreaker } = {}) {
     this._swarmAdvisor = swarmAdvisor;
     this._globalModulator = globalModulator;
     this._budgetTracker = budgetTracker;
@@ -47,6 +51,8 @@ export class GovernanceMetrics {
     this._messageBus = messageBus;
     this._db = db;
     this._logger = logger || console;
+    /** V6.2: 断路器实例 (可选) / CircuitBreaker instance (optional) */
+    this._circuitBreaker = circuitBreaker || null;
 
     /**
      * 决策事件缓冲 / Decision event buffer
@@ -59,6 +65,27 @@ export class GovernanceMetrics {
      * @type {Array<{ turnId: string, swarmUsed: boolean, success: boolean, cost: number, timestamp: number }>}
      */
     this._collabResults = [];
+
+    /**
+     * V6.2: 韧性事件缓冲 / Resilience event buffer
+     * 记录断路器状态转换事件 / Tracks circuit breaker state transitions
+     * @type {Array<{ from: string, to: string, toolId: string, timestamp: number }>}
+     */
+    this._resilienceBuffer = [];
+
+    /**
+     * V6.2: 最大并发故障数 / Max concurrent faults survived
+     * 系统存活过的最高同时 OPEN 断路器数量
+     * Maximum number of simultaneously OPEN breakers the system survived
+     * @type {number}
+     */
+    this._maxConcurrentFaults = 0;
+
+    /**
+     * V6.2: 当前 OPEN 断路器集合 / Currently OPEN breaker set
+     * @type {Set<string>}
+     */
+    this._openBreakers = new Set();
 
     /** Turn 计数 / Turn counter */
     this._turnCount = 0;
@@ -95,6 +122,11 @@ export class GovernanceMetrics {
     // 订阅模式切换事件
     this._messageBus.subscribe?.('modulator.mode.switched', (event) => {
       this._recordDecision('mode_switch', event);
+    });
+
+    // V6.2: 订阅断路器状态转换事件 / Subscribe to circuit breaker transition events
+    this._messageBus.subscribe?.('circuit_breaker.transition', (event) => {
+      this._recordBreakerTransition(event);
     });
   }
 
@@ -232,6 +264,109 @@ export class GovernanceMetrics {
   }
 
   // ============================================================================
+  // V6.2: Holling 韧性指标 / Holling Resilience Metrics
+  // ============================================================================
+
+  /**
+   * 记录断路器状态转换 / Record circuit breaker state transition
+   * @param {Object} event
+   * @private
+   */
+  _recordBreakerTransition(event) {
+    const payload = event?.payload || event;
+    const from = payload?.from || payload?.previousState || 'UNKNOWN';
+    const to = payload?.to || payload?.newState || 'UNKNOWN';
+    const toolId = payload?.toolId || payload?.breakerId || 'unknown';
+
+    this._resilienceBuffer.push({
+      from,
+      to,
+      toolId,
+      timestamp: Date.now(),
+    });
+
+    // 限制缓冲大小 / Cap buffer size
+    if (this._resilienceBuffer.length > MAX_RESILIENCE_BUFFER) {
+      this._resilienceBuffer.shift();
+    }
+
+    // 更新并发故障追踪 / Update concurrent fault tracking
+    if (to === 'OPEN') {
+      this._openBreakers.add(toolId);
+    } else if (to === 'CLOSED' || to === 'HALF_OPEN') {
+      this._openBreakers.delete(toolId);
+    }
+
+    // 更新最大并发故障数 / Update max concurrent faults
+    if (this._openBreakers.size > this._maxConcurrentFaults) {
+      this._maxConcurrentFaults = this._openBreakers.size;
+    }
+  }
+
+  /**
+   * V6.2: Holling 韧性三维指标 / Holling resilience three-dimensional metrics
+   *
+   * 1. 恢复时间 τ = 断路器 OPEN → CLOSED 的平均时间
+   *    Recovery time τ = average time from circuit breaker OPEN → CLOSED
+   * 2. 抵抗力 R = 1 - (错误率变化 / 扰动强度)
+   *    Resistance R = 1 - (error rate change / disturbance magnitude)
+   * 3. 生态韧性 E = 系统存活过的最大并发故障数
+   *    Ecological resilience E = max concurrent faults system survived
+   *
+   * @returns {{ recoveryTime: number, resistance: number, ecologicalResilience: number }}
+   */
+  computeResilience() {
+    // ── 1. 恢复时间 τ / Recovery time τ ──
+    // 配对 OPEN → CLOSED 事件计算平均恢复时间
+    // Pair OPEN → CLOSED events to compute average recovery time
+    const openTimestamps = new Map(); // toolId → timestamp
+    const recoveryTimes = [];
+
+    for (const entry of this._resilienceBuffer) {
+      if (entry.to === 'OPEN') {
+        openTimestamps.set(entry.toolId, entry.timestamp);
+      } else if (entry.to === 'CLOSED' && openTimestamps.has(entry.toolId)) {
+        const openTs = openTimestamps.get(entry.toolId);
+        recoveryTimes.push(entry.timestamp - openTs);
+        openTimestamps.delete(entry.toolId);
+      }
+    }
+
+    const recoveryTime = recoveryTimes.length > 0
+      ? recoveryTimes.reduce((a, b) => a + b, 0) / recoveryTimes.length
+      : 0;
+
+    // ── 2. 抵抗力 R / Resistance R ──
+    // 扰动 = 最近窗口内故障次数; 错误率变化 = 未恢复的断路器占比
+    // Disturbance = number of failures in recent window
+    // Error rate change = proportion of unrecovered breakers
+    const recentWindow = Date.now() - 300000; // 5 分钟窗口 / 5-minute window
+    const recentFailures = this._resilienceBuffer.filter(
+      (e) => e.to === 'OPEN' && e.timestamp >= recentWindow,
+    ).length;
+    const recentRecoveries = this._resilienceBuffer.filter(
+      (e) => e.to === 'CLOSED' && e.timestamp >= recentWindow,
+    ).length;
+
+    let resistance;
+    if (recentFailures === 0) {
+      resistance = 1.0; // 无扰动时满分 / Perfect when no disturbance
+    } else {
+      const errorRateChange = Math.max(0, recentFailures - recentRecoveries) / recentFailures;
+      resistance = Math.max(0, 1 - errorRateChange);
+    }
+
+    // ── 3. 生态韧性 E / Ecological resilience E ──
+    const ecologicalResilience = this._maxConcurrentFaults;
+
+    return {
+      recoveryTime: Math.round(recoveryTime),
+      resistance: parseFloat(resistance.toFixed(3)),
+      ecologicalResilience,
+    };
+  }
+
+  // ============================================================================
   // 汇总 / Summary
   // ============================================================================
 
@@ -257,6 +392,8 @@ export class GovernanceMetrics {
         currentMode: this._globalModulator?.getCurrentMode?.() || 'RELIABLE',
       },
       roi: roiData,
+      quality: this.computeQualityCompliance(),
+      resilience: this.computeResilience(),
       totalCollabResults: this._collabResults.length,
       timestamp: Date.now(),
     };
@@ -285,6 +422,45 @@ export class GovernanceMetrics {
         `policy=${summary.policy.compliance.toFixed(2)}, ` +
         `ROI=${summary.roi.roi.toFixed(2)}`
       );
+    }
+  }
+
+  // ============================================================================
+  // V6.0: 质量审计链合规 / Quality Audit Trail Compliance
+  // ============================================================================
+
+  /**
+   * 基于 quality_audit 表计算质量合规率
+   * Compute quality compliance rate from quality_audit table
+   *
+   * @param {Object} [options]
+   * @param {number} [options.since] - 起始时间戳 (默认最近 24 小时)
+   * @returns {{ passRate: number, totalEvaluations: number, failCount: number }}
+   */
+  computeQualityCompliance(options = {}) {
+    if (!this._db) return { passRate: 1.0, totalEvaluations: 0, failCount: 0 };
+
+    try {
+      const since = options.since || (Date.now() - 86400000);
+      const rows = this._db.all?.(
+        `SELECT verdict, COUNT(*) as cnt FROM quality_audit WHERE timestamp >= ? GROUP BY verdict`,
+        since,
+      ) || [];
+
+      let total = 0;
+      let failCount = 0;
+      for (const row of rows) {
+        total += row.cnt;
+        if (row.verdict === 'FAIL') failCount += row.cnt;
+      }
+
+      return {
+        passRate: total > 0 ? parseFloat(((total - failCount) / total).toFixed(3)) : 1.0,
+        totalEvaluations: total,
+        failCount,
+      };
+    } catch {
+      return { passRate: 1.0, totalEvaluations: 0, failCount: 0 };
     }
   }
 }

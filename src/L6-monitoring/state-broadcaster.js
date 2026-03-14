@@ -11,6 +11,10 @@
  * - 事件批处理 (100ms 窗口)
  * - SSE 敏感字段过滤
  *
+ * V6.0 增强 / V6.0 Enhancements:
+ * - 新增 V6.0 事件主题订阅 (vector.*, shapley.*, sna.*, dual_process.*, worker.*, signal.*, budget.*)
+ * - 扩展 ALLOWED_FIELDS 白名单 (V6.0 新字段)
+ *
  * @module L6-monitoring/state-broadcaster
  * @author DEEP-IOS
  */
@@ -22,7 +26,10 @@ import { ensureV51Format } from '../event-catalog.js';
 // ============================================================================
 
 /** SSE 心跳间隔 (ms) / SSE heartbeat interval */
-const HEARTBEAT_INTERVAL_MS = 30000;
+const HEARTBEAT_INTERVAL_MS = 15000;
+
+/** O4: 字段漂移日志周期 (ms) / Field drift log interval */
+const DRIFT_LOG_INTERVAL_MS = 60000;
 
 /** 事件批处理窗口 (ms) / Event batch window */
 const BATCH_WINDOW_MS = 100;
@@ -37,6 +44,35 @@ const ALLOWED_FIELDS = new Set([
   'breakerState', 'toolName', 'escalated', 'pressure', 'threshold',
   'postId', 'scope', 'priority', 'vaccineId', 'pattern', 'effectiveness',
   'featureFlags', 'engineStatus', 'configSummary',
+  // V6.0 新增 / V6.0 additions
+  'credit', 'dagId', 'coalitionSize', 'agentIds',
+  'degreeCentrality', 'betweennessCentrality', 'clusteringCoefficient',
+  'routeDecision', 'system', 'taskType', 'confidence',
+  'indexSize', 'dimensions', 'queryCount', 'mode',
+  'category', 'mitigation', 'trend', 'rate',
+  'estimatedRemaining', 'exhaustionRisk', 'forecast',
+  'signalName', 'weight', 'phase', 'calibrationMethod',
+  'workerCount', 'active', 'idle', 'queued', 'completed', 'errors',
+  'state', 'previousState', 'latency',
+  'passRate', 'overallScore', 'entries',
+  // V7.0 新增: 修复 SSE 字段丢失 / V7.0: Fix missing SSE fields
+  'newRole', 'oldRole', 'newState', 'reputation', 'newScore', 'previousScore',
+  'eventScore', 'from', 'to', 'content', 'summary', 'target', 'intensity',
+  'concentrations', 'model', 'bid', 'awarded', 'passed', 'message',
+  'title', 'titleZh', 'body', 'cfpId', 'issuerId', 'parentId',
+  'sessionKey', 'taskDescription', 'progress', 'kp', 'ki', 'output',
+  'integral', 'count', 'name', 'speciesId', 'factors',
+  // V7.1 新增: SNA + 能力 + 任务协作字段 / V7.1: SNA + capability + collaboration fields
+  'edges', 'parentAgentId', 'assignedBy', 'result', 'agentCount', 'edgeCount',
+  // V7.2 新增: 5轮审计补全字段 / V7.2: 5-round audit field additions
+  'bidId', 'contractId', 'bidScore', 'agentName', 'turns',
+  'requirements', 'expiresAt', 'successRate', 'failureCount',
+  'modelId', 'modelCost', 'modelCapability',
+  'credits', 'weights', 'system1', 'system2',
+  'pheromoneId', 'sourceId', 'targetScope',
+  'totalEvaluations', 'evidenceLevel',
+  'completedTasks', 'complete', 'action',
+  'delegated', 'remaining',
 ]);
 
 // ============================================================================
@@ -71,6 +107,12 @@ export class StateBroadcaster {
     /** @type {Map<string, number>} 按主题统计 / Per-topic counts */
     this._eventsByTopic = new Map();
 
+    // O3: 连接跟踪 / Connection tracking
+    /** @type {number} 累计连接数 / Total connections ever */
+    this._connectionCount = 0;
+    /** @type {number} 当前活跃连接数 / Currently active connections */
+    this._activeConnections = 0;
+
     // V5.1: 批处理缓冲区 / Batch processing buffer
     /** @type {Array<Object>} */
     this._batchBuffer = [];
@@ -78,6 +120,12 @@ export class StateBroadcaster {
     this._batchTimer = null;
     /** @type {NodeJS.Timeout|null} */
     this._heartbeatTimer = null;
+
+    // O4: 字段漂移日志 / Field drift log
+    /** @type {Map<string, {count: number, lastTopic: string, firstSeen: number}>} */
+    this._fieldDriftLog = new Map();
+    /** @type {NodeJS.Timeout|null} */
+    this._driftLogTimer = null;
   }
 
   // ━━━ 生命周期 / Lifecycle ━━━
@@ -104,6 +152,23 @@ export class StateBroadcaster {
       'speculative.*', 'work.*', 'pipeline.*',
       // V5.7 新增 / V5.7 additions
       'symbiosis.*',
+      // V6.0 新增 / V6.0 additions
+      'vector.*', 'hybrid.*', 'embedding.*',
+      'shapley.*', 'sna.*', 'dual_process.*',
+      'worker.*', 'signal.*', 'budget.*',
+      'metrics.*', 'ipc.*',
+      // V6.2 新增 / V6.2 additions
+      'conflict.*', 'consensus.*', 'anomaly.*', 'gossip.*', 'parasite.*',
+      // V6.3 新增 / V6.3 additions
+      'relay.*', 'auto.*', 'context.*', 'model.*', 'coldstart.*', 'progress.*',
+      // V7.0 新增 / V7.0 additions
+      'session.*', 'pi.*', 'cross_agent.*', 'communication.*',
+      'live.*', 'speculation.*', 'negative_selection.*',
+      'dream.*', 'evidence.*',
+      // V7.1 新增 / V7.1 additions
+      'swarm.*', 'contract.*', 'reputation.*', 'abc.*',
+      // V7.2 新增: hook 统计 / V7.2: Hook stats
+      'hook.*',
     ];
     this._unsubscribes = topics.map((topic) =>
       this._messageBus.subscribe(topic, (message) => {
@@ -116,6 +181,12 @@ export class StateBroadcaster {
       this._sendHeartbeat();
     }, HEARTBEAT_INTERVAL_MS);
     if (this._heartbeatTimer.unref) this._heartbeatTimer.unref();
+
+    // O4: 启动字段漂移周期日志 / Start field drift periodic logging
+    this._driftLogTimer = setInterval(() => {
+      this._logFieldDrift();
+    }, DRIFT_LOG_INTERVAL_MS);
+    if (this._driftLogTimer.unref) this._driftLogTimer.unref();
 
     this._broadcasting = true;
     this._logger.info?.('[StateBroadcaster] 广播已启动 / Broadcasting started');
@@ -156,6 +227,11 @@ export class StateBroadcaster {
    */
   destroy() {
     this.stop();
+    // O4: 清理漂移日志定时器 / Clean up drift log timer
+    if (this._driftLogTimer) {
+      clearInterval(this._driftLogTimer);
+      this._driftLogTimer = null;
+    }
     this._clients.clear();
     this._logger.info?.('[StateBroadcaster] 已销毁 / Destroyed');
   }
@@ -171,7 +247,10 @@ export class StateBroadcaster {
    */
   addClient(client) {
     this._clients.add(client);
-    this._logger.debug?.(`[StateBroadcaster] 客户端已注册 / Client registered (total: ${this._clients.size})`);
+    // O3: 连接跟踪 / Connection tracking
+    this._connectionCount++;
+    this._activeConnections = this._clients.size;
+    this._logger.debug?.(`[StateBroadcaster] 客户端已注册 / Client registered (active: ${this._activeConnections}, total: ${this._connectionCount})`);
     return () => this.removeClient(client);
   }
 
@@ -183,7 +262,9 @@ export class StateBroadcaster {
    */
   removeClient(client) {
     this._clients.delete(client);
-    this._logger.debug?.(`[StateBroadcaster] 客户端已移除 / Client removed (total: ${this._clients.size})`);
+    // O3: 连接跟踪 / Connection tracking
+    this._activeConnections = this._clients.size;
+    this._logger.debug?.(`[StateBroadcaster] 客户端已移除 / Client removed (active: ${this._activeConnections}, total: ${this._connectionCount})`);
   }
 
   /**
@@ -210,6 +291,11 @@ export class StateBroadcaster {
       clientCount: this._clients.size,
       totalBroadcasts: this._totalBroadcasts,
       eventsByTopic: Object.fromEntries(this._eventsByTopic),
+      // O3: 连接跟踪统计 / Connection tracking stats
+      activeConnections: this._activeConnections,
+      totalConnections: this._connectionCount,
+      // O4: 字段漂移统计 / Field drift stats
+      fieldDrift: Object.fromEntries(this._fieldDriftLog || new Map()),
     };
   }
 
@@ -230,7 +316,7 @@ export class StateBroadcaster {
     const wrapped = ensureV51Format(topic, message.data || message, 'legacy');
 
     // V5.1: 过滤敏感字段 / Filter sensitive fields
-    const safePayload = this._filterPayload(wrapped.payload || {});
+    const safePayload = this._filterPayload(wrapped.payload || {}, topic);
 
     const event = {
       event: topic,
@@ -242,10 +328,22 @@ export class StateBroadcaster {
     // 更新统计 / Update stats
     this._totalBroadcasts++;
     this._eventsByTopic.set(topic, (this._eventsByTopic.get(topic) || 0) + 1);
+    // V7.2 P5.1: 限制 _eventsByTopic Map 大小 / Cap Map size
+    if (this._eventsByTopic.size > 200) {
+      const firstKey = this._eventsByTopic.keys().next().value;
+      this._eventsByTopic.delete(firstKey);
+    }
 
     // V5.1: 批处理 — 100ms 窗口聚合 / Batch processing — 100ms window aggregation
     this._batchBuffer.push(event);
-    if (!this._batchTimer) {
+    // V7.2: batch 上限 50，超出立即 flush / Batch cap 50, flush immediately if exceeded
+    if (this._batchBuffer.length >= 50) {
+      if (this._batchTimer) {
+        clearTimeout(this._batchTimer);
+        this._batchTimer = null;
+      }
+      this._flushBatch();
+    } else if (!this._batchTimer) {
       this._batchTimer = setTimeout(() => {
         this._flushBatch();
         this._batchTimer = null;
@@ -279,6 +377,10 @@ export class StateBroadcaster {
     for (const dead of deadClients) {
       this._clients.delete(dead);
     }
+    // O3: 同步活跃连接计数 / Sync active connection count
+    if (deadClients.length > 0) {
+      this._activeConnections = this._clients.size;
+    }
   }
 
   /**
@@ -289,15 +391,42 @@ export class StateBroadcaster {
    * @returns {Object} 安全的 payload / Safe payload
    * @private
    */
-  _filterPayload(payload) {
+  _filterPayload(payload, topic) {
     if (!payload || typeof payload !== 'object') return payload;
     const safe = {};
     for (const [key, value] of Object.entries(payload)) {
       if (ALLOWED_FIELDS.has(key)) {
         safe[key] = value;
+      } else {
+        // O4: 记录被剥离的字段 / Track stripped fields for drift detection
+        const existing = this._fieldDriftLog.get(key);
+        if (existing) {
+          existing.count++;
+          existing.lastTopic = topic || 'unknown';
+        } else {
+          this._fieldDriftLog.set(key, {
+            count: 1,
+            lastTopic: topic || 'unknown',
+            firstSeen: Date.now(),
+          });
+        }
       }
     }
     return safe;
+  }
+
+  /**
+   * O4: 周期性记录字段漂移告警
+   * Periodically log field drift alerts (only when entries exist)
+   * @private
+   */
+  _logFieldDrift() {
+    if (this._fieldDriftLog.size === 0) return;
+    this._logger.warn?.(
+      '[StateBroadcaster] Field drift detected:',
+      JSON.stringify(Object.fromEntries(this._fieldDriftLog)),
+    );
+    this._fieldDriftLog.clear();
   }
 
   /**
@@ -309,15 +438,23 @@ export class StateBroadcaster {
     if (this._clients.size === 0) return;
 
     const deadClients = [];
+    // O3: 心跳中包含连接统计 / Include connection stats in heartbeat
+    const heartbeatData = {
+      timestamp: Date.now(),
+      activeConnections: this._activeConnections,
+      totalConnections: this._connectionCount,
+    };
     for (const client of this._clients) {
       try {
-        client.send({ event: 'heartbeat', data: { timestamp: Date.now() } });
+        client.send({ event: 'heartbeat', data: heartbeatData });
       } catch {
         deadClients.push(client);
       }
     }
     for (const dead of deadClients) {
       this._clients.delete(dead);
+      // O3: 死亡客户端清理后同步活跃计数 / Sync active count after dead client cleanup
+      this._activeConnections = this._clients.size;
     }
   }
 }

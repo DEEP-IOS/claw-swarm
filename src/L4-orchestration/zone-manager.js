@@ -114,6 +114,13 @@ export class ZoneManager {
     /** @type {Object} */
     this._logger = logger || console;
 
+    /**
+     * Agent 生命周期管理器引用 (可选, 用于选举过滤)
+     * Agent lifecycle manager reference (optional, used for election filtering)
+     * @type {Object | null}
+     */
+    this._agentLifecycle = null;
+
     // 配置 / Configuration
     const cfg = config || {};
 
@@ -122,6 +129,29 @@ export class ZoneManager {
 
     /** @type {number} */
     this._maxMembers = cfg.maxMembers ?? DEFAULT_MAX_MEMBERS;
+
+    // 自动降级订阅: Leader 进入 MAINTENANCE/RETIRED 时自动降级并重新选举
+    // Auto-demotion subscription: auto-demote leader on MAINTENANCE/RETIRED transition
+    this._setupAutoDemotionSubscription();
+  }
+
+  // ━━━ 生命周期绑定 / Lifecycle Binding ━━━
+
+  /**
+   * 设置 Agent 生命周期管理器引用
+   * Set agent lifecycle manager reference
+   *
+   * 绑定后, electLeader() 将额外过滤: 仅 IDLE/ACTIVE 状态的 Agent 可参选。
+   * Once bound, electLeader() will additionally filter: only agents in IDLE/ACTIVE state are eligible.
+   *
+   * @param {Object} lifecycle - Agent 生命周期管理器 / Agent lifecycle manager
+   * @param {Function} lifecycle.getState - 获取 Agent 当前状态 / Get agent current state
+   */
+  setAgentLifecycle(lifecycle) {
+    this._agentLifecycle = lifecycle || null;
+    this._logger.info?.(
+      `[ZoneManager] AgentLifecycle ${lifecycle ? '已绑定' : '已解绑'} / AgentLifecycle ${lifecycle ? 'bound' : 'unbound'}`,
+    );
   }
 
   // ━━━ Zone CRUD ━━━
@@ -334,6 +364,19 @@ export class ZoneManager {
       const agent = this._agentRepo.getAgent(member.agent_id);
       if (!agent) continue;
 
+      // 生命周期状态过滤: 仅 IDLE/ACTIVE 可参选 (若 _agentLifecycle 可用)
+      // Lifecycle state filter: only IDLE/ACTIVE eligible (if _agentLifecycle available)
+      if (this._agentLifecycle) {
+        try {
+          const state = this._agentLifecycle.getState(member.agent_id);
+          if (state && state !== 'IDLE' && state !== 'ACTIVE') {
+            continue;
+          }
+        } catch {
+          // 获取状态失败不阻断选举 / State lookup failure does not block election
+        }
+      }
+
       // 计算成功率 / Compute success rate
       const totalTasks = (agent.success_count || 0) + (agent.failure_count || 0);
       const successRate = totalTasks > 0
@@ -385,7 +428,7 @@ export class ZoneManager {
       `[ZoneManager] Leader 选举完成: Zone ${zone.name} → Agent ${winner.agentId} (score=${winner.score.toFixed(3)}) / Leader elected`,
     );
 
-    this._emit('zone.leaderElected', {
+    this._emit('zone.leader.elected', {
       zoneId,
       zoneName: zone.name,
       leaderId: winner.agentId,
@@ -397,6 +440,52 @@ export class ZoneManager {
       leaderId: winner.agentId,
       score: winner.score,
     };
+  }
+
+  /**
+   * 降级 Zone Leader
+   * Demote zone leader
+   *
+   * 移除当前 Leader 角色, 将其降为 member, 并发布降级事件。
+   * Remove current leader role, demote to member, and publish demotion event.
+   *
+   * @param {string} zoneId - Zone ID
+   * @param {Object} [options]
+   * @param {string} [options.reason='manual'] - 降级原因 / Demotion reason
+   * @returns {{ demotedAgentId: string, reason: string } | null} 降级结果, 无 Leader 返回 null / Demotion result, null if no leader
+   */
+  demoteLeader(zoneId, { reason = 'manual' } = {}) {
+    const zone = this._zoneRepo.getZone(zoneId);
+    if (!zone) {
+      throw new Error(`[ZoneManager] Zone 不存在 / Zone not found: ${zoneId}`);
+    }
+
+    if (!zone.leaderId) {
+      this._logger.warn?.(
+        `[ZoneManager] Zone ${zoneId} 无 Leader, 无需降级 / No leader to demote`,
+      );
+      return null;
+    }
+
+    const demotedAgentId = zone.leaderId;
+
+    // 移除 Leader: 角色降为 member, Zone leaderId 清空
+    // Remove leader: role demoted to member, zone leaderId cleared
+    this._zoneRepo.updateMemberRole(zoneId, demotedAgentId, ZoneRole.member);
+    this._zoneRepo.updateZone(zoneId, { leaderId: null });
+
+    this._logger.info?.(
+      `[ZoneManager] Leader 已降级: Zone ${zone.name}, Agent ${demotedAgentId}, 原因=${reason} / Leader demoted`,
+    );
+
+    this._emit('zone.leader.demoted', {
+      zoneId,
+      zoneName: zone.name,
+      demotedAgentId,
+      reason,
+    });
+
+    return { demotedAgentId, reason };
   }
 
   // ━━━ 健康检查 / Health Check ━━━
@@ -570,6 +659,75 @@ export class ZoneManager {
       } catch {
         // 忽略消息总线错误 / Ignore message bus errors
       }
+    }
+  }
+
+  /**
+   * 设置自动降级订阅
+   * Setup auto-demotion subscription
+   *
+   * 监听 'agent.lifecycle.transition' 事件:
+   * 若某 Zone Leader 转为 MAINTENANCE 或 RETIRED 状态, 自动降级并触发重新选举。
+   *
+   * Subscribe to 'agent.lifecycle.transition' events:
+   * If a zone leader transitions to MAINTENANCE or RETIRED, auto-demote and trigger re-election.
+   *
+   * @private
+   */
+  _setupAutoDemotionSubscription() {
+    if (!this._messageBus) return;
+
+    /** @type {Set<string>} 需要自动降级的状态 / States that trigger auto-demotion */
+    const DEMOTE_STATES = new Set(['MAINTENANCE', 'RETIRED']);
+
+    try {
+      this._messageBus.subscribe('agent.lifecycle.transition', (event) => {
+        const payload = event?.payload || event;
+        const agentId = payload?.agentId;
+        const newState = payload?.newState || payload?.to;
+
+        if (!agentId || !newState) return;
+        if (!DEMOTE_STATES.has(newState)) return;
+
+        // 查找该 Agent 是否是任何 Zone 的 Leader
+        // Check if this agent is a leader of any zone
+        try {
+          const zones = this._zoneRepo.listZones();
+
+          for (const zone of zones) {
+            if (zone.leaderId !== agentId) continue;
+
+            this._logger.info?.(
+              `[ZoneManager] 自动降级: Agent ${agentId} 转为 ${newState}, Zone ${zone.name} / Auto-demotion triggered`,
+            );
+
+            // 降级 / Demote
+            this.demoteLeader(zone.id, {
+              reason: `auto:lifecycle_${newState.toLowerCase()}`,
+            });
+
+            // 触发重新选举 / Trigger re-election
+            try {
+              this.electLeader(zone.id);
+            } catch (electionErr) {
+              this._logger.warn?.(
+                `[ZoneManager] 自动重选失败: Zone ${zone.name} — ${electionErr.message} / Auto re-election failed`,
+              );
+            }
+          }
+        } catch (err) {
+          this._logger.warn?.(
+            `[ZoneManager] 自动降级处理异常: ${err.message} / Auto-demotion error`,
+          );
+        }
+      });
+
+      this._logger.info?.(
+        '[ZoneManager] 自动降级订阅已建立 / Auto-demotion subscription established',
+      );
+    } catch {
+      // messageBus.subscribe 不可用时静默跳过
+      // Silently skip if messageBus.subscribe is unavailable
     }
   }
 }

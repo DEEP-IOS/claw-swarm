@@ -1,0 +1,82 @@
+# Claw-Swarm V7 Canonical Metrics Baseline
+# Generated: 2026-03-14
+# Source of truth: code-derived, every value has a verification command
+# Usage: All documentation MUST reference these values; drift = QA failure
+
+project:
+  name: claw-swarm
+  version: "7.0.0"
+  verify_version: |
+    grep '"version"' package.json openclaw.plugin.json
+
+database:
+  schema_version: 9
+  table_count: 52
+  verify_schema: |
+    grep "SCHEMA_VERSION" src/L1-infrastructure/schemas/database-schemas.js | head -1
+  verify_tables: |
+    grep -c "CREATE TABLE" src/L1-infrastructure/schemas/database-schemas.js
+
+events:
+  topic_count: 122
+  verify_topics: |
+    grep -cE "^\s+[A-Z_]+:" src/event-catalog.js
+
+tools:
+  file_count: 10
+  public_tools: 4  # swarm_run, swarm_query, swarm_dispatch, swarm_checkpoint
+  all_tools:
+    - swarm-run-tool.js
+    - swarm-query-tool.js
+    - swarm-dispatch-tool.js
+    - swarm-checkpoint-tool.js
+    - swarm-spawn-tool.js
+    - swarm-pheromone-tool.js
+    - swarm-gate-tool.js
+    - swarm-memory-tool.js
+    - swarm-plan-tool.js
+    - swarm-zone-tool.js
+  verify_tools: |
+    ls src/L5-application/tools/*.js | wc -l
+
+tests:
+  file_count: 105
+  last_passing_count: 1463
+  verify_files: |
+    find tests -name "*.test.js" | wc -l
+  verify_passing: |
+    npx vitest run --reporter=verbose 2>&1 | tail -5
+
+source:
+  total_js_files: 173  # excluding node_modules and dist
+  root_files: 3  # index.js, swarm-core.js, event-catalog.js
+  L1_infrastructure: 25
+  L2_communication: 13
+  L3_agent: 21
+  L4_orchestration: 25
+  L5_application: 18
+  L6_monitoring_service: 7
+  L6_console_src: 98
+  verify_total: |
+    find src -name "*.js" -not -path "*/node_modules/*" -not -path "*/dist/*" | wc -l
+
+hooks:
+  registration_count: 19
+  unique_event_types: 14
+  verify_hooks: |
+    grep -c "api\.on(" src/index.js
+
+console:
+  src_file_count: 98
+  jsx_files: 41
+  js_files: 55
+  css_files: 2
+  i18n_languages: 2  # en, zh
+  verify_console: |
+    find src/L6-monitoring/console/src -type f | wc -l
+
+architecture:
+  layers: 6  # L1-L6
+  process_model: "fork + WorkerPool"
+  soul_profiles: 6  # main, architect, coder, reviewer, swarm-relay, scout
+  agent_roles: 5  # per AGENTS.md (main, architect, coder, reviewer, swarm-relay)

@@ -1,8 +1,8 @@
 {
   "id": "claw-swarm",
-  "name": "Claw-Swarm V5.7",
-  "description": "蜂群智能协作引擎 — Swarm intelligence engine with 6-layer architecture: bio-inspired multi-agent orchestration, adaptive arbitration, evidence discipline, protocol semantics, collaboration tax tracking, unified observability, memory systems, quality governance, and real-time monitoring dashboard",
-  "version": "5.7.0",
+  "name": "Claw-Swarm V7.0",
+  "description": "蜂群智能协作引擎 — Swarm intelligence engine with hybrid-architecture: fork() child process isolation, IPC bridge, worker thread pool, 6-layer architecture, bio-inspired multi-agent orchestration, adaptive arbitration, vector retrieval, Shapley credit, SNA metrics, dual-process routing, signal auto-calibration, webhook relay, tool consolidation (9→3), DAG cascade, closed-loop actuation, speculative execution, evidence gate, budget degradation, persona evolution, and real-time monitoring dashboard",
+  "version": "7.0.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": true,
@@ -10,6 +10,16 @@
       "dbPath": {
         "type": "string",
         "description": "Path to the SQLite database file. If omitted, defaults to <dataDir>/claw-swarm.db"
+      },
+      "architecture": {
+        "type": "object",
+        "description": "V6.0 Architecture settings (process model, worker pool, IPC)",
+        "properties": {
+          "mode": { "type": "string", "default": "hybrid", "description": "hybrid (fork+workers) or legacy (single-process)" },
+          "workerPoolSize": { "type": "number", "default": 4 },
+          "ipcTimeoutMs": { "type": "number", "default": 5000 },
+          "coreRestartMaxRetries": { "type": "number", "default": 3 }
+        }
       },
       "pheromone": {
         "type": "object",
@@ -54,6 +64,114 @@
         "description": "V5.4 Swarm Decision Empowerment — adaptive advisory with 4-state arbitration",
         "properties": {
           "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "embedding": {
+        "type": "object",
+        "description": "V6.0 Dual-mode embedding engine (local ONNX or API)",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "mode": { "type": "string", "default": "local" },
+          "localModel": { "type": "string", "default": "Xenova/all-MiniLM-L6-v2" },
+          "dimensions": { "type": "number", "default": 384 }
+        }
+      },
+      "vectorIndex": {
+        "type": "object",
+        "description": "V6.0 HNSW vector index settings",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "maxElements": { "type": "number", "default": 50000 },
+          "metric": { "type": "string", "default": "cos" }
+        }
+      },
+      "signalCalibrator": {
+        "type": "object",
+        "description": "V6.0 MI-based signal auto-calibration",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "calibrationIntervalTurns": { "type": "number", "default": 100 },
+          "floor": { "type": "number", "default": 0.03 },
+          "cap": { "type": "number", "default": 0.40 }
+        }
+      },
+      "shapley": {
+        "type": "object",
+        "description": "V6.0 Monte Carlo Shapley credit assignment",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "monteCarloSamples": { "type": "number", "default": 100 }
+        }
+      },
+      "sna": {
+        "type": "object",
+        "description": "V6.0 Social Network Analysis metrics",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "computeIntervalTurns": { "type": "number", "default": 50 }
+        }
+      },
+      "dualProcess": {
+        "type": "object",
+        "description": "V6.0 System 1/2 dual-process routing",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "hybridRetrieval": {
+        "type": "object",
+        "description": "V6.0 6-dimensional hybrid retrieval formula",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "weights": {
+            "type": "object",
+            "properties": {
+              "semantic": { "type": "number", "default": 0.30 },
+              "temporal": { "type": "number", "default": 0.20 },
+              "importance": { "type": "number", "default": 0.15 },
+              "confidence": { "type": "number", "default": 0.10 },
+              "frequency": { "type": "number", "default": 0.10 },
+              "context": { "type": "number", "default": 0.15 }
+            }
+          }
+        }
+      },
+      "failureModeAnalyzer": {
+        "type": "object",
+        "description": "V6.0 Failure root-cause classification (5 categories)",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "budgetForecaster": {
+        "type": "object",
+        "description": "V6.0 Token budget linear-regression forecasting",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "exhaustionWarningMultiplier": { "type": "number", "default": 1.2 }
+        }
+      },
+      "qualityAudit": {
+        "type": "object",
+        "description": "V6.0 Quality assessment audit trail",
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "reputationDecay": {
+        "type": "object",
+        "description": "V6.0 Exponential reputation decay with half-life",
+        "properties": {
+          "halfLifeDays": { "type": "number", "default": 14 }
+        }
+      },
+      "metricsAlerting": {
+        "type": "object",
+        "description": "V6.0 Threshold-based metrics alerting",
+        "properties": {
+          "errorRateThreshold": { "type": "number", "default": 0.30 },
+          "latencyP95Threshold": { "type": "number", "default": 10000 },
+          "dlqThreshold": { "type": "number", "default": 20 }
         }
       }
     }

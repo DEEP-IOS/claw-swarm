@@ -33,6 +33,13 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.js'],
       exclude: ['src/L6-monitoring/dashboard.html'],
+      reporter: ['text', 'json-summary', 'html'],
+      thresholds: {
+        lines: 60,
+        statements: 60,
+        functions: 70,
+        branches: 65,
+      },
     },
   },
 });

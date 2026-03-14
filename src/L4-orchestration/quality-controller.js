@@ -150,7 +150,7 @@ export class QualityController {
    * @param {Object} [deps.config] - 质量控制配置 / Quality control config
    * @param {Object} [deps.logger] - 日志器 / Logger
    */
-  constructor({ taskRepo, agentRepo, messageBus, config = {}, logger = console }) {
+  constructor({ taskRepo, agentRepo, messageBus, config = {}, logger = console, db }) {
     /** @type {import('../L1-infrastructure/database/repositories/task-repo.js').TaskRepository} */
     this._taskRepo = taskRepo;
 
@@ -159,6 +159,9 @@ export class QualityController {
 
     /** @type {import('../L2-communication/message-bus.js').MessageBus} */
     this._messageBus = messageBus;
+
+    /** @type {Object|null} V6.0: DatabaseManager for quality_audit table */
+    this._db = db || null;
 
     /** @type {Object} 质量控制配置 / Quality control configuration */
     this._config = {
@@ -294,6 +297,9 @@ export class QualityController {
 
     // 存储评估记录 / Store evaluation record
     this.recordEvaluation(taskId, record);
+
+    // V6.0: 写入质量审计链 / Write to quality audit trail
+    this._writeAuditRecord(record);
 
     // 更新失败计数 / Update failure count
     if (verdict === QualityVerdict.FAIL) {
@@ -864,11 +870,26 @@ export class QualityController {
    * @param {EvaluationRecord} evaluation
    */
   recordEvaluation(taskId, evaluation) {
+    // V7.0-fix: auto-hook 路径可能缺少 id/tier, 补充默认值
+    // V7.0-fix: auto-hook path may lack id/tier, supply defaults
+    const record = {
+      id: evaluation.id || nanoid(),
+      tier: evaluation.tier || 'self-review',
+      score: typeof evaluation.score === 'number' ? evaluation.score : 0,
+      verdict: evaluation.verdict || 'unknown',
+      dimensions: evaluation.dimensions || [],
+      feedback: evaluation.feedback || [],
+      reviewerId: evaluation.reviewerId || null,
+      passed: evaluation.passed,
+      source: evaluation.source || null,
+      timestamp: evaluation.timestamp || Date.now(),
+    };
+
     // 内存存储 / Memory storage
     if (!this._evaluationHistory.has(taskId)) {
       this._evaluationHistory.set(taskId, []);
     }
-    this._evaluationHistory.get(taskId).push(evaluation);
+    this._evaluationHistory.get(taskId).push(record);
 
     // LRU 驱逐: 超出最大跟踪任务数时, 删除最早的任务条目
     // LRU eviction: when exceeding max tracked tasks, remove oldest task entries
@@ -881,17 +902,17 @@ export class QualityController {
     // 数据库持久化 (通过 checkpoint) / DB persistence (via checkpoint)
     try {
       this._taskRepo.saveCheckpoint(
-        evaluation.id,
+        record.id,
         taskId,
-        `quality_${evaluation.tier}`,
+        `quality_${record.tier}`,
         'quality_evaluation',
         {
-          tier: evaluation.tier,
-          score: evaluation.score,
-          verdict: evaluation.verdict,
-          dimensions: evaluation.dimensions,
-          feedback: evaluation.feedback,
-          reviewerId: evaluation.reviewerId,
+          tier: record.tier,
+          score: record.score,
+          verdict: record.verdict,
+          dimensions: record.dimensions,
+          feedback: record.feedback,
+          reviewerId: record.reviewerId,
         },
       );
     } catch (err) {
@@ -1050,5 +1071,74 @@ export class QualityController {
     this.clearAllHistory();
     this._scoringFunctions.clear();
     this._logger.info?.('[QualityController] 已销毁 / Destroyed');
+  }
+
+  // --------------------------------------------------------------------------
+  // V6.0: 质量审计链 / Quality Audit Trail
+  // --------------------------------------------------------------------------
+
+  /**
+   * 写入质量审计记录 / Write quality audit record
+   *
+   * @param {EvaluationRecord} record
+   * @private
+   */
+  _writeAuditRecord(record) {
+    if (!this._db) return;
+
+    try {
+      const rubricScores = JSON.stringify(
+        record.dimensions.map((d) => ({ dimension: d.dimension, score: d.score })),
+      );
+      const conflictNotes = record.feedback?.length > 0 ? record.feedback.join('; ') : null;
+
+      this._db.run?.(
+        `INSERT INTO quality_audit (task_id, tier, rubric_scores, overall_score, verdict, conflict_notes, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        record.taskId,
+        record.tier,
+        rubricScores,
+        record.score,
+        record.verdict,
+        conflictNotes ? conflictNotes.slice(0, 500) : null,
+        record.timestamp || Date.now(),
+      );
+    } catch {
+      // non-fatal — audit 写入不应影响评估结果
+    }
+  }
+
+  /**
+   * V6.0: 查询质量审计链 / Query quality audit trail
+   *
+   * @param {Object} [options]
+   * @param {string} [options.taskId] - 按任务 ID 过滤
+   * @param {number} [options.since] - 起始时间戳
+   * @param {number} [options.limit=50]
+   * @returns {Array<Object>}
+   */
+  getAuditTrail(options = {}) {
+    if (!this._db) return [];
+
+    try {
+      let sql = 'SELECT * FROM quality_audit WHERE 1=1';
+      const params = [];
+
+      if (options.taskId) {
+        sql += ' AND task_id = ?';
+        params.push(options.taskId);
+      }
+      if (options.since) {
+        sql += ' AND timestamp >= ?';
+        params.push(options.since);
+      }
+
+      sql += ' ORDER BY timestamp DESC LIMIT ?';
+      params.push(options.limit || 50);
+
+      return this._db.all?.(sql, ...params) || [];
+    } catch {
+      return [];
+    }
   }
 }

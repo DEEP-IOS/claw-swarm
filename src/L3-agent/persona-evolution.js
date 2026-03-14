@@ -85,6 +85,9 @@ export class PersonaEvolution {
      */
     this._evolutionLog = [];
 
+    /** V7.0 §25: 最近 promoted 的 capsule / Latest promoted capsule */
+    this._latestPromotedCapsule = null;
+
     /**
      * 人格配置缓存 / Persona config cache
      * Map<personaId, config>
@@ -426,6 +429,22 @@ export class PersonaEvolution {
       promotedAt: Date.now(),
     };
 
+    // V7.0 §25: 生成进化后的指令片段 / Generate evolved instruction snippet
+    // 胜出的 capsule 产生可注入 before_agent_start 的指令
+    // Winning capsule produces instructions injectable in before_agent_start
+    const configDesc = config ? Object.entries(config)
+      .filter(([, v]) => typeof v === 'number')
+      .map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(2) : v}`)
+      .join(', ') : '';
+    capsule.evolvedInstructions =
+      `[Evolved Persona: ${personaId}] winRate=${stats.successRate.toFixed(2)}, ` +
+      `quality=${(stats.avgQuality || 0).toFixed(2)}` +
+      (configDesc ? `, config: ${configDesc}` : '');
+
+    // V7.0 §25: 存储为最近 promoted capsule (供 before_agent_start 查询)
+    // Store as latest promoted capsule (for before_agent_start query)
+    this._latestPromotedCapsule = capsule;
+
     // 持久化 (通过 agentRepo 或消息总线通知外部存储)
     // Persist via agentRepo or notify external storage via message bus
     this._messageBus.publish?.('persona.capsule.promoted', capsule);
@@ -438,6 +457,19 @@ export class PersonaEvolution {
     );
 
     return capsuleId;
+  }
+
+  /**
+   * V7.0 §25: 获取最近 promoted 的 capsule 的进化指令
+   * V7.0 §25: Get evolved instructions from latest promoted capsule
+   *
+   * 用于 before_agent_start 注入进化后的行为指令。
+   * Used in before_agent_start to inject evolved behavior instructions.
+   *
+   * @returns {string|null}
+   */
+  getEvolvedInstructions() {
+    return this._latestPromotedCapsule?.evolvedInstructions || null;
   }
 
   // --------------------------------------------------------------------------

@@ -103,6 +103,19 @@ export class CriticalPathAnalyzer {
      * @type {boolean}
      */
     this._analyzed = false;
+
+    /** @type {import('../L1-infrastructure/worker-pool.js').WorkerPool | null} V6.0 Worker 委托 */
+    this._workerPool = null;
+  }
+
+  /**
+   * V6.0: 设置 Worker 线程池
+   * V6.0: Set worker pool for CPM delegation
+   *
+   * @param {import('../L1-infrastructure/worker-pool.js').WorkerPool} pool
+   */
+  setWorkerPool(pool) {
+    this._workerPool = pool;
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,6 +283,55 @@ export class CriticalPathAnalyzer {
     this._criticalPath = [];
     this._totalDuration = 0;
     this._analyzed = false;
+  }
+
+  /**
+   * V6.0: Worker 委托版分析 (异步)
+   * V6.0: Worker-delegated CPM analysis (async)
+   *
+   * @param {RoleInput[]} roles
+   * @returns {Promise<AnalysisResult>}
+   */
+  async analyzeAsync(roles) {
+    if (!this._workerPool) {
+      return this.analyze(roles);
+    }
+
+    try {
+      const normalizedRoles = roles.map((r) => ({
+        name: r.name,
+        duration: r.duration || 1,
+        dependencies: r.dependencies || r.dependsOn || [],
+      }));
+
+      const result = await this._workerPool.submit('criticalPath', {
+        roles: normalizedRoles,
+      });
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // 更新内部缓存 / Update internal caches
+      this.reset();
+      this._criticalPath = result.criticalPath;
+      this._totalDuration = result.totalDuration;
+      for (const [name, analysis] of Object.entries(result.roleAnalysis)) {
+        this._roleAnalysis.set(name, analysis);
+      }
+      this._analyzed = true;
+
+      return {
+        criticalPath: result.criticalPath,
+        totalDuration: result.totalDuration,
+        roleAnalysis: this._roleAnalysis,
+        criticalPathLength: result.criticalPath.length,
+        parallelismFactor: result.parallelismFactor,
+      };
+    } catch (err) {
+      this._logger.warn?.(`[CriticalPath] Worker analyze failed, fallback to sync: ${err.message}`);
+      return this.analyze(roles);
+    }
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

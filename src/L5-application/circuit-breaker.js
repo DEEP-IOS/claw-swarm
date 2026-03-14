@@ -66,6 +66,7 @@ export class CircuitBreaker {
     successThreshold = DEFAULTS.successThreshold,
     resetTimeoutMs = DEFAULTS.resetTimeoutMs,
     logger,
+    messageBus,
   } = {}) {
     /** @type {number} 失败阈值 / Failure threshold */
     this._failureThreshold = failureThreshold;
@@ -78,6 +79,9 @@ export class CircuitBreaker {
 
     /** @type {Object} */
     this._logger = logger || console;
+
+    /** @type {Object|null} V7.1: MessageBus for transition events */
+    this._messageBus = messageBus || null;
 
     // ── 内部状态 / Internal state ────────────────────────────────────────
 
@@ -218,6 +222,73 @@ export class CircuitBreaker {
     this._logger.info?.('[CircuitBreaker] 手动重置为 CLOSED / Manually reset to CLOSED');
   }
 
+  // ━━━ V7.1: 公开状态记录 / Public State Recording ━━━
+
+  /**
+   * 记录成功执行（供外部调用，如 ToolResilience）
+   * Record successful execution (called externally, e.g. by ToolResilience)
+   */
+  recordSuccess() {
+    this._onSuccess();
+  }
+
+  /**
+   * 记录失败执行（供外部调用，如 ToolResilience）
+   * Record failed execution (called externally, e.g. by ToolResilience)
+   */
+  recordFailure() {
+    this._onFailure();
+  }
+
+  // ━━━ V6.0: 状态持久化 / State Persistence ━━━
+
+  /**
+   * V6.0: 导出状态快照 (用于持久化到 breaker_state 表)
+   * V6.0: Export state snapshot (for persisting to breaker_state table)
+   *
+   * @returns {Object} 可序列化的状态快照 / Serializable state snapshot
+   */
+  exportState() {
+    return {
+      state: this._state,
+      failures: this._failures,
+      successes: this._successes,
+      totalCalls: this._totalCalls,
+      lastFailure: this._lastFailure,
+    };
+  }
+
+  /**
+   * V6.0: 从持久化快照恢复状态
+   * V6.0: Restore state from persisted snapshot
+   *
+   * @param {Object} snapshot - 持久化的状态快照 / Persisted state snapshot
+   */
+  restoreState(snapshot) {
+    if (!snapshot) return;
+
+    // 仅恢复 CLOSED 和 HALF_OPEN, OPEN 状态需要检查超时
+    // Only restore CLOSED and HALF_OPEN; OPEN requires timeout check
+    if (snapshot.state === State.CLOSED || snapshot.state === State.HALF_OPEN) {
+      this._state = snapshot.state;
+    } else if (snapshot.state === State.OPEN && snapshot.lastFailure) {
+      // OPEN 状态: 检查是否已超时应转为 HALF_OPEN
+      const elapsed = Date.now() - snapshot.lastFailure;
+      if (elapsed >= this._resetTimeout) {
+        this._state = State.HALF_OPEN;
+      } else {
+        this._state = State.OPEN;
+      }
+    }
+
+    this._failures = snapshot.failures || 0;
+    this._successes = snapshot.successes || 0;
+    this._totalCalls = snapshot.totalCalls || 0;
+    this._lastFailure = snapshot.lastFailure || null;
+
+    this._logger.info?.(`[CircuitBreaker] 状态恢复为 ${this._state} / State restored to ${this._state}`);
+  }
+
   // ━━━ 内部方法 / Internal Methods ━━━
 
   /**
@@ -309,6 +380,17 @@ export class CircuitBreaker {
     this._state = newState;
 
     this._logger.debug?.(`[CircuitBreaker] 状态转换 / State transition: ${oldState} -> ${newState}`);
+
+    // V7.1: Publish transition event to SSE pipeline
+    try {
+      this._messageBus?.publish?.('circuit_breaker.transition', {
+        from: oldState,
+        to: newState,
+        failures: this._failures,
+        totalCalls: this._totalCalls,
+        timestamp: Date.now(),
+      });
+    } catch { /* non-fatal */ }
   }
 }
 

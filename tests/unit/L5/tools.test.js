@@ -316,9 +316,10 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
   // 2. swarm_query 工具测试 / swarm_query Tool Tests
   // --------------------------------------------------------------------------
   describe('swarm_query / 蜂群查询工具', () => {
-    it('status action should return swarm status / status 动作应返回蜂群状态', async () => {
+    it('status scope should return swarm status / status scope 应返回蜂群状态', async () => {
       const tool = createQueryTool({ engines, logger: silentLogger });
-      const result = await tool.handler({ action: 'status' });
+      // V6.3: action → scope
+      const result = await tool.handler({ scope: 'status' });
 
       expect(result.success).toBe(true);
       expect(result.data).toBeDefined();
@@ -328,26 +329,26 @@ describe('L5 Tool Factories / L5 工具工厂', () => {
       expect(result.data.timestamp).toBeDefined();
     });
 
-    it('agent action should return agent info / agent 动作应返回代理信息', async () => {
+    it('agent scope should return agent info / agent scope 应返回代理信息', async () => {
       const tool = createQueryTool({ engines, logger: silentLogger });
-      const result = await tool.handler({ action: 'agent', agentId: 'a1' });
+      const result = await tool.handler({ scope: 'agent', agentId: 'a1' });
 
       expect(result.success).toBe(true);
       expect(result.data).toBeDefined();
       expect(result.data.id).toBe('a1');
     });
 
-    it('agent action without agentId should fail / 无 agentId 的 agent 动作应失败', async () => {
+    it('agent scope without agentId should fail / 无 agentId 的 agent scope 应失败', async () => {
       const tool = createQueryTool({ engines, logger: silentLogger });
-      const result = await tool.handler({ action: 'agent' });
+      const result = await tool.handler({ scope: 'agent' });
 
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();
     });
 
-    it('agents action should return agent list / agents 动作应返回代理列表', async () => {
+    it('agents scope should return agent list / agents scope 应返回代理列表', async () => {
       const tool = createQueryTool({ engines, logger: silentLogger });
-      const result = await tool.handler({ action: 'agents' });
+      const result = await tool.handler({ scope: 'agents' });
 
       expect(result.success).toBe(true);
       expect(result.data).toBeDefined();

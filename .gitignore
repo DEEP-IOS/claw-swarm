@@ -46,5 +46,14 @@ test-reports/
 # ── Windows artifacts / Windows 产物 ─────────────────────────
 nul
 
+# ── Runtime / 运行时产物 ──────────────────────────────────────
+.gateway.pid
+
+# ── Internal audit / 内部审计 ────────────────────────────────
+.sisyphus/
+
+# ── Legacy / 旧版文件 ────────────────────────────────────────
+internal/
+
 # ── Local AI tool config / AI 工具本地配置 ───────────────────
-.cl[a]ude/
+.ai-tool-config/

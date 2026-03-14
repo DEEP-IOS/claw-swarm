@@ -32,6 +32,7 @@ import { EventTopics, wrapEvent } from '../event-catalog.js';
 /** 任务状态枚举 / Task state enum */
 export const TaskState = Object.freeze({
   PENDING: 'pending',
+  SPAWNING: 'spawning',    // V6.3: 正在 spawn, 防止竞态重复 spawn
   AUCTIONING: 'auctioning',
   ASSIGNED: 'assigned',
   EXECUTING: 'executing',
@@ -39,16 +40,20 @@ export const TaskState = Object.freeze({
   FAILED: 'failed',
   DEAD_LETTER: 'dead_letter',
   TAINTED: 'tainted',
+  CANCELLED: 'cancelled',  // V6.3: 用户取消
+  INTERRUPTED: 'interrupted',  // V6.3 阻塞7: Gateway 重启中断
 });
 
 /** 合法状态转换 / Valid state transitions */
 const VALID_TRANSITIONS = {
-  [TaskState.PENDING]: [TaskState.AUCTIONING, TaskState.ASSIGNED],
-  [TaskState.AUCTIONING]: [TaskState.ASSIGNED, TaskState.PENDING],
-  [TaskState.ASSIGNED]: [TaskState.EXECUTING, TaskState.PENDING], // work-steal 可从 assigned 偷回 pending
-  [TaskState.EXECUTING]: [TaskState.COMPLETED, TaskState.FAILED, TaskState.TAINTED],
-  [TaskState.FAILED]: [TaskState.DEAD_LETTER, TaskState.PENDING], // 可重试回 pending
-  [TaskState.TAINTED]: [TaskState.PENDING, TaskState.DEAD_LETTER],
+  [TaskState.PENDING]: [TaskState.SPAWNING, TaskState.AUCTIONING, TaskState.ASSIGNED, TaskState.CANCELLED],
+  [TaskState.SPAWNING]: [TaskState.ASSIGNED, TaskState.EXECUTING, TaskState.FAILED, TaskState.CANCELLED, TaskState.INTERRUPTED],  // V6.3: spawn 后进入 ASSIGNED/EXECUTING 或失败/中断
+  [TaskState.AUCTIONING]: [TaskState.ASSIGNED, TaskState.PENDING, TaskState.CANCELLED],
+  [TaskState.ASSIGNED]: [TaskState.EXECUTING, TaskState.PENDING, TaskState.CANCELLED, TaskState.INTERRUPTED],
+  [TaskState.EXECUTING]: [TaskState.COMPLETED, TaskState.FAILED, TaskState.TAINTED, TaskState.CANCELLED, TaskState.INTERRUPTED],
+  [TaskState.FAILED]: [TaskState.DEAD_LETTER, TaskState.PENDING, TaskState.CANCELLED],
+  [TaskState.TAINTED]: [TaskState.PENDING, TaskState.DEAD_LETTER, TaskState.CANCELLED],
+  [TaskState.INTERRUPTED]: [TaskState.PENDING, TaskState.CANCELLED],  // V6.3 阻塞7: 可恢复或取消
 };
 
 /** 默认拍卖超时 (ms) / Default auction timeout */
@@ -227,7 +232,10 @@ export class TaskDAGEngine {
       `[TaskDAGEngine] DAG created: ${dagId}, ${nodes.length} nodes`
     );
 
-    // 5. 启动就绪任务 / Start ready tasks
+    // 5. V6.3 阻塞7: 初始持久化 DAG / Initial DAG persistence
+    this.persistDAG(dagId);
+
+    // 6. 启动就绪任务 / Start ready tasks
     this._scheduleReadyTasks(dagId);
 
     return { success: true, dagId };
@@ -255,6 +263,12 @@ export class TaskDAGEngine {
 
     const node = entry.node;
     const validTransitions = VALID_TRANSITIONS[node.state];
+
+    // V6.3: 同状态转换跳过 (no-op) / Same-state transition skip (no-op)
+    if (node.state === newState) {
+      this._logger.debug?.(`[TaskDAGEngine] Same-state skip: ${node.state} for ${key}`);
+      return true;
+    }
 
     if (!validTransitions || !validTransitions.includes(newState)) {
       this._logger.warn?.(
@@ -303,6 +317,18 @@ export class TaskDAGEngine {
     // 如果任务完成, 调度下游就绪任务 / If task completed, schedule downstream ready tasks
     if (newState === TaskState.COMPLETED) {
       this._scheduleReadyTasks(dagId);
+    }
+
+    // V6.3 阻塞7: 在关键状态转换时持久化 DAG 快照
+    // Persist DAG snapshot on key state transitions
+    if (
+      newState === TaskState.COMPLETED ||
+      newState === TaskState.FAILED ||
+      newState === TaskState.CANCELLED ||
+      newState === TaskState.INTERRUPTED ||
+      newState === TaskState.DEAD_LETTER
+    ) {
+      this.persistDAG(dagId);
     }
 
     return true;
@@ -631,6 +657,77 @@ export class TaskDAGEngine {
   }
 
   /**
+   * V6.0: 重试死信任务 (指数退避)
+   * V6.0: Retry dead letter tasks (exponential backoff)
+   *
+   * @param {Object} [options]
+   * @param {number} [options.maxRetries=3] - 最大重试次数 / Max retries
+   * @param {number} [options.baseDelayMs=30000] - 基础延迟 / Base delay
+   * @returns {{retried: number, exhausted: number, skipped: number}}
+   */
+  retryDeadLetterTasks({ maxRetries = 3, baseDelayMs = 30000 } = {}) {
+    const items = [...this._deadLetterQueue];
+    let retried = 0;
+    let exhausted = 0;
+    let skipped = 0;
+
+    const now = Date.now();
+
+    for (const item of items) {
+      const retryCount = item._retryCount || 0;
+
+      // 已达最大重试次数 / Max retries reached
+      if (retryCount >= maxRetries) {
+        exhausted++;
+        this._messageBus?.publish?.('task.dead_letter.exhausted', {
+          dagId: item.dagId,
+          taskNodeId: item.taskNodeId,
+          retries: retryCount,
+        });
+        continue;
+      }
+
+      // 退避检查 / Backoff check
+      const backoffDelay = baseDelayMs * Math.pow(2, retryCount);
+      const lastAttempt = item._lastRetryAt || item.createdAt || 0;
+      if (now - lastAttempt < backoffDelay) {
+        skipped++;
+        continue;
+      }
+
+      // 重试: 重新提交任务 / Retry: resubmit task
+      item._retryCount = retryCount + 1;
+      item._lastRetryAt = now;
+
+      try {
+        const dag = this._activeDags.get(item.dagId);
+        if (dag) {
+          const node = dag.nodes.get(item.taskNodeId);
+          if (node && node.status === 'failed') {
+            node.status = 'pending';
+            node.error = null;
+            retried++;
+
+            this._messageBus?.publish?.('task.dead_letter.retried', {
+              dagId: item.dagId,
+              taskNodeId: item.taskNodeId,
+              retryCount: item._retryCount,
+            });
+
+            // 从 DLQ 移除 / Remove from DLQ
+            const idx = this._deadLetterQueue.indexOf(item);
+            if (idx !== -1) this._deadLetterQueue.splice(idx, 1);
+          }
+        }
+      } catch (err) {
+        this._logger?.warn?.(`[TaskDAGEngine] DLQ retry failed: ${err.message}`);
+      }
+    }
+
+    return { retried, exhausted, skipped };
+  }
+
+  /**
    * 获取引擎统计 / Get engine statistics
    *
    * @returns {Object}
@@ -641,14 +738,16 @@ export class TaskDAGEngine {
     let executingNodes = 0;
     let completedNodes = 0;
     let failedNodes = 0;
+    let interruptedNodes = 0;
 
     for (const dag of this._activeDags.values()) {
       for (const node of dag.nodes.values()) {
         totalNodes++;
         if (node.state === TaskState.PENDING) pendingNodes++;
-        else if (node.state === TaskState.EXECUTING) executingNodes++;
+        else if (node.state === TaskState.SPAWNING || node.state === TaskState.EXECUTING) executingNodes++;
         else if (node.state === TaskState.COMPLETED) completedNodes++;
         else if (node.state === TaskState.FAILED || node.state === TaskState.DEAD_LETTER) failedNodes++;
+        else if (node.state === TaskState.INTERRUPTED) interruptedNodes++;
       }
     }
 
@@ -659,6 +758,7 @@ export class TaskDAGEngine {
       executingNodes,
       completedNodes,
       failedNodes,
+      interruptedNodes,
       deadLetterQueueSize: this._deadLetterQueue.length,
       agentQueues: this._agentQueues.size,
     };
@@ -713,6 +813,124 @@ export class TaskDAGEngine {
   // ━━━ 生命周期 / Lifecycle ━━━
 
   /**
+   * V6.3: 取消 DAG 中所有未完成节点
+   * Cancel all incomplete nodes in a DAG
+   *
+   * @param {string} dagId
+   * @returns {{ cancelled: number, alreadyDone: number }}
+   */
+  cancelDAG(dagId) {
+    const dag = this._activeDags.get(dagId);
+    if (!dag) return { cancelled: 0, alreadyDone: 0 };
+
+    let cancelled = 0;
+    let alreadyDone = 0;
+
+    for (const [nodeId, node] of dag.nodes) {
+      if (node.state === TaskState.COMPLETED || node.state === TaskState.DEAD_LETTER || node.state === TaskState.CANCELLED) {
+        alreadyDone++;
+        continue;
+      }
+
+      // 尝试状态转换到 CANCELLED / Try to transition to CANCELLED
+      const validNext = VALID_TRANSITIONS[node.state];
+      if (validNext && validNext.includes(TaskState.CANCELLED)) {
+        node.state = TaskState.CANCELLED;
+        node.completedAt = Date.now();
+        node.error = 'Cancelled by user';
+        cancelled++;
+      }
+    }
+
+    dag.status = 'cancelled';
+
+    this._messageBus?.publish?.(
+      'dag.cancelled',
+      wrapEvent('dag.cancelled', {
+        dagId,
+        cancelled,
+        alreadyDone,
+        timestamp: Date.now(),
+      }, 'task-dag-engine')
+    );
+
+    // V6.3 阻塞7: 持久化取消状态 / Persist cancelled state
+    this.persistDAG(dagId);
+
+    this._logger.info?.(
+      `[TaskDAGEngine] DAG cancelled: ${dagId}, cancelled=${cancelled}, alreadyDone=${alreadyDone}`
+    );
+
+    return { cancelled, alreadyDone };
+  }
+
+  /**
+   * V6.3: 获取 DAG 中所有就绪节点 (依赖已完成且自身 PENDING)
+   * Get all ready nodes in a DAG (dependencies completed, self is PENDING)
+   *
+   * @param {string} dagId
+   * @returns {Array<{ nodeId: string, node: Object }>}
+   */
+  getReadyNodes(dagId) {
+    const dag = this._activeDags.get(dagId);
+    if (!dag) return [];
+
+    const readyNodes = [];
+    for (const [nodeId, node] of dag.nodes) {
+      if (node.state !== TaskState.PENDING) continue;
+
+      const allDepsComplete = node.deps.every(depId => {
+        const dep = dag.nodes.get(depId);
+        return dep && dep.state === TaskState.COMPLETED;
+      });
+
+      if (allDepsComplete) {
+        readyNodes.push({ nodeId, node });
+      }
+    }
+
+    // 按关键路径优先 + slack 升序排序
+    // Sort by critical path priority + slack ascending
+    readyNodes.sort((a, b) => {
+      if (a.node.isCritical && !b.node.isCritical) return -1;
+      if (!a.node.isCritical && b.node.isCritical) return 1;
+      return a.node.slack - b.node.slack;
+    });
+
+    return readyNodes;
+  }
+
+  /**
+   * V6.3: 原子地 claim 所有就绪节点 — PENDING→SPAWNING 原子转换
+   * 防止并发 subagent_ended 处理器重复 spawn 同一节点。
+   *
+   * V6.3: Atomically claim all ready nodes — PENDING→SPAWNING atomic transition.
+   * Prevents concurrent subagent_ended handlers from spawning the same node twice.
+   *
+   * @param {string} dagId
+   * @returns {Array<{ nodeId: string, node: Object }>} 成功 claim 的节点 / Successfully claimed nodes
+   */
+  claimReadyNodes(dagId) {
+    const readyNodes = this.getReadyNodes(dagId);
+    const claimed = [];
+
+    for (const { nodeId, node } of readyNodes) {
+      // 原子检查: 只有仍是 PENDING 的才能 claim
+      // Atomic check: only PENDING nodes can be claimed
+      if (node.state === TaskState.PENDING) {
+        try {
+          this.transitionState(dagId, nodeId, TaskState.SPAWNING);
+          claimed.push({ nodeId, node });
+        } catch {
+          // 另一个并发处理器已经 claim 了这个节点 / Another handler already claimed this node
+        }
+      }
+    }
+
+    return claimed;
+  }
+
+  /**
    * 移除已完成的 DAG
    * Remove a completed DAG
    *
@@ -727,14 +945,263 @@ export class TaskDAGEngine {
       this._taskIndex.delete(`${dagId}:${nodeId}`);
     }
 
+    // V6.3 阻塞7: 清理持久化快照 / Clean up persisted snapshot
+    this.deletePersistedDAG(dagId);
+
     this._activeDags.delete(dagId);
     this._logger.info?.(`[TaskDAGEngine] DAG removed: ${dagId}`);
+  }
+
+  // ━━━ V6.3 阻塞7: DAG 持久化 / DAG Persistence ━━━
+
+  /**
+   * 持久化 DAG 快照到 SQLite
+   * Persist DAG snapshot to SQLite
+   *
+   * @param {string} dagId
+   */
+  persistDAG(dagId) {
+    if (!this._db) return;
+    const dag = this._activeDags.get(dagId);
+    if (!dag) return;
+
+    try {
+      // 序列化节点 (Map → Array of plain objects)
+      const nodesArray = [];
+      for (const [nodeId, node] of dag.nodes) {
+        nodesArray.push({
+          id: nodeId,
+          agent: node.agent,
+          deps: node.deps,
+          state: node.state,
+          assignedAgent: node.assignedAgent,
+          retryCount: node.retryCount,
+          result: node.result,
+          error: node.error,
+          startedAt: node.startedAt,
+          completedAt: node.completedAt,
+          estimatedDuration: node.estimatedDuration,
+          isCritical: node.isCritical,
+          slack: node.slack,
+          // V6.3: 保存 roleName/description 用于恢复 spawn
+          roleName: node.roleName,
+          description: node.description,
+          priority: node.priority,
+          modelId: node.modelId,
+        });
+      }
+
+      const nodesJson = JSON.stringify(nodesArray);
+      const metadataJson = JSON.stringify(dag.metadata || {});
+      const now = Date.now();
+
+      this._db.prepare('dag_persist', `
+        INSERT INTO dag_snapshots (dag_id, status, nodes_json, metadata_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(dag_id) DO UPDATE SET
+          status = excluded.status,
+          nodes_json = excluded.nodes_json,
+          metadata_json = excluded.metadata_json,
+          updated_at = excluded.updated_at
+      `).run(dagId, dag.status, nodesJson, metadataJson, dag.createdAt || now, now);
+
+      this._logger.debug?.(`[TaskDAGEngine] DAG persisted: ${dagId}, status=${dag.status}`);
+    } catch (err) {
+      this._logger.warn?.(`[TaskDAGEngine] DAG persist failed: ${dagId}, ${err.message}`);
+    }
+  }
+
+  /**
+   * 持久化所有活跃 DAG (用于 graceful shutdown)
+   * Persist all active DAGs (for graceful shutdown)
+   *
+   * @returns {number} 持久化的 DAG 数量
+   */
+  persistAllDAGs() {
+    let count = 0;
+    for (const dagId of this._activeDags.keys()) {
+      this.persistDAG(dagId);
+      count++;
+    }
+    this._logger.info?.(`[TaskDAGEngine] Persisted ${count} active DAGs`);
+    return count;
+  }
+
+  /**
+   * 从 SQLite 加载持久化的 DAG (用于 Gateway 重启恢复)
+   * Load persisted DAGs from SQLite (for Gateway restart recovery)
+   *
+   * 只加载 status='active' 的 DAG, 并将进行中的节点标记为 INTERRUPTED。
+   * Only loads DAGs with status='active', marks in-progress nodes as INTERRUPTED.
+   *
+   * @returns {{ loaded: number, interrupted: number }}
+   */
+  loadPersistedDAGs() {
+    if (!this._db) return { loaded: 0, interrupted: 0 };
+
+    try {
+      const rows = this._db.prepare('dag_load_active',
+        `SELECT dag_id, status, nodes_json, metadata_json, created_at, updated_at
+         FROM dag_snapshots WHERE status = 'active'`
+      ).all();
+
+      let loaded = 0;
+      let interrupted = 0;
+
+      for (const row of rows) {
+        // 跳过已在内存中的 DAG / Skip DAGs already in memory
+        if (this._activeDags.has(row.dag_id)) continue;
+
+        const nodesArray = JSON.parse(row.nodes_json);
+        const metadata = JSON.parse(row.metadata_json || '{}');
+
+        // 重建 DAG 数据结构 / Rebuild DAG data structure
+        const dag = {
+          id: row.dag_id,
+          nodes: new Map(),
+          createdAt: row.created_at,
+          status: 'active',
+          metadata,
+        };
+
+        for (const nodeDef of nodesArray) {
+          const wasInProgress =
+            nodeDef.state === TaskState.EXECUTING ||
+            nodeDef.state === TaskState.SPAWNING ||
+            nodeDef.state === TaskState.ASSIGNED ||
+            nodeDef.state === TaskState.AUCTIONING;
+
+          const node = {
+            id: nodeDef.id,
+            agent: nodeDef.agent || null,
+            deps: nodeDef.deps || [],
+            estimatedDuration: nodeDef.estimatedDuration || 60000,
+            state: wasInProgress ? TaskState.INTERRUPTED : nodeDef.state,
+            assignedAgent: nodeDef.assignedAgent,
+            retryCount: nodeDef.retryCount || 0,
+            result: nodeDef.result,
+            error: wasInProgress ? 'Gateway restart interrupted execution' : nodeDef.error,
+            startedAt: nodeDef.startedAt,
+            completedAt: wasInProgress ? Date.now() : nodeDef.completedAt,
+            isCritical: nodeDef.isCritical || false,
+            slack: nodeDef.slack || 0,
+            // V6.3: 恢复额外字段
+            roleName: nodeDef.roleName,
+            description: nodeDef.description,
+            priority: nodeDef.priority,
+            modelId: nodeDef.modelId,
+          };
+
+          if (wasInProgress) interrupted++;
+          dag.nodes.set(nodeDef.id, node);
+
+          // 重建任务索引 / Rebuild task index
+          this._taskIndex.set(`${row.dag_id}:${nodeDef.id}`, {
+            dagId: row.dag_id,
+            node,
+          });
+        }
+
+        this._activeDags.set(row.dag_id, dag);
+
+        // 更新持久化状态为 interrupted (如果有中断节点)
+        if (interrupted > 0) {
+          dag.status = 'interrupted';
+          this.persistDAG(row.dag_id);
+        }
+
+        loaded++;
+      }
+
+      if (loaded > 0) {
+        this._logger.info?.(
+          `[TaskDAGEngine] Loaded ${loaded} persisted DAGs, ${interrupted} nodes interrupted`
+        );
+      }
+
+      return { loaded, interrupted };
+    } catch (err) {
+      this._logger.warn?.(`[TaskDAGEngine] DAG load failed: ${err.message}`);
+      return { loaded: 0, interrupted: 0 };
+    }
+  }
+
+  /**
+   * 恢复 INTERRUPTED 的 DAG — 将 INTERRUPTED 节点回退到 PENDING
+   * Resume an INTERRUPTED DAG — revert INTERRUPTED nodes to PENDING
+   *
+   * @param {string} dagId
+   * @returns {{ resumed: number, dagId: string }}
+   */
+  resumeDAG(dagId) {
+    const dag = this._activeDags.get(dagId);
+    if (!dag) return { resumed: 0, dagId, error: 'DAG not found' };
+
+    let resumed = 0;
+    for (const [, node] of dag.nodes) {
+      if (node.state === TaskState.INTERRUPTED) {
+        node.state = TaskState.PENDING;
+        node.error = null;
+        node.completedAt = null;
+        resumed++;
+      }
+    }
+
+    dag.status = 'active';
+    this.persistDAG(dagId);
+
+    this._logger.info?.(`[TaskDAGEngine] DAG resumed: ${dagId}, ${resumed} nodes reverted to PENDING`);
+    return { resumed, dagId };
+  }
+
+  /**
+   * 获取所有 INTERRUPTED 的 DAG 列表
+   * Get list of all interrupted DAGs
+   *
+   * @returns {Array<{ dagId: string, totalNodes: number, interruptedNodes: number, completedNodes: number }>}
+   */
+  getInterruptedDAGs() {
+    const result = [];
+    for (const [dagId, dag] of this._activeDags) {
+      if (dag.status !== 'interrupted') continue;
+
+      let interruptedNodes = 0;
+      let completedNodes = 0;
+      let totalNodes = 0;
+      for (const node of dag.nodes.values()) {
+        totalNodes++;
+        if (node.state === TaskState.INTERRUPTED) interruptedNodes++;
+        if (node.state === TaskState.COMPLETED) completedNodes++;
+      }
+
+      result.push({ dagId, totalNodes, interruptedNodes, completedNodes });
+    }
+    return result;
+  }
+
+  /**
+   * 删除持久化的 DAG 快照 (完成或取消后清理)
+   * Delete persisted DAG snapshot (cleanup after completion/cancellation)
+   *
+   * @param {string} dagId
+   */
+  deletePersistedDAG(dagId) {
+    if (!this._db) return;
+    try {
+      this._db.prepare('dag_delete', 'DELETE FROM dag_snapshots WHERE dag_id = ?').run(dagId);
+      this._logger.debug?.(`[TaskDAGEngine] Persisted DAG deleted: ${dagId}`);
+    } catch (err) {
+      this._logger.warn?.(`[TaskDAGEngine] DAG delete failed: ${dagId}, ${err.message}`);
+    }
   }
 
   /**
    * 销毁引擎 / Destroy engine
    */
   destroy() {
+    // V6.3: 销毁前持久化所有活跃 DAG / Persist all active DAGs before destroy
+    this.persistAllDAGs();
+
     this._activeDags.clear();
     this._taskIndex.clear();
     this._agentQueues.clear();
@@ -1048,7 +1515,7 @@ export class TaskDAGEngine {
 
     let allDone = true;
     for (const node of dag.nodes.values()) {
-      if (node.state !== TaskState.COMPLETED && node.state !== TaskState.DEAD_LETTER) {
+      if (node.state !== TaskState.COMPLETED && node.state !== TaskState.DEAD_LETTER && node.state !== TaskState.CANCELLED) {
         allDone = false;
         break;
       }
@@ -1112,6 +1579,13 @@ export class TaskDAGEngine {
           JSON.stringify(node.params || node.input || {}),
           entry.failureCategory, (entry.error || '').substring(0, 500),
           entry.createdAt
+        );
+        // B4-fix: 清理超过上限的最旧记录，防止 SQLite 无限增长
+        this._db.run(
+          `DELETE FROM dead_letter_tasks WHERE id NOT IN (
+             SELECT id FROM dead_letter_tasks ORDER BY created_at DESC LIMIT ?
+           )`,
+          MAX_DLQ_SIZE
         );
       } catch (err) {
         this._logger.debug?.(`[TaskDAGEngine] DLQ persistence error: ${err.message}`);

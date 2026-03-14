@@ -92,6 +92,19 @@ export class PheromoneEngine {
       evaporated: 0,
       reads: 0,
     };
+
+    /** @type {import('../L1-infrastructure/worker-pool.js').WorkerPool | null} V6.0 Worker 委托 */
+    this._workerPool = null;
+  }
+
+  /**
+   * V6.0: 设置 Worker 线程池 (可选, 用于 decayPass 等批量计算)
+   * V6.0: Set worker pool (optional, for batch computations like decayPass)
+   *
+   * @param {import('../L1-infrastructure/worker-pool.js').WorkerPool} pool
+   */
+  setWorkerPool(pool) {
+    this._workerPool = pool;
   }
 
   // ━━━ 发射 / Emit ━━━
@@ -232,6 +245,45 @@ export class PheromoneEngine {
     return { ...ph, intensity: decayedIntensity };
   }
 
+  /**
+   * V6.3 §4B.4: 获取方向性信息素路径 — 包含 sourceId + type + scope 的完整路径信息
+   * Get directional pheromone trails with full path info (who is doing what)
+   *
+   * @param {Object} [options]
+   * @param {string} [options.scope] - 过滤范围 / Filter by scope
+   * @param {number} [options.limit=5] - 返回数量限制 / Limit
+   * @returns {Array<{ sourceId: string, type: string, scope: string, intensity: number, payload?: any }>}
+   */
+  getDirectionalTrails({ scope, limit = 5 } = {}) {
+    let pheromones = this._repo.getAll();
+
+    if (scope) {
+      pheromones = pheromones.filter(p =>
+        p.targetScope === scope || (p.targetScope || '').startsWith(scope + '/')
+      );
+    }
+
+    // 计算衰减后强度并过滤 / Compute decayed intensity and filter
+    const trails = [];
+    for (const ph of pheromones) {
+      const decayed = this._computeDecayedIntensity(ph);
+      if (decayed >= MIN_INTENSITY) {
+        trails.push({
+          sourceId: ph.sourceId,
+          type: ph.type,
+          scope: ph.targetScope,
+          intensity: decayed,
+          payload: ph.payload,
+        });
+      }
+    }
+
+    // 按强度降序 / Sort by intensity descending
+    trails.sort((a, b) => b.intensity - a.intensity);
+
+    return trails.slice(0, limit);
+  }
+
   // ━━━ 快照 / Snapshot ━━━
 
   /**
@@ -331,17 +383,101 @@ export class PheromoneEngine {
     this._stats.decayed += updates.length;
     this._stats.evaporated += toDelete.length;
 
+    // 构建信息素浓度快照 (按类型聚合) / Build concentration snapshot (aggregate by type)
+    const concentrations = {};
+    const remainingPheromones = allPheromones.filter(p => !toDelete.includes(p.id));
+    for (const ph of remainingPheromones) {
+      const decayed = this._computeDecayedIntensity(ph);
+      if (decayed >= MIN_INTENSITY) {
+        concentrations[ph.type] = Math.max(concentrations[ph.type] || 0, decayed);
+      }
+    }
+
     // 广播衰减完成 / Broadcast decay complete
     this._emit('pheromone.decayPass', {
       updated: updates.length,
       evaporated: toDelete.length,
-      remaining: allPheromones.length - toDelete.length,
+      remaining: remainingPheromones.length,
+      concentrations,
     });
 
     // 清理过期 / Clean expired
     this._repo.deleteExpired(now);
 
     return { updated: updates.length, evaporated: toDelete.length };
+  }
+
+  /**
+   * V6.0: Worker 委托版衰减 (异步)
+   * V6.0: Worker-delegated decay pass (async)
+   *
+   * 如果 WorkerPool 可用, 将衰减计算委托给 aco-worker;
+   * 否则 fallback 到同步 decayPass()。
+   *
+   * If WorkerPool available, delegates decay to aco-worker;
+   * otherwise falls back to synchronous decayPass().
+   *
+   * @returns {Promise<{updated: number, evaporated: number}>}
+   */
+  async decayPassAsync() {
+    if (!this._workerPool) {
+      return this.decayPass();
+    }
+
+    try {
+      const allPheromones = this._repo.getAll();
+      const now = Date.now();
+
+      const result = await this._workerPool.submit('decayPass', {
+        pheromones: allPheromones.map((p) => ({
+          id: p.id,
+          type: p.type,
+          intensity: p.intensity,
+          decayRate: p.decayRate || this._getTypeConfig(p.type).decayRate,
+          updatedAt: p.updatedAt,
+          expiresAt: p.expiresAt,
+          mmasMin: this._getTypeConfig(p.type).mmasMin,
+        })),
+        now,
+        minIntensity: MIN_INTENSITY,
+      });
+
+      // 应用 Worker 结果到 DB / Apply worker results to DB
+      if (result.updated.length > 0) {
+        this._repo.batchUpdateIntensity(result.updated);
+      }
+      for (const id of result.evaporated) {
+        this._repo.delete(id);
+      }
+
+      this._stats.decayed += result.updated.length;
+      this._stats.evaporated += result.evaporated.length;
+
+      // Worker 版也需要浓度快照 / Worker version also needs concentrations
+      const workerConcentrations = {};
+      const workerRemaining = allPheromones.filter(p => !result.evaporated.includes(p.id));
+      for (const ph of workerRemaining) {
+        const decayed = this._computeDecayedIntensity(ph);
+        if (decayed >= MIN_INTENSITY) {
+          workerConcentrations[ph.type] = Math.max(workerConcentrations[ph.type] || 0, decayed);
+        }
+      }
+
+      this._emit('pheromone.decayPass', {
+        updated: result.updated.length,
+        evaporated: result.evaporated.length,
+        remaining: workerRemaining.length,
+        concentrations: workerConcentrations,
+        delegated: 'worker',
+      });
+
+      this._repo.deleteExpired(now);
+
+      return { updated: result.updated.length, evaporated: result.evaporated.length };
+    } catch (err) {
+      this._logger.warn?.(`[PheromoneEngine] Worker decayPass failed, fallback to sync: ${err.message}`);
+      return this.decayPass();
+    }
   }
 
   // ━━━ ACO 轮盘赌选择 / ACO Roulette Wheel Selection ━━━
@@ -545,6 +681,83 @@ export class PheromoneEngine {
     }
 
     return { checked, escalated };
+  }
+
+  // ━━━ V6.1: 信息素传播 / Pheromone Propagation ━━━
+
+  /**
+   * 信息素 hop-by-hop 传播 / Pheromone hop-by-hop propagation
+   *
+   * 将信息素从源范围传播到相邻范围, 强度按距离指数衰减。
+   * Spreads pheromone from source scope to adjacent scopes with distance-based decay.
+   *
+   * propagatedIntensity = sourceIntensity × spreadFactor^hop
+   *
+   * @param {Object} params
+   * @param {string} params.type - 信息素类型 / Pheromone type
+   * @param {string} params.sourceScope - 源范围 / Source scope
+   * @param {string[]} params.adjacentScopes - 相邻范围列表 / Adjacent scope list
+   * @param {number} [params.spreadFactor=0.5] - 传播衰减系数 (0-1) / Spread decay factor
+   * @param {number} [params.maxHops=2] - 最大传播跳数 / Max propagation hops
+   * @returns {{ propagated: number, totalScopes: number }}
+   */
+  propagate({ type, sourceScope, adjacentScopes, spreadFactor = 0.5, maxHops = 2 }) {
+    if (!adjacentScopes || adjacentScopes.length === 0) return { propagated: 0, totalScopes: 0 };
+    if (spreadFactor <= 0 || spreadFactor >= 1) return { propagated: 0, totalScopes: 0 };
+
+    // 读取源范围的信息素强度 / Read source scope pheromone intensity
+    const sourcePheromones = this.read(sourceScope, { type });
+    if (sourcePheromones.length === 0) return { propagated: 0, totalScopes: 0 };
+
+    const maxSourceIntensity = Math.max(...sourcePheromones.map(p => p.intensity));
+    let propagated = 0;
+
+    // BFS 传播: 逐跳衰减 / BFS propagation: decay per hop
+    const visited = new Set([sourceScope]);
+    let currentFrontier = adjacentScopes.filter(s => !visited.has(s));
+
+    for (let hop = 1; hop <= maxHops && currentFrontier.length > 0; hop++) {
+      const propagatedIntensity = maxSourceIntensity * Math.pow(spreadFactor, hop);
+      if (propagatedIntensity < 0.01) break; // 低于阈值停止 / Stop below threshold
+
+      for (const scope of currentFrontier) {
+        if (visited.has(scope)) continue;
+        visited.add(scope);
+
+        this.emitPheromone({
+          type,
+          sourceId: 'propagation',
+          targetScope: scope,
+          intensity: propagatedIntensity,
+          payload: { propagatedFrom: sourceScope, hop, spreadFactor },
+        });
+        propagated++;
+      }
+
+      // 下一跳: 当前前沿的相邻范围 (简化: 基于 scope 层级展开)
+      // Next hop: adjacent scopes of current frontier (simplified: scope hierarchy expansion)
+      const nextFrontier = [];
+      for (const scope of currentFrontier) {
+        // 上层 scope: /task/123 → /task
+        const parentScope = scope.substring(0, scope.lastIndexOf('/'));
+        if (parentScope && !visited.has(parentScope)) {
+          nextFrontier.push(parentScope);
+        }
+      }
+      currentFrontier = nextFrontier;
+    }
+
+    if (propagated > 0) {
+      this._emit('pheromone.propagated', {
+        type,
+        sourceScope,
+        propagated,
+        spreadFactor,
+        maxHops,
+      });
+    }
+
+    return { propagated, totalScopes: visited.size };
   }
 
   // ━━━ V5.2: 多类型衰减 / Multi-type Decay ━━━

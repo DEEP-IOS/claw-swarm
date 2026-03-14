@@ -1,4 +1,5 @@
 /**
+ * @deprecated V6.3 — 功能已吸收到 auto-hooks + swarm_query / Absorbed into auto-hooks + swarm_query
  * SwarmSpawnTool -- 蜂群生成工具 / Swarm Spawn Tool
  *
  * V5.1 L5 应用层工具: 创建和管理子代理, 基于 MoE 角色选择。

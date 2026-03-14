@@ -1,4 +1,5 @@
 /**
+ * @deprecated V6.3 — 功能已吸收到 auto-hooks + swarm_query / Absorbed into auto-hooks + swarm_query
  * SwarmPheromoneTool -- 信息素管理工具 / Swarm Pheromone Tool
  *
  * V5.0 L5 应用层工具: 管理信息素信号, 支持基于 stigmergy 的间接协调。

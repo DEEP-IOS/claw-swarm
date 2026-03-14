@@ -140,56 +140,50 @@ describe('Full Pipeline Integration', () => {
 
   // ━━━ L5 工具集成 / L5 Tool Integration ━━━
 
-  it('L5: 8 工具全部可调用 / all 8 tools callable', async () => {
+  it('L5: V7.1 合并后 4 工具全部可调用 / all 4 consolidated tools callable', async () => {
     const tools = adapter.getTools();
-    expect(tools.length).toBe(8);
+    expect(tools.length).toBe(4);
 
-    // 逐一验证工具结构 / Verify each tool structure
+    // 逐一验证工具结构 / Verify each tool structure (V7.1: added swarm_checkpoint)
     const names = tools.map((t) => t.name);
-    expect(names).toContain('swarm_spawn');
-    expect(names).toContain('swarm_query');
-    expect(names).toContain('swarm_pheromone');
-    expect(names).toContain('swarm_gate');
-    expect(names).toContain('swarm_memory');
-    expect(names).toContain('swarm_plan');
-    expect(names).toContain('swarm_zone');
     expect(names).toContain('swarm_run');
+    expect(names).toContain('swarm_query');
+    expect(names).toContain('swarm_dispatch');
+    expect(names).toContain('swarm_checkpoint');
 
     // 调用 swarm_query.status / Call swarm_query.status
     const queryTool = tools.find((t) => t.name === 'swarm_query');
-    const result = await queryTool.handler({ action: 'status' });
+    const result = await queryTool.handler({ scope: 'status' });
     expect(result.success).toBe(true);
   });
 
-  it('L5: swarm_pheromone emit + read 往返 / pheromone emit+read round-trip', async () => {
-    const tools = adapter.getTools();
-    const phTool = tools.find((t) => t.name === 'swarm_pheromone');
+  it('L5: V6.3 信息素 emit + 引擎读取 往返 / pheromone emit+read round-trip via engine', () => {
+    // V6.3: swarm_pheromone 已合并, deposit 自动化 (subagent_ended auto-hook)
+    // 测试引擎直接操作 + swarm_query scope='pheromones' 读取能力
+    const { pheromoneEngine } = adapter._engines;
 
-    // emit
-    const emitResult = await phTool.handler({
-      action: 'emit',
+    // emit via engine (V6.3: 不再通过工具, 由 auto-hook 触发)
+    const phId = pheromoneEngine.emitPheromone({
       type: 'trail',
-      scope: '/integration',
-      message: 'test signal',
+      sourceId: 'integration-agent',
+      targetScope: '/integration',
       intensity: 0.7,
+      payload: { signal: 'test' },
     });
-    expect(emitResult.success).toBe(true);
+    expect(phId).toBeDefined();
 
-    // read
-    const readResult = await phTool.handler({
-      action: 'read',
-      scope: '/integration',
-    });
-    expect(readResult.success).toBe(true);
+    // read via engine
+    const pheromones = pheromoneEngine.read('/integration');
+    expect(pheromones.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('L5: swarm_memory record + recall 往返 / memory record+recall round-trip', async () => {
-    const tools = adapter.getTools();
-    const memTool = tools.find((t) => t.name === 'swarm_memory');
+  it('L5: V6.3 情景记忆 record + recall 往返 / memory record+recall round-trip via engine', () => {
+    // V6.3: swarm_memory 已合并, store 自动化 (subagent_ended auto-hook)
+    // 测试引擎直接操作 + swarm_query scope='memory' 读取能力
+    const { episodicMemory } = adapter._engines;
 
-    // record
-    const recResult = await memTool.handler({
-      action: 'record',
+    // record via engine (V6.3: 不再通过工具, 由 auto-hook 触发)
+    const evId = episodicMemory.record({
       agentId: 'mem-agent',
       eventType: 'action',
       subject: 'agent',
@@ -197,15 +191,11 @@ describe('Full Pipeline Integration', () => {
       object: 'feature',
       importance: 0.9,
     });
-    expect(recResult.success).toBe(true);
+    expect(evId).toBeDefined();
 
-    // recall
-    const recallResult = await memTool.handler({
-      action: 'recall',
-      agentId: 'mem-agent',
-      limit: 5,
-    });
-    expect(recallResult.success).toBe(true);
+    // recall via engine
+    const events = episodicMemory.recall('mem-agent', { limit: 5 });
+    expect(events.length).toBeGreaterThanOrEqual(1);
   });
 
   // ━━━ L6 监控集成 / L6 Monitoring Integration ━━━

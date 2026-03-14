@@ -169,6 +169,19 @@ export class SpeciesEvolver {
      * @private
      */
     this._gepHistory = new Map(); // agentId → { previous: params, declineCount: 0 }
+
+    /** @type {import('../L1-infrastructure/worker-pool.js').WorkerPool | null} V6.0 Worker 委托 */
+    this._workerPool = null;
+  }
+
+  /**
+   * V6.0: 设置 Worker 线程池
+   * V6.0: Set worker pool for GEP tournament delegation
+   *
+   * @param {import('../L1-infrastructure/worker-pool.js').WorkerPool} pool
+   */
+  setWorkerPool(pool) {
+    this._workerPool = pool;
   }
 
   // --------------------------------------------------------------------------
@@ -498,6 +511,68 @@ export class SpeciesEvolver {
     return { evolved, stagnant };
   }
 
+  /**
+   * V6.0: Worker 委托版 GEP 锦标赛 (异步)
+   * V6.0: Worker-delegated GEP tournament (async)
+   *
+   * Worker 计算锦标赛决策, 主线程执行变异操作。
+   * Worker computes tournament decisions, main thread executes mutations.
+   *
+   * @param {Object} personaEvolution
+   * @param {string[]} agentIds
+   * @returns {Promise<{evolved: number, stagnant: boolean}>}
+   */
+  async performGEPEvolutionAsync(personaEvolution, agentIds) {
+    if (!this._workerPool || !this._enabled || !this._gepConfig.enabled || !agentIds || agentIds.length < 2) {
+      return this.performGEPEvolution(personaEvolution, agentIds);
+    }
+
+    try {
+      // 收集分数 / Collect scores
+      const agentScores = agentIds.map((id) => ({
+        agentId: id,
+        score: personaEvolution.getPersonaStats(id).winRate || 0,
+      }));
+
+      const stagnant = this._detectStagnation(
+        agentIds,
+        new Map(agentScores.map((a) => [a.agentId, a.score]))
+      );
+
+      // 委托锦标赛计算给 Worker / Delegate tournament to worker
+      const result = await this._workerPool.submit('gepTournament', {
+        agentScores,
+        mutationRate: this._gepConfig.mutationRate,
+        stagnant,
+      });
+
+      // 主线程应用变异 / Main thread applies mutations
+      let evolved = 0;
+      for (const r of result.results) {
+        if (r.action === 'evolve') {
+          personaEvolution.mutatePersona(r.agentId, { mutationRate: r.mutationRate });
+          evolved++;
+        }
+      }
+
+      this._messageBus.publish?.(
+        'species.gep.evolved',
+        wrapEvent('species.gep.evolved', {
+          evolved,
+          stagnant,
+          effectiveRate: stagnant ? this._gepConfig.mutationRate * 2 : this._gepConfig.mutationRate,
+          agentCount: agentIds.length,
+          delegated: 'worker',
+        }),
+      );
+
+      return { evolved, stagnant };
+    } catch (err) {
+      this._logger.warn?.(`[SpeciesEvolver] Worker GEP failed, fallback to sync: ${err.message}`);
+      return this.performGEPEvolution(personaEvolution, agentIds);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // 查询方法 / Query Methods
   // --------------------------------------------------------------------------
@@ -577,6 +652,53 @@ export class SpeciesEvolver {
    */
   getEvolutionLog(limit = 50) {
     return this._evolutionLog.slice(-limit);
+  }
+
+  /**
+   * V7.0 §6: 获取种群推荐配置
+   * V7.0 §6: Get species recommended configuration for a role
+   *
+   * 根据角色名匹配已注册种群, 返回推荐的运行时配置。
+   * 高成功率种群 → 低 temperature (精确执行);
+   * 低成功率种群 → 高 temperature (需要更多探索)。
+   *
+   * Matches role name to registered species, returns recommended runtime config.
+   * High success rate → low temperature (precise execution);
+   * Low success rate → high temperature (needs more exploration).
+   *
+   * @param {string} roleName - 角色名 / Role name
+   * @returns {{ speciesName: string, temperature: number, successRate: number } | null}
+   */
+  getSpeciesConfig(roleName) {
+    if (!this._enabled) return null;
+
+    const lower = (roleName || '').toLowerCase();
+
+    for (const [name, species] of this._species) {
+      if (species.status === 'retired') continue;
+
+      // 匹配种群适用任务类型 / Match species applicable task types
+      const matched = species.taskTypes?.some(t => {
+        const tLower = t.toLowerCase();
+        return lower.includes(tLower) || tLower.includes(lower);
+      });
+
+      if (matched) {
+        const successRate = species.assignments > 0
+          ? species.successes / species.assignments
+          : 0.5;
+
+        return {
+          speciesName: name,
+          // 高成功率 → 低 temperature (精确), 低成功率 → 高 temperature (探索)
+          // High success → low temp (precise), low success → high temp (explore)
+          temperature: successRate > 0.8 ? 0.3 : successRate > 0.5 ? 0.5 : 0.7,
+          successRate: Math.round(successRate * 1000) / 1000,
+        };
+      }
+    }
+
+    return null;
   }
 
   // --------------------------------------------------------------------------

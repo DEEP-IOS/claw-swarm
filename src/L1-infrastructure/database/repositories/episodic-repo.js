@@ -93,6 +93,48 @@ export class EpisodicRepository {
   }
 
   /**
+   * V6.3: 跨 Agent 检索情景记忆 (无 agentId 过滤)
+   * Cross-agent episodic memory recall (no agentId filter)
+   *
+   * 与 recall() 相同的排序逻辑, 但移除 agent_id 条件, 返回结果包含 agentId 字段。
+   * Same ranking logic as recall(), but removes agent_id condition.
+   * Results include agentId field for source attribution.
+   *
+   * @param {Object} [options]
+   * @param {string} [options.eventType]
+   * @param {string} [options.keyword] - 在 subject/predicate/object 中搜索
+   * @param {number} [options.limit=10]
+   * @param {number} [options.minImportance=0]
+   * @returns {Array<Object>}
+   */
+  recallAll({ eventType, keyword, limit = 10, minImportance = 0 } = {}) {
+    let sql = 'SELECT * FROM episodic_events WHERE 1=1';
+    const params = [];
+
+    if (eventType) {
+      sql += ' AND event_type = ?';
+      params.push(eventType);
+    }
+
+    if (keyword) {
+      sql += ' AND (subject LIKE ? OR predicate LIKE ? OR object LIKE ?)';
+      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+    }
+
+    if (minImportance > 0) {
+      sql += ' AND importance >= ?';
+      params.push(minImportance);
+    }
+
+    // 按 importance * recency 排序 / Sort by importance * recency
+    sql += ' ORDER BY (importance * (1.0 / (1.0 + (? - timestamp) / 86400000.0))) DESC LIMIT ?';
+    params.push(Date.now(), limit);
+
+    const rows = this.db.getDb().prepare(sql).all(...params);
+    return rows.map(r => this._parseRow(r));
+  }
+
+  /**
    * 获取 Agent 最近的事件
    * Get recent events for an agent
    */

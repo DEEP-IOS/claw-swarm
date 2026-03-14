@@ -1,7 +1,7 @@
 {
   "name": "openclaw-swarm",
-  "version": "5.4.0",
-  "description": "Claw-Swarm V5.4 — 蜂群智能插件 / Swarm intelligence plugin for OpenClaw with 6-layer architecture",
+  "version": "7.0.0",
+  "description": "Claw-Swarm V7.0 — 蜂群智能插件 / Hybrid-architecture swarm intelligence plugin with closed-loop actuation, speculative execution, and full system landing for OpenClaw",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -26,15 +26,25 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit/",
     "test:integration": "vitest run tests/integration/",
-    "test:stress": "vitest run tests/stress/ --passWithNoTests",
+    "test:stress": "vitest run tests/stress/",
+    "test:stress:release": "vitest run tests/stress/swarm-runtime-release.stress.test.js",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "start-server-and-test \"npm run console:dev:test\" http://127.0.0.1:19101/v6/console/ \"playwright test tests/e2e --workers=1\"",
+    "test:visual": "start-server-and-test \"npm run console:dev:test\" http://127.0.0.1:19101/v6/console/ \"playwright test tests/visual --workers=1\"",
+    "test:visual:update": "start-server-and-test \"npm run console:dev:test\" http://127.0.0.1:19101/v6/console/ \"playwright test tests/visual --workers=1 --update-snapshots\"",
+    "test:gates": "npm run test:unit && npm run test:integration && npm run test:stress && npm run test:coverage",
+    "test:release-gate": "npm run test:gates && npm run test:e2e && npm run test:visual && npm run console:build",
     "test:L1": "vitest run tests/unit/L1/",
     "test:L2": "vitest run tests/unit/L2/",
     "test:L3": "vitest run tests/unit/L3/",
     "test:L4": "vitest run tests/unit/L4/",
     "test:L5": "vitest run tests/unit/L5/",
-    "test:L6": "vitest run tests/unit/L6/"
+    "test:L6": "vitest run tests/unit/L6/",
+    "console:dev": "cd src/L6-monitoring/console && npx vite",
+    "console:dev:test": "vite src/L6-monitoring/console --config src/L6-monitoring/console/vite.config.js --host 127.0.0.1 --port 19101 --strictPort",
+    "console:build": "cd src/L6-monitoring/console && npx vite build",
+    "console:preview": "cd src/L6-monitoring/console && npx vite preview"
   },
   "repository": {
     "type": "git",
@@ -62,19 +72,36 @@
     "knowledge-graph",
     "moe",
     "contract-net",
-    "abc-algorithm"
+    "abc-algorithm",
+    "ipc",
+    "worker-threads",
+    "vector-search",
+    "shapley",
+    "sna"
   ],
   "dependencies": {
     "ajv": "^8.18.0",
     "eventemitter3": "^5.0.1",
-    "fastify": "^5.2.1",
+    "fastify": "^5.8.2",
     "nanoid": "^5.1.2",
     "pino": "^9.6.0",
     "tiktoken": "^1.0.22",
     "zod": "^3.24.2"
   },
+  "optionalDependencies": {
+    "@xenova/transformers": "^2.0.0",
+    "usearch": "^2.0.0"
+  },
   "devDependencies": {
-    "vitest": "^2.1.8"
+    "@playwright/test": "^1.54.1",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vitejs/plugin-react": "^4.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "start-server-and-test": "^2.1.0",
+    "vite": "^6.4.1",
+    "vitest": "^2.1.8",
+    "zustand": "^5.0.11"
   },
   "files": [
     "src/",

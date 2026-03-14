@@ -159,6 +159,62 @@ export class TokenBudgetTracker {
     this._consumed.clear();
   }
 
+  // ━━━ V6.3: 跨 session token 消耗追踪 / Cross-session Token Tracking ━━━
+
+  /**
+   * 记录一次 session 的 token 消耗 (subagent_ended 时调用)
+   * Record token consumption from a completed session
+   *
+   * @param {{ agentId: string, modelId?: string, promptTokens?: number, completionTokens?: number, totalCost?: number }} record
+   */
+  recordSessionCost(record) {
+    if (!this._sessionCosts) this._sessionCosts = [];
+    this._sessionCosts.push({
+      agentId: record.agentId || 'unknown',
+      modelId: record.modelId || 'default',
+      promptTokens: record.promptTokens || 0,
+      completionTokens: record.completionTokens || 0,
+      totalCost: record.totalCost || 0,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * 获取累计消耗总量
+   * Get cumulative cost across all recorded sessions
+   *
+   * @returns {{ totalPromptTokens: number, totalCompletionTokens: number, totalCost: number, sessionCount: number }}
+   */
+  getCumulativeCost() {
+    if (!this._sessionCosts) return { totalPromptTokens: 0, totalCompletionTokens: 0, totalCost: 0, sessionCount: 0 };
+    let p = 0, c = 0, cost = 0;
+    for (const s of this._sessionCosts) {
+      p += s.promptTokens;
+      c += s.completionTokens;
+      cost += s.totalCost;
+    }
+    return { totalPromptTokens: p, totalCompletionTokens: c, totalCost: cost, sessionCount: this._sessionCosts.length };
+  }
+
+  /**
+   * 按模型分组获取消耗
+   * Get cost breakdown by model
+   *
+   * @returns {Object<string, { promptTokens: number, completionTokens: number, totalCost: number, sessions: number }>}
+   */
+  getCostByModel() {
+    if (!this._sessionCosts) return {};
+    const byModel = {};
+    for (const s of this._sessionCosts) {
+      if (!byModel[s.modelId]) byModel[s.modelId] = { promptTokens: 0, completionTokens: 0, totalCost: 0, sessions: 0 };
+      byModel[s.modelId].promptTokens += s.promptTokens;
+      byModel[s.modelId].completionTokens += s.completionTokens;
+      byModel[s.modelId].totalCost += s.totalCost;
+      byModel[s.modelId].sessions++;
+    }
+    return byModel;
+  }
+
   // ━━━ 内部方法 / Internal Methods ━━━
 
   /** @private */

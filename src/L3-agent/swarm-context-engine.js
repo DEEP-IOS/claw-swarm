@@ -310,9 +310,16 @@ export function createSwarmContextEngineFactory(deps) {
  * @param {Object} deps.pheromoneEngine
  * @param {Object} deps.capabilityEngine
  * @param {string} [deps.advisory] - V5.3: 蜂群赋能上下文 / Swarm advisory context
+ * @param {string} [deps.detail='full'] - V6.3 §4.2: 注入详细级别 / Injection detail level
+ *   - 'none': 立即返回 undefined (0 token) / Return undefined immediately
+ *   - 'brief': 仅 agent 计数 + 当前模式 (~150 token) / Agent count + mode only
+ *   - 'full': 完整行为 (~500 token) / Full context (default)
  * @returns {string|undefined} 蜂群上下文文本
  */
-export function buildSwarmContextFallback({ gossipProtocol, pheromoneEngine, capabilityEngine, advisory }) {
+export function buildSwarmContextFallback({ gossipProtocol, pheromoneEngine, capabilityEngine, advisory, detail }) {
+  // V6.3 §4.2: detail='none' → 0 token 注入 / No injection for DIRECT mode
+  if (detail === 'none') return undefined;
+
   const parts = [];
 
   // V5.3: 如果有赋能上下文，优先输出 / If advisory context available, prepend it
@@ -326,26 +333,36 @@ export function buildSwarmContextFallback({ gossipProtocol, pheromoneEngine, cap
       .filter(([, s]) => s.status === 'active' || s.status === 'spawned');
 
     if (activeAgents.length > 0) {
-      const lines = activeAgents.slice(0, 8).map(([id, s]) =>
-        `  ${id}: ${s.status}${s.task ? ` → ${s.task.substring(0, 25)}` : ''}`
-      );
-      parts.push(`[蜂群] ${activeAgents.length} agent(s):\n${lines.join('\n')}`);
+      if (detail === 'brief') {
+        // V6.3 brief: 仅 agent 计数 / Agent count only (~150 token)
+        parts.push(`[蜂群] ${activeAgents.length} agent(s) active`);
+      } else {
+        // full: 完整列表 / Full list
+        const lines = activeAgents.slice(0, 8).map(([id, s]) =>
+          `  ${id}: ${s.status}${s.task ? ` → ${s.task.substring(0, 25)}` : ''}`
+        );
+        parts.push(`[蜂群] ${activeAgents.length} agent(s):\n${lines.join('\n')}`);
+      }
     }
   } catch { /* silent */ }
 
-  try {
-    const hotspots = pheromoneEngine?.getHotspots?.({ limit: 3 }) || [];
-    if (hotspots.length > 0) {
-      const lines = hotspots.map(h =>
-        `  ${h.type}@${(h.scope || '').substring(0, 15)}: ${(h.intensity || 0).toFixed(1)}`
-      );
-      parts.push(`[信息素] ${lines.join(', ')}`);
-    }
-  } catch { /* silent */ }
+  // V6.3: brief 模式跳过信息素和能力详情 / Skip pheromone+capability details in brief mode
+  if (detail !== 'brief') {
+    try {
+      const hotspots = pheromoneEngine?.getHotspots?.({ limit: 3 }) || [];
+      if (hotspots.length > 0) {
+        const lines = hotspots.map(h =>
+          `  ${h.type}@${(h.scope || '').substring(0, 15)}: ${(h.intensity || 0).toFixed(1)}`
+        );
+        parts.push(`[信息素] ${lines.join(', ')}`);
+      }
+    } catch { /* silent */ }
+  }
 
   if (parts.length === 0) return undefined;
 
   const text = parts.join('\n');
-  // 硬限制 500 tokens / Hard limit 500 tokens
-  return text.length > 800 ? text.substring(0, 800) + '...' : text;
+  // 硬限制: brief=300 chars, full=800 chars / Hard limit by detail level
+  const maxChars = (detail === 'brief') ? 300 : 800;
+  return text.length > maxChars ? text.substring(0, maxChars) + '...' : text;
 }

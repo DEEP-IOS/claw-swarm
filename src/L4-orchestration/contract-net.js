@@ -41,21 +41,29 @@ const MAX_CONCURRENT_CFPS = 100;
  * @type {{ capabilityMatch: number, workloadFactor: number, successRate: number, opportunityCost: number }}
  */
 const BID_WEIGHTS = {
-  capabilityMatch: 0.4,
-  workloadFactor: 0.2,
-  successRate: 0.3,
-  opportunityCost: 0.1,
+  capabilityMatch: 0.36,
+  workloadFactor: 0.18,
+  successRate: 0.26,
+  opportunityCost: 0.08,
+  affinityScore: 0.06,    // V6.0: 任务亲和度 / Task affinity
+  symbiosisScore: 0.06,   // V5.7: 团队互补度 / Team complementarity
 };
 
 /**
  * 授予评分权重 / Award scoring weights
- * @type {{ capabilityMatch: number, reputation: number, resource: number, loadFactor: number }}
+ *
+ * V6.3: 新增 modelCostFactor (成本效率) + pheromoneSignal (信息素信号)
+ * V6.3: Added modelCostFactor (cost efficiency) + pheromoneSignal (pheromone signal)
+ *
+ * @type {{ capabilityMatch: number, reputation: number, resource: number, loadFactor: number, modelCostFactor: number, pheromoneSignal: number }}
  */
 const AWARD_WEIGHTS = {
-  capabilityMatch: 0.4,
-  reputation: 0.3,
-  resource: 0.2,
-  loadFactor: 0.1,
+  capabilityMatch: 0.30,
+  reputation: 0.25,
+  resource: 0.15,
+  loadFactor: 0.10,
+  modelCostFactor: 0.12,   // V6.3: 成本效率 (便宜模型得分高)
+  pheromoneSignal: 0.08,    // V6.3: 信息素信号
 };
 
 /**
@@ -244,6 +252,81 @@ export class ContractNet {
   }
 
   /**
+   * V7.0 §4: 创建真实竞标 CFP — 通过 LLM 子代理生成真实投标
+   * V7.0 §4: Create live CFP — spawn lightweight bidding subagents for real bids
+   *
+   * 向每个候选 agent spawn 一个轻量 "竞标 subagent", 任务:
+   * "评估以下任务, 返回 JSON { confidence, estimatedTime, approach }"
+   * 收集 LLM 返回的真实投标 → 综合内部指标做最终决策。
+   *
+   * Spawns a lightweight "bidding subagent" for each candidate.
+   * Task: "Evaluate this task, return JSON { confidence, estimatedTime, approach }"
+   * Collects real LLM bids → combines with internal metrics for final decision.
+   *
+   * @param {string} taskId - 任务 ID
+   * @param {Object} requirements - 任务需求描述
+   * @param {Array<{ id: string, modelId?: string }>} candidateAgents - 候选 agent 列表
+   * @param {Object} [options]
+   * @param {Object} [options.relayClient] - SwarmRelayClient 实例
+   * @returns {Promise<{ cfpId: string, liveBids: Array<Object>, winner?: string }>}
+   */
+  async createLiveCFP(taskId, requirements, candidateAgents, options = {}) {
+    const { relayClient } = options;
+    const cfpId = this.createCFP(taskId, requirements, { metadata: { isLive: true } });
+
+    if (!relayClient || !candidateAgents || candidateAgents.length < 2) {
+      // 无 relayClient 或不足 2 个候选时, 回退为普通 CFP / Fallback to standard CFP
+      return { cfpId, liveBids: [], fallback: true };
+    }
+
+    const liveBids = [];
+    const bidPromises = candidateAgents.map(async (candidate) => {
+      try {
+        const bidTask =
+          `[Live CFP Bid] 评估以下任务并返回 JSON:\n` +
+          `任务: ${JSON.stringify(requirements).substring(0, 300)}\n` +
+          `返回格式: { "confidence": 0.0-1.0, "estimatedTime": "预计耗时", "approach": "简述方案" }`;
+
+        const result = await relayClient.spawnAndMonitor({
+          agentId: candidate.id,
+          task: bidTask,
+          model: candidate.modelId || undefined,
+          timeoutSeconds: 60, // 竞标用较短超时 / Short timeout for bidding
+          label: `cfp:${cfpId}:${candidate.id}`,
+          onEnded: () => {}, // 必须提供以启动 monitor / Required to start monitor
+        });
+
+        if (result?.status === 'spawned') {
+          liveBids.push({
+            agentId: candidate.id,
+            cfpId,
+            status: 'submitted',
+            modelId: candidate.modelId,
+          });
+        }
+      } catch (err) {
+        this._logger.debug?.(`[ContractNet] Live CFP bid error for ${candidate.id}: ${err.message}`);
+      }
+    });
+
+    // 等待所有竞标完成 (最多 60s) / Wait for all bids (max 60s)
+    await Promise.allSettled(bidPromises);
+
+    this._emit('contract.live_cfp.completed', {
+      cfpId,
+      taskId,
+      candidateCount: candidateAgents.length,
+      bidCount: liveBids.length,
+    });
+
+    this._logger.info?.(
+      `[ContractNet] Live CFP completed: ${cfpId}, bids=${liveBids.length}/${candidateAgents.length}`
+    );
+
+    return { cfpId, liveBids };
+  }
+
+  /**
    * 获取 CFP 状态
    * Get CFP status
    *
@@ -292,6 +375,10 @@ export class ContractNet {
    * @param {number} [bidData.opportunityCost=0] - 机会成本 (0-1) / Opportunity cost
    * @param {number} [bidData.reputation=0.5] - 声誉分 (0-1) / Reputation score
    * @param {number} [bidData.resource=0.5] - 资源可用度 (0-1) / Resource availability
+   * @param {string} [bidData.modelId] - V6.3: 竞标模型 ID / Bidding model ID
+   * @param {number} [bidData.modelCost] - V6.3: 模型成本 ($/1K token) / Model cost
+   * @param {number} [bidData.modelCapability] - V6.3: 模型能力分 (0-1) / Model capability score
+   * @param {number} [bidData.pheromoneSignal=0] - V6.3: 信息素信号 (0-1) / Pheromone signal
    * @param {Object} [bidData.metadata] - 附加数据 / Additional data
    * @returns {string} bidId
    * @throws {Error} CFP 不存在或已关闭 / CFP not found or closed
@@ -310,10 +397,15 @@ export class ContractNet {
     }
 
     // 检查重复投标 / Check duplicate bid
-    const existingBid = cfp.bids.find(b => b.agentId === agentId);
+    // V6.3: 同一 agent 可以用不同 model 提交多个 bid, 但同一 (agent, model) 不可重复
+    // V6.3: Same agent can submit multiple bids with different models, but same (agent, model) pair cannot repeat
+    const modelId = bidData.modelId || null;
+    const existingBid = cfp.bids.find(b => b.agentId === agentId && b.modelId === modelId);
     if (existingBid) {
       throw new Error(
-        `Agent ${agentId} has already bid on CFP ${cfpId}. 该 Agent 已投标。`
+        `Agent ${agentId} has already bid on CFP ${cfpId}` +
+        (modelId ? ` with model ${modelId}` : '') +
+        `. 该 Agent 已投标。`
       );
     }
 
@@ -328,6 +420,11 @@ export class ContractNet {
       opportunityCost: bidData.opportunityCost ?? 0,
       reputation: bidData.reputation ?? 0.5,
       resource: bidData.resource ?? 0.5,
+      // V6.3: model 竞标字段 / Model bidding fields
+      modelId: bidData.modelId || null,
+      modelCost: bidData.modelCost ?? null,
+      modelCapability: bidData.modelCapability ?? null,
+      pheromoneSignal: bidData.pheromoneSignal ?? 0,
       metadata: bidData.metadata ? { ...bidData.metadata } : {},
       score: 0, // 评估时计算 / Computed at evaluation
       submittedAt: Date.now(),
@@ -347,6 +444,9 @@ export class ContractNet {
       bidId,
       agentId,
       taskId: cfp.taskId,
+      model: bid.modelId || null,
+      score: bid.capabilityScore || 0,
+      bid: bid.capabilityScore || 0,
     });
 
     this._logger.debug?.(
@@ -411,36 +511,59 @@ export class ContractNet {
       return {
         agentId: bid.agentId,
         bidId: bid.id,
+        modelId: bid.modelId || null,  // V6.3: 竞标模型
         bidScore: Math.round(bidScore * 10000) / 10000,
         awardScore: Math.round(awardScore * 10000) / 10000,
         combinedScore: Math.round(combinedScore * 10000) / 10000,
       };
     });
 
-    // 按综合分降序 / Sort by combined score descending
-    evaluated.sort((a, b) => b.combinedScore - a.combinedScore);
+    // V6.3: 两阶段排序 / Two-stage ranking
+    // 阶段1 (intra-agent): 按 agent 分组, 每组内选出最优 model bid
+    // Phase 1 (intra-agent): group by agent, pick best model bid per agent
+    const byAgent = new Map();
+    for (const e of evaluated) {
+      const existing = byAgent.get(e.agentId);
+      if (!existing || e.combinedScore > existing.combinedScore) {
+        byAgent.set(e.agentId, e);
+      }
+    }
 
-    const winner = evaluated.length > 0
-      ? { agentId: evaluated[0].agentId, score: evaluated[0].combinedScore, bidId: evaluated[0].bidId }
+    // 阶段2 (inter-agent): 各 agent 最优 bid 之间竞争
+    // Phase 2 (inter-agent): best bids from each agent compete
+    const finalists = [...byAgent.values()];
+    finalists.sort((a, b) => b.combinedScore - a.combinedScore);
+
+    const winner = finalists.length > 0
+      ? {
+          agentId: finalists[0].agentId,
+          score: finalists[0].combinedScore,
+          bidId: finalists[0].bidId,
+          modelId: finalists[0].modelId,  // V6.3: 选中的模型
+        }
       : null;
 
     this._emit('contract.bids.evaluated', {
       cfpId,
       taskId: cfp.taskId,
       bidCount: evaluated.length,
+      finalistCount: finalists.length,  // V6.3: 进入决赛的 agent 数
       winner: winner ? winner.agentId : null,
+      winnerModelId: winner?.modelId || null,  // V6.3: 胜出模型
       topScore: winner ? winner.score : 0,
     });
 
     this._logger.debug?.(
       `[ContractNet] 投标评估完成 / Bids evaluated for CFP ${cfpId}: ` +
-      `${evaluated.length} bids, winner=${winner?.agentId || 'none'}`
+      `${evaluated.length} bids (${finalists.length} agents), winner=${winner?.agentId || 'none'}` +
+      (winner?.modelId ? ` model=${winner.modelId}` : '')
     );
 
     return {
       winner,
-      bids: evaluated,
-      scores: evaluated.map(e => e.combinedScore),
+      bids: finalists,           // V6.3: 返回 finalist 而非所有 bid
+      allBids: evaluated,        // V6.3: 所有 bid (含同一 agent 的多 model)
+      scores: finalists.map(e => e.combinedScore),
     };
   }
 
@@ -463,12 +586,16 @@ export class ContractNet {
     const workload = bidData.workloadFactor ?? 0.5;
     const success = bidData.successRate ?? 0.5;
     const cost = bidData.opportunityCost ?? 0;
+    const affinity = bidData.affinityScore ?? 0;       // V6.0: 任务亲和度
+    const symbiosis = bidData.symbiosisScore ?? 0;     // V5.7: 团队互补度
 
     const score =
       cap * this._bidWeights.capabilityMatch +
       workload * this._bidWeights.workloadFactor +
       success * this._bidWeights.successRate -
-      cost * this._bidWeights.opportunityCost;
+      cost * this._bidWeights.opportunityCost +
+      affinity * (this._bidWeights.affinityScore || 0) +
+      symbiosis * (this._bidWeights.symbiosisScore || 0);
 
     // clamp 到 [0, 1] / Clamp to [0, 1]
     return Math.max(0, Math.min(1, score));
@@ -524,6 +651,7 @@ export class ContractNet {
       agentId,
       bidId: bid.id,
       bidScore: bid.score,
+      modelId: bid.modelId || null,  // V6.3: 选中的模型
       status: ContractStatus.active,
       result: null,
       error: null,
@@ -690,8 +818,8 @@ export class ContractNet {
    * 计算授予评分
    * Compute award score
    *
-   * award = capability_match * 0.4 + reputation * 0.3
-   *       + resource * 0.2 + load_factor * 0.1
+   * V6.3: award = cap * 0.30 + rep * 0.25 + res * 0.15
+   *              + load * 0.10 + modelCost * 0.12 + pheromone * 0.08
    *
    * @private
    * @param {Object} bid
@@ -703,11 +831,23 @@ export class ContractNet {
     const res = bid.resource ?? 0.5;
     const load = bid.workloadFactor ?? 0.5;
 
+    // V6.3: model 成本因子 — 便宜模型得分高, 昂贵模型得分低
+    // V6.3: model cost factor — cheaper models score higher
+    const modelCost = bid.modelCost ?? null;
+    const costFactor = modelCost !== null
+      ? 1.0 / (1.0 + modelCost)  // 归一化到 (0, 1), cost=0 → 1.0, cost=1 → 0.5
+      : 0.5;  // 无 model 信息时使用中性值
+
+    // V6.3: 信息素信号 / Pheromone signal
+    const pheromone = bid.pheromoneSignal ?? 0;
+
     let score =
       cap * this._awardWeights.capabilityMatch +
       rep * this._awardWeights.reputation +
       res * this._awardWeights.resource +
-      load * this._awardWeights.loadFactor;
+      load * this._awardWeights.loadFactor +
+      costFactor * (this._awardWeights.modelCostFactor || 0) +
+      pheromone * (this._awardWeights.pheromoneSignal || 0);
 
     // V5.7: 共生互补度信号注入 / Symbiosis complementarity signal injection
     if (this._skillSymbiosis && bid.symbiosisScore !== undefined) {

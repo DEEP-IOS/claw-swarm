@@ -128,7 +128,7 @@ export class TaskRepository {
 
   saveCheckpoint(id, taskId, roleName, trigger, data) {
     const stmt = this.db.prepare('scp_save', `
-      INSERT INTO swarm_checkpoints (id, task_id, role_name, trigger, data, created_at)
+      INSERT OR IGNORE INTO swarm_checkpoints (id, task_id, role_name, trigger, data, created_at)
       VALUES (?, ?, ?, ?, ?, datetime('now'))
     `);
     stmt.run(id, taskId, roleName, trigger, JSON.stringify(data));

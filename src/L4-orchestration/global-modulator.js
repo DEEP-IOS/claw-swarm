@@ -87,7 +87,7 @@ export class GlobalModulator {
    * @param {Object} [deps.messageBus] - MessageBus 实例
    * @param {Object} [deps.logger] - Logger 实例
    */
-  constructor({ swarmAdvisor, toolResilience, healthChecker, budgetTracker, evidenceGate, messageBus, logger } = {}) {
+  constructor({ swarmAdvisor, toolResilience, healthChecker, budgetTracker, evidenceGate, messageBus, logger, config = {} } = {}) {
     this._swarmAdvisor = swarmAdvisor;
     this._toolResilience = toolResilience;
     this._healthChecker = healthChecker;
@@ -96,8 +96,20 @@ export class GlobalModulator {
     this._messageBus = messageBus;
     this._logger = logger || console;
 
-    /** 当前工作模式 / Current work mode */
-    this._currentMode = WorkMode.RELIABLE;
+    /**
+     * V6.3: 冷启动 — 初始模式为 EXPLORE, 累计完成 N 次任务后切换到正常动态模式
+     * V6.3: Cold start — initial mode is EXPLORE, switches to normal dynamic mode after N tasks
+     */
+    this._currentMode = WorkMode.EXPLORE;
+
+    /** V6.3: 冷启动任务计数 / Cold start task counter */
+    this._completedTaskCount = 0;
+
+    /** V6.3: 冷启动阈值 / Cold start threshold */
+    this._coldStartThreshold = config.coldStartThreshold ?? 20;
+
+    /** V6.3: 冷启动是否完成 / Cold start completion flag */
+    this._coldStartComplete = false;
 
     /** 最后切换的 turn 计数 / Turn count at last mode switch */
     this._lastSwitchTurn = 0;
@@ -141,8 +153,49 @@ export class GlobalModulator {
   evaluate(turnContext = {}) {
     this._turnCount++;
 
+    // V6.3: 记录任务完成数, 检测冷启动结束
+    // V6.3: Track completed tasks, detect cold start completion
+    if (turnContext.taskCompleted) {
+      this._completedTaskCount++;
+    }
+
     // 更新当前模式停留时间 / Update dwell time for current mode
     this._modeDwellTurns[this._currentMode]++;
+
+    // V6.3: 冷启动期间保持 EXPLORE 模式 (除非 URGENT)
+    // V6.3: During cold start, stay in EXPLORE mode (unless URGENT)
+    if (!this._coldStartComplete) {
+      if (this._completedTaskCount >= this._coldStartThreshold) {
+        this._coldStartComplete = true;
+        this._messageBus?.publish?.('coldstart.phase.completed', {
+          tasksCompleted: this._completedTaskCount,
+          threshold: this._coldStartThreshold,
+          turn: this._turnCount,
+          timestamp: Date.now(),
+        });
+        this._logger.info?.(
+          `[GlobalModulator] Cold start complete: ${this._completedTaskCount} tasks, ` +
+          `switching to dynamic mode selection`
+        );
+      } else {
+        // 冷启动中: 仅允许 URGENT 覆盖 EXPLORE
+        // During cold start: only URGENT can override EXPLORE
+        const signals = this._aggregateSignals(turnContext);
+        if (signals.failureRate >= THRESHOLDS.urgentEntry.failureRate ||
+            signals.urgencyScore >= THRESHOLDS.urgentEntry.urgencyScore) {
+          if (this._currentMode !== WorkMode.URGENT) {
+            this._switchMode(WorkMode.URGENT, signals);
+          }
+        } else if (this._currentMode === WorkMode.URGENT) {
+          // 从 URGENT 回到 EXPLORE (冷启动未完成)
+          if (signals.failureRate <= THRESHOLDS.urgentExit.failureRate &&
+              signals.urgencyScore <= THRESHOLDS.urgentExit.urgencyScore) {
+            this._switchMode(WorkMode.EXPLORE, signals);
+          }
+        }
+        return this._currentMode;
+      }
+    }
 
     // 聚合信号 / Aggregate signals
     const signals = this._aggregateSignals(turnContext);
@@ -435,6 +488,12 @@ export class GlobalModulator {
         ? this._switchHistory[this._switchHistory.length - 1]
         : null,
       factors: this.getModulationFactors(),
+      // V6.3: 冷启动状态 / Cold start status
+      coldStart: {
+        complete: this._coldStartComplete,
+        completedTasks: this._completedTaskCount,
+        threshold: this._coldStartThreshold,
+      },
     };
   }
 }

@@ -1,17 +1,28 @@
 /**
  * SwarmQueryTool -- 蜂群查询工具 / Swarm Query Tool
  *
- * V5.0 L5 应用层工具: 查询蜂群状态、代理信息和任务进度。
- * V5.0 L5 Application Layer tool: Query swarm state, agent info,
- * and task progress.
+ * V6.3 L5 应用层工具: 统一蜂群只读查询入口, 10 个 scope 覆盖全蜂群状态。
+ * V6.3 L5 Application Layer tool: Unified swarm read-only query entry, 10 scopes
+ * covering full swarm state.
  *
- * 动作 / Actions:
- * - status: 获取总体蜂群状态 / Get overall swarm status
- * - agent:  获取单个代理信息 / Get specific agent info
- * - task:   获取任务详情 / Get task details
- * - agents: 列出所有代理 (带可选过滤) / List all agents with optional filter
+ * V6.3 工具精简: 吸收 swarm_pheromone(query), swarm_memory(recall),
+ *   swarm_gate(query), swarm_zone(query), swarm_plan(list/detail) 的只读操作。
+ * V6.3 Tool consolidation: absorbs read operations from deprecated tools.
+ *
+ * Scope 列表 / Scope list:
+ * - status:     获取总体蜂群状态 / Get overall swarm status
+ * - agent:      获取单个代理信息 / Get specific agent info
+ * - task:       获取任务详情 / Get task details
+ * - agents:     列出所有代理 (带可选过滤) / List all agents with optional filter
+ * - pheromones: 信息素状态查询 / Pheromone state query
+ * - memory:     情景记忆检索 / Episodic memory recall
+ * - quality:    质量门控审计 / Quality gate audit
+ * - zones:      区域状态查询 / Zone status query
+ * - plans:      执行计划查询 / Execution plan query
+ * - board:      公告板读取 / Stigmergic board read
  *
  * @module L5-application/tools/swarm-query-tool
+ * @version 6.3.0
  * @author DEEP-IOS
  */
 
@@ -23,7 +34,7 @@
 const TOOL_NAME = 'swarm_query';
 
 /** 工具描述 / Tool description */
-const TOOL_DESCRIPTION = 'Query swarm state, agent info, and task progress';
+const TOOL_DESCRIPTION = 'Query swarm state: status, agents, tasks, pheromones, memory, quality, zones, plans, board';
 
 // ============================================================================
 // JSON Schema 定义 / JSON Schema Definition
@@ -32,18 +43,22 @@ const TOOL_DESCRIPTION = 'Query swarm state, agent info, and task progress';
 const inputSchema = {
   type: 'object',
   properties: {
-    action: {
+    scope: {
       type: 'string',
-      enum: ['status', 'agent', 'task', 'agents'],
-      description: '查询类型 / Query type: status, agent, task, or agents',
+      enum: ['status', 'agent', 'task', 'agents', 'pheromones', 'memory', 'quality', 'zones', 'plans', 'board'],
+      description: '查询范围 / Query scope',
     },
     agentId: {
       type: 'string',
-      description: 'Agent ID (agent 动作必需) / Agent ID (required for agent action)',
+      description: 'Agent ID (agent scope 必需) / Agent ID (required for agent scope)',
     },
     taskId: {
       type: 'string',
-      description: '任务 ID (task 动作必需) / Task ID (required for task action)',
+      description: '任务 ID (task/quality scope 可用) / Task ID (for task/quality scope)',
+    },
+    planId: {
+      type: 'string',
+      description: '计划 ID (plans scope 详情查询) / Plan ID (for plans scope detail)',
     },
     filter: {
       type: 'object',
@@ -51,10 +66,34 @@ const inputSchema = {
         tier: { type: 'string', description: '按经验等级过滤 / Filter by tier' },
         status: { type: 'string', description: '按状态过滤 / Filter by status' },
       },
-      description: 'agents 动作的过滤条件 / Filter for agents action',
+      description: 'agents scope 的过滤条件 / Filter for agents scope',
+    },
+    keyword: {
+      type: 'string',
+      description: '搜索关键词 (memory/pheromones scope) / Search keyword',
+    },
+    crossAgent: {
+      type: 'boolean',
+      description: 'memory scope: 跨 agent 全局检索 / Cross-agent global recall',
+    },
+    limit: {
+      type: 'number',
+      description: '返回数量上限 / Max results to return',
+    },
+    targetScope: {
+      type: 'string',
+      description: 'board/pheromones scope: 目标路径 / Target path for board/pheromones',
+    },
+    category: {
+      type: 'string',
+      description: 'board scope: 分类过滤 / Category filter for board',
+    },
+    eventType: {
+      type: 'string',
+      description: 'memory scope: 事件类型过滤 / Event type filter for memory',
     },
   },
-  required: ['action'],
+  required: ['scope'],
 };
 
 // ============================================================================
@@ -68,7 +107,7 @@ const inputSchema = {
  * @param {Object} deps - 依赖注入 / Dependency injection
  * @param {Object} deps.engines - 引擎实例集合 / Engine instances
  * @param {Object} deps.logger - 日志器 / Logger
- * @returns {{ name: string, description: string, inputSchema: Object, handler: Function }}
+ * @returns {{ name: string, description: string, parameters: Object, handler: Function, execute: Function }}
  */
 export function createQueryTool({ engines, logger }) {
   const {
@@ -76,14 +115,18 @@ export function createQueryTool({ engines, logger }) {
     agentRepo,
     pheromoneEngine,
     orchestrator,
+    // V6.3: 新增引擎依赖 / New engine dependencies
+    episodicMemory,
+    qualityController,
+    zoneRepo,
+    planRepo,
+    stigmergicBoard,
   } = engines;
+
+  // ━━━ scope: status ━━━
 
   /**
    * 获取总体蜂群状态 / Get overall swarm status
-   *
-   * 聚合: Agent 计数、任务计数、信息素统计、编排器状态。
-   * Aggregates: agent count, task counts, pheromone stats, orchestrator state.
-   *
    * @returns {Object}
    */
   async function handleStatus() {
@@ -148,12 +191,10 @@ export function createQueryTool({ engines, logger }) {
     return { success: true, data };
   }
 
+  // ━━━ scope: agent ━━━
+
   /**
    * 获取单个代理详情 / Get specific agent info
-   *
-   * 包括: 基本信息、能力维度、技能列表。
-   * Includes: basic info, capability dimensions, skill list.
-   *
    * @param {Object} input
    * @returns {Object}
    */
@@ -209,9 +250,10 @@ export function createQueryTool({ engines, logger }) {
     }
   }
 
+  // ━━━ scope: task ━━━
+
   /**
    * 获取任务详情 / Get task details
-   *
    * @param {Object} input
    * @returns {Object}
    */
@@ -238,9 +280,10 @@ export function createQueryTool({ engines, logger }) {
     }
   }
 
+  // ━━━ scope: agents ━━━
+
   /**
    * 列出所有代理 (带可选过滤) / List all agents with optional filter
-   *
    * @param {Object} input
    * @returns {Object}
    */
@@ -252,10 +295,8 @@ export function createQueryTool({ engines, logger }) {
     }
 
     try {
-      // 获取 Agent 列表, 按状态预过滤 / Get agent list, pre-filter by status
       let agents = agentRepo.listAgents(filter?.status || null);
 
-      // 按 tier 过滤 / Filter by tier
       if (filter?.tier) {
         agents = agents.filter(a => a.tier === filter.tier);
       }
@@ -279,13 +320,314 @@ export function createQueryTool({ engines, logger }) {
     }
   }
 
+  // ━━━ scope: pheromones (V6.3: 吸收自 swarm_pheromone query) ━━━
+
+  /**
+   * 信息素状态查询 / Query pheromone state
+   *
+   * 替代已废弃的 swarm_pheromone(query) 操作。
+   * Replaces deprecated swarm_pheromone(query) action.
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handlePheromones(input) {
+    if (!pheromoneEngine) {
+      return { success: false, error: 'pheromoneEngine 不可用 / pheromoneEngine not available' };
+    }
+
+    try {
+      const { targetScope, keyword, limit = 20 } = input;
+
+      // 如果指定了 targetScope, 读取该路径下的信息素
+      // If targetScope specified, read pheromones under that path
+      if (targetScope) {
+        const pheromones = pheromoneEngine.read(targetScope, {
+          type: keyword || undefined,
+          minIntensity: 0,
+        });
+        return {
+          success: true,
+          data: {
+            scope: targetScope,
+            pheromones: pheromones.slice(0, limit),
+            count: pheromones.length,
+          },
+        };
+      }
+
+      // 默认: 返回快照 + 统计 / Default: return snapshot + stats
+      const stats = pheromoneEngine.getStats();
+      const snapshot = pheromoneEngine.buildSnapshot({ type: keyword || undefined });
+
+      return {
+        success: true,
+        data: {
+          stats,
+          snapshot: {
+            timestamp: snapshot.timestamp,
+            count: snapshot.count,
+            pheromones: (snapshot.pheromones || []).slice(0, limit),
+          },
+        },
+      };
+    } catch (err) {
+      return { success: false, error: `信息素查询失败 / Pheromone query failed: ${err.message}` };
+    }
+  }
+
+  // ━━━ scope: memory (V6.3: 吸收自 swarm_memory recall) ━━━
+
+  /**
+   * 情景记忆检索 / Episodic memory recall
+   *
+   * 替代已废弃的 swarm_memory(recall) 操作。
+   * 支持 crossAgent=true 进行跨 agent 全局检索 (V6.3 recallAll)。
+   * Replaces deprecated swarm_memory(recall) action.
+   * Supports crossAgent=true for cross-agent global recall (V6.3 recallAll).
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handleMemory(input) {
+    if (!episodicMemory) {
+      return { success: false, error: 'episodicMemory 不可用 / episodicMemory not available' };
+    }
+
+    try {
+      const { agentId, keyword, eventType, crossAgent = false, limit = 10 } = input;
+
+      if (crossAgent) {
+        // V6.3: 跨 agent 全局检索 / Cross-agent global recall
+        const events = episodicMemory.recallAll({
+          eventType,
+          keyword,
+          limit,
+          minImportance: 0,
+        });
+        return {
+          success: true,
+          data: {
+            crossAgent: true,
+            events,
+            count: events.length,
+          },
+        };
+      }
+
+      // 单 agent 检索 / Single agent recall
+      if (!agentId) {
+        return { success: false, error: 'agentId 必需 (或设 crossAgent=true) / agentId required (or set crossAgent=true)' };
+      }
+
+      const events = episodicMemory.recall(agentId, {
+        eventType,
+        keyword,
+        limit,
+        minImportance: 0,
+      });
+      return {
+        success: true,
+        data: {
+          agentId,
+          events,
+          count: events.length,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: `记忆检索失败 / Memory recall failed: ${err.message}` };
+    }
+  }
+
+  // ━━━ scope: quality (V6.3: 吸收自 swarm_gate query) ━━━
+
+  /**
+   * 质量门控审计查询 / Quality gate audit query
+   *
+   * 替代已废弃的 swarm_gate(query) 操作。
+   * Replaces deprecated swarm_gate(query) action.
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handleQuality(input) {
+    if (!qualityController) {
+      return { success: false, error: 'qualityController 不可用 / qualityController not available' };
+    }
+
+    try {
+      const { taskId, limit = 20 } = input;
+
+      if (taskId) {
+        // 特定任务的质量报告 / Quality report for specific task
+        const report = qualityController.getQualityReport(taskId);
+        return {
+          success: true,
+          data: report || { taskId, message: '无评估记录 / No evaluation records' },
+        };
+      }
+
+      // 全局审计汇总 / Global audit summary
+      const stats = qualityController.getStats();
+      const auditTrail = qualityController.getAuditTrail({ limit });
+
+      return {
+        success: true,
+        data: {
+          stats,
+          auditTrail,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: `质量查询失败 / Quality query failed: ${err.message}` };
+    }
+  }
+
+  // ━━━ scope: zones (V6.3: 吸收自 swarm_zone query) ━━━
+
+  /**
+   * 区域状态查询 / Zone status query
+   *
+   * 替代已废弃的 swarm_zone(list/members) 操作。
+   * Replaces deprecated swarm_zone(list/members) actions.
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handleZones(input) {
+    if (!zoneRepo) {
+      return { success: false, error: 'zoneRepo 不可用 / zoneRepo not available' };
+    }
+
+    try {
+      const { agentId } = input;
+
+      // 如果指定 agentId, 返回该 agent 所属区域
+      // If agentId specified, return zones this agent belongs to
+      if (agentId) {
+        const zones = zoneRepo.getAgentZones(agentId);
+        return {
+          success: true,
+          data: {
+            agentId,
+            zones,
+            count: zones.length,
+          },
+        };
+      }
+
+      // 默认: 列出所有区域及成员数
+      // Default: list all zones with member counts
+      const zones = zoneRepo.listZones();
+      const zonesWithMembers = zones.map(z => {
+        let memberCount = 0;
+        try {
+          memberCount = zoneRepo.getMemberCount(z.id);
+        } catch { /* silent */ }
+        return { ...z, memberCount };
+      });
+
+      return {
+        success: true,
+        data: zonesWithMembers,
+        count: zonesWithMembers.length,
+      };
+    } catch (err) {
+      return { success: false, error: `区域查询失败 / Zone query failed: ${err.message}` };
+    }
+  }
+
+  // ━━━ scope: plans (V6.3: 吸收自 swarm_plan list/detail) ━━━
+
+  /**
+   * 执行计划查询 / Execution plan query
+   *
+   * 替代已废弃的 swarm_plan(list/detail) 操作。
+   * Replaces deprecated swarm_plan(list/detail) actions.
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handlePlans(input) {
+    if (!planRepo) {
+      return { success: false, error: 'planRepo 不可用 / planRepo not available' };
+    }
+
+    try {
+      const { planId, taskId, limit = 20 } = input;
+
+      // 按 planId 获取详情 / Get detail by planId
+      if (planId) {
+        const plan = planRepo.get(planId);
+        if (!plan) {
+          return { success: false, error: `计划不存在 / Plan not found: ${planId}` };
+        }
+        return { success: true, data: plan };
+      }
+
+      // 按 taskId 获取关联计划 / Get plans by taskId
+      if (taskId) {
+        const plans = planRepo.getByTask(taskId);
+        return {
+          success: true,
+          data: plans,
+          count: plans.length,
+        };
+      }
+
+      // 默认: 列出所有计划 / Default: list all plans
+      const plans = planRepo.list(null, limit);
+      return {
+        success: true,
+        data: plans,
+        count: plans.length,
+      };
+    } catch (err) {
+      return { success: false, error: `计划查询失败 / Plan query failed: ${err.message}` };
+    }
+  }
+
+  // ━━━ scope: board (V6.3: StigmergicBoard 读取) ━━━
+
+  /**
+   * 公告板读取 / Stigmergic board read
+   *
+   * @param {Object} input
+   * @returns {Object}
+   */
+  async function handleBoard(input) {
+    if (!stigmergicBoard) {
+      return { success: false, error: 'stigmergicBoard 不可用 / stigmergicBoard not available' };
+    }
+
+    try {
+      const { targetScope = '/swarm', category, limit = 10 } = input;
+
+      const posts = stigmergicBoard.read(targetScope, {
+        category: category || undefined,
+        limit,
+      });
+
+      return {
+        success: true,
+        data: {
+          scope: targetScope,
+          posts,
+          count: posts.length,
+        },
+      };
+    } catch (err) {
+      return { success: false, error: `公告板查询失败 / Board query failed: ${err.message}` };
+    }
+  }
+
   // ━━━ 主处理函数 / Main Handler ━━━
 
   async function handler(input) {
     try {
-      const { action } = input;
+      const { scope } = input;
 
-      switch (action) {
+      switch (scope) {
         case 'status':
           return await handleStatus();
         case 'agent':
@@ -294,10 +636,22 @@ export function createQueryTool({ engines, logger }) {
           return await handleTask(input);
         case 'agents':
           return await handleAgents(input);
+        case 'pheromones':
+          return await handlePheromones(input);
+        case 'memory':
+          return await handleMemory(input);
+        case 'quality':
+          return await handleQuality(input);
+        case 'zones':
+          return await handleZones(input);
+        case 'plans':
+          return await handlePlans(input);
+        case 'board':
+          return await handleBoard(input);
         default:
           return {
             success: false,
-            error: `未知操作 / Unknown action: ${action}. 支持 / Supported: status, agent, task, agents`,
+            error: `未知 scope / Unknown scope: ${scope}. 支持 / Supported: status, agent, task, agents, pheromones, memory, quality, zones, plans, board`,
           };
       }
     } catch (err) {

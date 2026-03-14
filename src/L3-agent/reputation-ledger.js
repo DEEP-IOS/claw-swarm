@@ -20,20 +20,22 @@
 // ============================================================================
 
 /**
- * 五维声誉维度 / Five reputation dimensions
+ * 六维声誉维度 / Six reputation dimensions (V6.0: +centrality, +influence)
  * @type {string[]}
  */
-const REPUTATION_DIMENSIONS = ['competence', 'reliability', 'collaboration', 'innovation'];
+const REPUTATION_DIMENSIONS = ['competence', 'reliability', 'collaboration', 'innovation', 'centrality', 'influence'];
 
 /**
- * Trust 计算权重 / Weights for trust computation
+ * Trust 计算权重 / Weights for trust computation (V6.0: 6D)
  * @type {Record<string, number>}
  */
 const TRUST_WEIGHTS = Object.freeze({
-  competence: 0.35,
-  reliability: 0.30,
-  collaboration: 0.20,
-  innovation: 0.15,
+  competence: 0.30,
+  reliability: 0.25,
+  collaboration: 0.15,
+  innovation: 0.10,
+  centrality: 0.10,
+  influence: 0.10,
 });
 
 /** 默认初始声誉分 / Default initial reputation score */
@@ -268,6 +270,48 @@ export class ReputationLedger {
     this._logger.debug({ agentId, factor }, 'reputation decayed / 声誉已衰减');
   }
 
+  /**
+   * V6.0: 半衰期指数衰减 / Half-life exponential decay
+   *
+   * effectiveScore = Σ(score_i × e^(-t_i/halfLife)) / Σ(e^(-t_i/halfLife))
+   *
+   * @param {string} agentId
+   * @param {Object} [options]
+   * @param {number} [options.halfLifeDays=14] - 半衰期 (天) / Half-life in days
+   * @returns {Object} 衰减后的声誉 / Decayed reputation profile
+   */
+  decayWithHalfLife(agentId, { halfLifeDays = 14 } = {}) {
+    const history = this._history.get(agentId) || [];
+    if (history.length === 0) return this.getReputation(agentId);
+
+    const now = Date.now();
+    const halfLifeMs = halfLifeDays * 86400000;
+    const lambda = Math.LN2 / halfLifeMs;
+
+    // 按维度加权平均 / Weighted average per dimension
+    const profile = {};
+    for (const dim of REPUTATION_DIMENSIONS) {
+      const dimEvents = history.filter((h) => h.dimension === dim);
+      if (dimEvents.length === 0) {
+        profile[dim] = this._getDimensionScore(agentId, dim);
+        continue;
+      }
+
+      let weightedSum = 0;
+      let weightSum = 0;
+      for (const evt of dimEvents) {
+        const age = now - (evt.timestamp || now);
+        const weight = Math.exp(-lambda * age);
+        weightedSum += (evt.newScore || evt.score) * weight;
+        weightSum += weight;
+      }
+
+      profile[dim] = weightSum > 0 ? weightedSum / weightSum : this._initialScore;
+    }
+
+    return profile;
+  }
+
   // --------------------------------------------------------------------------
   // 历史记录 / History
   // --------------------------------------------------------------------------
@@ -345,6 +389,174 @@ export class ReputationLedger {
     if (history.length > MAX_HISTORY_SIZE) {
       this._history.set(agentId, history.slice(-Math.floor(MAX_HISTORY_SIZE / 2)));
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // V6.2: 寄生 Agent 检测 / Parasite Agent Detection
+  // --------------------------------------------------------------------------
+
+  /**
+   * V6.2: 寄生 Agent 检测 / Parasite agent detection
+   *
+   * 检测消耗资源但不贡献的 Agent。
+   * Detects agents that consume resources without contributing.
+   *
+   * 判定标准: collaboration 维度持续为 0 但 competence 正常。
+   * Criteria: collaboration dimension consistently 0 but competence normal.
+   *
+   * parasiteScore = (1 - avgCollaboration) * competence * activityFactor
+   * 其中 activityFactor = min(1, eventCount / minEvents)
+   * where activityFactor = min(1, eventCount / minEvents)
+   *
+   * 当 parasiteScore > threshold 时发布 'parasite.detected' 事件。
+   * Publishes 'parasite.detected' event when parasiteScore > threshold.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.threshold=0.7] - 寄生判定阈值 / Parasite detection threshold
+   * @param {number} [options.minEvents=5] - 最少事件数 / Minimum events required
+   * @returns {Array<{ agentId: string, parasiteScore: number, collaboration: number, competence: number }>}
+   */
+  detectParasites({ threshold = 0.7, minEvents = 5 } = {}) {
+    const agents = this._agentRepo.listAgents('active');
+    const parasites = [];
+
+    for (const agent of agents) {
+      const profile = this.getContributionProfile(agent.id);
+
+      // 需要足够的事件数据才能做出判断 / Need sufficient event data to make judgment
+      const history = this._history.get(agent.id) || [];
+      const eventCount = history.length;
+      const activityFactor = Math.min(1, eventCount / minEvents);
+
+      if (activityFactor < 1) continue; // 事件不足, 跳过 / Insufficient events, skip
+
+      // 归一化到 0-1 范围 / Normalize to 0-1 range
+      const normalizedCollab = profile.collaborationMean / MAX_SCORE;
+      const normalizedCompetence = profile.competenceMean / MAX_SCORE;
+
+      // parasiteScore: 低协作 + 正常能力 = 寄生行为
+      // parasiteScore: low collaboration + normal competence = parasitic behavior
+      const parasiteScore = (1 - normalizedCollab) * normalizedCompetence * activityFactor;
+      const rounded = Math.round(parasiteScore * 1000) / 1000;
+
+      if (rounded > threshold) {
+        parasites.push({
+          agentId: agent.id,
+          parasiteScore: rounded,
+          collaboration: profile.collaborationMean,
+          competence: profile.competenceMean,
+        });
+
+        // 发布寄生检测事件 / Publish parasite detected event
+        this._messageBus.publish?.('parasite.detected', {
+          agentId: agent.id,
+          parasiteScore: rounded,
+          collaboration: profile.collaborationMean,
+          competence: profile.competenceMean,
+          contributionRatio: profile.contributionRatio,
+        });
+
+        this._logger.warn(
+          { agentId: agent.id, parasiteScore: rounded },
+          'parasite agent detected / 检测到寄生 Agent',
+        );
+      }
+    }
+
+    return parasites.sort((a, b) => b.parasiteScore - a.parasiteScore);
+  }
+
+  /**
+   * V6.2: 获取 Agent 贡献率 / Get agent contribution ratio
+   *
+   * 基于声誉历史计算 collaboration 与 competence 的均值和贡献率。
+   * Computes collaboration and competence means and contribution ratio from reputation history.
+   *
+   * contributionRatio = collaborationMean / max(competenceMean, 1)
+   * 高贡献率 = 协作产出与能力匹配; 低贡献率 = 可能存在搭便车行为。
+   * High ratio = collaboration matches competence; Low ratio = possible free-riding.
+   *
+   * @param {string} agentId
+   * @returns {{ contributionRatio: number, collaborationMean: number, competenceMean: number }}
+   */
+  getContributionProfile(agentId) {
+    const collaborationScore = this._getDimensionScore(agentId, 'collaboration');
+    const competenceScore = this._getDimensionScore(agentId, 'competence');
+
+    // 从历史记录计算均值 (如有) / Compute mean from history (if available)
+    const history = this._history.get(agentId) || [];
+
+    const collabEvents = history.filter((h) => h.dimension === 'collaboration');
+    const compEvents = history.filter((h) => h.dimension === 'competence');
+
+    const collaborationMean = collabEvents.length > 0
+      ? collabEvents.reduce((sum, h) => sum + h.score, 0) / collabEvents.length
+      : collaborationScore;
+
+    const competenceMean = compEvents.length > 0
+      ? compEvents.reduce((sum, h) => sum + h.score, 0) / compEvents.length
+      : competenceScore;
+
+    // 贡献率: 协作产出 / 能力水平 / Contribution ratio: collaboration output / competence level
+    const contributionRatio = competenceMean > 0
+      ? Math.round((collaborationMean / competenceMean) * 1000) / 1000
+      : 0;
+
+    return {
+      contributionRatio,
+      collaborationMean: Math.round(collaborationMean * 100) / 100,
+      competenceMean: Math.round(competenceMean * 100) / 100,
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // V6.0: SNA + Shapley 集成 / SNA + Shapley Integration
+  // --------------------------------------------------------------------------
+
+  /**
+   * V6.0: 更新 SNA 指标到声誉 / Update SNA metrics to reputation dimensions
+   *
+   * @param {string} agentId
+   * @param {{ degreeCentrality: number, betweennessCentrality: number }} snaMetrics
+   */
+  updateSNAScores(agentId, snaMetrics) {
+    // centrality = 度中心性 × 100 (归一化到 0-100)
+    if (snaMetrics.degreeCentrality !== undefined) {
+      this.recordEvent(agentId, {
+        dimension: 'centrality',
+        score: Math.min(100, snaMetrics.degreeCentrality * 100),
+        context: { source: 'sna', metric: 'degree' },
+      });
+    }
+
+    // influence = 介数中心性 × 100
+    if (snaMetrics.betweennessCentrality !== undefined) {
+      this.recordEvent(agentId, {
+        dimension: 'influence',
+        score: Math.min(100, snaMetrics.betweennessCentrality * 100),
+        context: { source: 'sna', metric: 'betweenness' },
+      });
+    }
+  }
+
+  /**
+   * V6.0: 记录 Shapley 信用 / Record Shapley credit
+   *
+   * 信用值映射到 competence 维度的增量事件。
+   * Credit maps to competence dimension incremental event.
+   *
+   * @param {string} agentId
+   * @param {number} credit - Shapley 信用 (0-1)
+   * @param {string} [dagId]
+   */
+  recordShapleyCredit(agentId, credit, dagId) {
+    // Shapley 信用映射到 competence 分数: credit × 100
+    this.recordEvent(agentId, {
+      dimension: 'competence',
+      score: Math.min(100, credit * 100),
+      taskId: dagId,
+      context: { source: 'shapley', credit },
+    });
   }
 }
 

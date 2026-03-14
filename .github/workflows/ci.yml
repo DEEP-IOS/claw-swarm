@@ -31,3 +31,25 @@ jobs:
 
       - name: Run stress tests
         run: npm run test:stress
+
+      - name: Run coverage gate
+        run: npm run test:coverage
+
+  console-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run console e2e tests
+        run: npm run test:e2e

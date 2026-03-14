@@ -63,6 +63,7 @@ import { KnowledgeRepository } from '../L1-infrastructure/database/repositories/
 import { EpisodicRepository } from '../L1-infrastructure/database/repositories/episodic-repo.js';
 import { ZoneRepository } from '../L1-infrastructure/database/repositories/zone-repo.js';
 import { PlanRepository } from '../L1-infrastructure/database/repositories/plan-repo.js';
+import { UserCheckpointRepository } from '../L1-infrastructure/database/repositories/user-checkpoint-repo.js';
 import { PheromoneTypeRepository } from '../L1-infrastructure/database/repositories/pheromone-type-repo.js';
 import { TABLE_SCHEMAS } from '../L1-infrastructure/schemas/database-schemas.js';
 import { ConfigManager } from '../L1-infrastructure/config/config-manager.js';
@@ -82,6 +83,10 @@ import { CapabilityEngine } from '../L3-agent/capability-engine.js';
 import { PersonaEvolution } from '../L3-agent/persona-evolution.js';
 import { ReputationLedger } from '../L3-agent/reputation-ledger.js';
 import { SoulDesigner } from '../L3-agent/soul-designer.js';
+// V6.1: 向量检索管线 / Vector retrieval pipeline
+import { EmbeddingEngine } from '../L3-agent/embedding-engine.js';
+import { VectorIndex } from '../L3-agent/vector-index.js';
+import { HybridRetrieval } from '../L3-agent/hybrid-retrieval.js';
 
 // ── L4 编排层 / L4 Orchestration ────────────────────────────────────────────
 import { Orchestrator } from '../L4-orchestration/orchestrator.js';
@@ -107,26 +112,38 @@ import { ContextService } from './context-service.js';
 import { CircuitBreaker } from './circuit-breaker.js';
 import { SkillGovernor } from './skill-governor.js';
 import { TokenBudgetTracker } from './token-budget-tracker.js';
+import { SwarmRelayClient } from '../L2-communication/swarm-relay-client.js';
+import { ProgressTracker } from './progress-tracker.js';
+
+// ── L6 监控层 / L6 Monitoring ──────────────────────────────────────────────
+import { StateBroadcaster } from '../L6-monitoring/state-broadcaster.js';
+import { MetricsCollector } from '../L6-monitoring/metrics-collector.js';
+import { DashboardService } from '../L6-monitoring/dashboard-service.js';
 
 // ── V5.1 事件目录 / V5.1 Event Catalog ──────────────────────────────────────
 import { EventTopics, wrapEvent } from '../event-catalog.js';
 
 // ── 工具工厂 / Tool Factories ───────────────────────────────────────────────
-import { createSpawnTool } from './tools/swarm-spawn-tool.js';
+// V6.3: 工具精简 9→3 / Tool consolidation 9→3
+// 废弃工具保留 import 用于可能的回滚, 但不再注册
+// Deprecated tools keep imports for possible rollback, but no longer registered
+// @deprecated V6.3: import { createSpawnTool } from './tools/swarm-spawn-tool.js';
+// @deprecated V6.3: import { createPheromoneTool } from './tools/swarm-pheromone-tool.js';
+// @deprecated V6.3: import { createGateTool } from './tools/swarm-gate-tool.js';
+// @deprecated V6.3: import { createMemoryTool } from './tools/swarm-memory-tool.js';
+// @deprecated V6.3: import { createPlanTool } from './tools/swarm-plan-tool.js';
+// @deprecated V6.3: import { createZoneTool } from './tools/swarm-zone-tool.js';
 import { createQueryTool } from './tools/swarm-query-tool.js';
-import { createPheromoneTool } from './tools/swarm-pheromone-tool.js';
-import { createGateTool } from './tools/swarm-gate-tool.js';
-import { createMemoryTool } from './tools/swarm-memory-tool.js';
-import { createPlanTool } from './tools/swarm-plan-tool.js';
-import { createZoneTool } from './tools/swarm-zone-tool.js';
 import { createRunTool } from './tools/swarm-run-tool.js';
+import { createDispatchTool } from './tools/swarm-dispatch-tool.js';
+import { createCheckpointTool } from './tools/swarm-checkpoint-tool.js';
 
 // ============================================================================
 // 常量 / Constants
 // ============================================================================
 
 /** 版本号 / Version */
-const VERSION = '5.7.0';
+const VERSION = '7.0.0';
 
 /** 默认信息素衰减间隔 (ms) / Default pheromone decay interval */
 const DEFAULT_DECAY_INTERVAL_MS = 60_000;
@@ -200,10 +217,12 @@ export class PluginAdapter {
     const zoneRepo = new ZoneRepository(dbManager);
     const planRepo = new PlanRepository(dbManager);
     const pheromoneTypeRepo = new PheromoneTypeRepository(dbManager);
+    const userCheckpointRepo = new UserCheckpointRepository(dbManager);
 
     this._engines.repos = {
       pheromoneRepo, taskRepo, agentRepo, knowledgeRepo,
       episodicRepo, zoneRepo, planRepo, pheromoneTypeRepo,
+      userCheckpointRepo,
     };
 
     // ── L2: 通信层 ────────────────────────────────────────────────────
@@ -232,6 +251,10 @@ export class PluginAdapter {
       messageBus,
       logger,
       fanout: config.gossip?.fanout || 3,
+      // V6.2: P2-1/P2-2 信息素引擎注入 (episodicMemory 延迟注入, 见 L3 区段)
+      // V6.2: P2-1/P2-2 pheromone engine injection (episodicMemory deferred, see L3 section)
+      pheromoneEngine,
+      config: config.gossip || {},
     });
     this._engines.gossipProtocol = gossipProtocol;
 
@@ -257,6 +280,14 @@ export class PluginAdapter {
       maxContext: config.memory?.maxContext || 15,
       maxScratch: config.memory?.maxScratch || 30,
       logger,
+      onEvict: (evicted) => {
+        // LTM promotion: 高重要性驱逐项固化到情景记忆 (延迟引用)
+        // LTM promotion: consolidate high-importance evicted items (deferred reference)
+        const em = this._engines.episodicMemory;
+        if (em) {
+          try { em.consolidate('system', [evicted]); } catch { /* non-fatal */ }
+        }
+      },
     });
     this._engines.workingMemory = workingMemory;
 
@@ -265,6 +296,64 @@ export class PluginAdapter {
 
     const semanticMemory = new SemanticMemory({ knowledgeRepo, messageBus, logger });
     this._engines.semanticMemory = semanticMemory;
+
+    // V6.2: P1-5 情景→语义固化桥接 / Episodic→Semantic consolidation bridge
+    if (episodicMemory && semanticMemory) {
+      episodicMemory.setSemanticMemory(semanticMemory);
+    }
+
+    // V6.2: P2-1 延迟注入 episodicMemory 到 GossipProtocol (L2 先于 L3 创建)
+    // V6.2: P2-1 deferred injection of episodicMemory into GossipProtocol (L2 created before L3)
+    if (gossipProtocol && episodicMemory) {
+      gossipProtocol._episodicMemory = episodicMemory;
+    }
+
+    // ── V6.1: 向量检索管线 (EmbeddingEngine → VectorIndex → HybridRetrieval) ──
+    // V6.1: Vector retrieval pipeline (lazy-init, graceful degradation)
+    try {
+      const embeddingEngine = new EmbeddingEngine({
+        config: config.embedding || {},
+        messageBus,
+        logger,
+      });
+      this._engines.embeddingEngine = embeddingEngine;
+
+      const vectorIndex = new VectorIndex({
+        config: config.vectorIndex || {},
+        messageBus,
+        logger,
+        db: dbManager,
+      });
+      this._engines.vectorIndex = vectorIndex;
+
+      // VectorIndex.init() 是异步的但 plugin-adapter.init() 是同步的
+      // VectorIndex.init() is async but plugin-adapter.init() is sync
+      // 使用 then() 链式异步初始化, 错误不阻塞启动
+      // Use then() for async init, errors don't block startup
+      vectorIndex.init().then(() => {
+        logger.info?.('[PluginAdapter] VectorIndex initialized (HNSW or brute-force)');
+      }).catch((err) => {
+        logger.warn?.(`[PluginAdapter] VectorIndex init failed (retrieval fallback active): ${err.message}`);
+      });
+
+      const hybridRetrieval = new HybridRetrieval({
+        embeddingEngine,
+        vectorIndex,
+        knowledgeRepo,
+        messageBus,
+        logger,
+        config: config.hybridRetrieval || {},
+      });
+      this._engines.hybridRetrieval = hybridRetrieval;
+
+      // 注入混合检索到记忆层 / Inject hybrid retrieval into memory layers
+      episodicMemory.setHybridRetrieval(hybridRetrieval);
+      semanticMemory.setHybridRetrieval(hybridRetrieval);
+
+      logger.info?.('[PluginAdapter] Vector retrieval pipeline activated');
+    } catch (err) {
+      logger.warn?.(`[PluginAdapter] Vector pipeline init failed (standard retrieval active): ${err.message}`);
+    }
 
     const contextCompressor = new ContextCompressor({
       maxItems: config.context?.maxItems || 20,
@@ -437,8 +526,8 @@ export class PluginAdapter {
           logger,
           config: {
             enabled: true,
-            clustering: config.evolution?.clustering ?? false,
-            gep: config.evolution?.gep ?? false,
+            clustering: config.evolution?.clustering ?? true,
+            gep: config.evolution?.gep ?? true,
             minTasksPerAgent: config.evolution?.minTasksPerAgent ?? 10,
             silhouetteThreshold: config.evolution?.silhouetteThreshold ?? 0.45,
           },
@@ -465,8 +554,9 @@ export class PluginAdapter {
     });
     this._engines.circuitBreaker = circuitBreaker;
 
-    // V5.1 Phase 5: Skills 治理引擎 / V5.1 Phase 5: Skill Governor
-    if (config.skillGovernor?.enabled) {
+    // V6.0: Skills 治理引擎 (默认启用, graceful degradation)
+    // V6.0: Skill Governor (default enabled, graceful degradation)
+    if (config.skillGovernor?.enabled !== false) {
       try {
         const skillGovernor = new SkillGovernor({
           messageBus,
@@ -480,7 +570,7 @@ export class PluginAdapter {
           },
         });
         this._engines.skillGovernor = skillGovernor;
-        logger.info?.('[PluginAdapter] SkillGovernor initialized');
+        logger.info?.('[PluginAdapter] SkillGovernor initialized (V6.0 default enabled)');
       } catch (err) {
         logger.warn?.(`[PluginAdapter] SkillGovernor init failed: ${err.message}`);
       }
@@ -496,10 +586,77 @@ export class PluginAdapter {
       },
     });
 
+    // V6.4: SwarmRelayClient — 直接 subagent spawn 客户端 (取代 webhook relay)
+    // V6.4: Direct subagent spawn client (replaces webhook relay)
+    // 通过 WS callGateway 以 lane="subagent" 创建真正的子代理,
+    // 支持完整生命周期: subagent_spawned/ended hooks + announce 回传
+    const relayConfig = config?.relay || {};
+    if (relayConfig.enabled !== false) {
+      try {
+        this._engines.relayClient = new SwarmRelayClient({
+          gatewayUrl: relayConfig.gatewayUrl || 'http://127.0.0.1:18789',
+          gatewayToken: relayConfig.gatewayToken || '', // 自动从 config 文件读取 / Auto-loads from config
+          logger: this._logger,
+          maxRetries: relayConfig.maxRetries ?? 3,
+          baseDelayMs: relayConfig.baseDelayMs ?? 500,
+          availableModels: config?.models?.available || [],
+          detachSubagentsOnParentDisconnect: relayConfig.detachSubagentsOnParentDisconnect !== false,
+        });
+        this._logger.info?.('[PluginAdapter] SwarmRelayClient initialized (direct subagent spawn)');
+      } catch (err) {
+        this._logger.warn?.(`[PluginAdapter] SwarmRelayClient init failed: ${err.message}`);
+      }
+    }
+
+    // V6.3: ProgressTracker — 子代理执行进度追踪
+    // V6.3: Sub-agent execution progress tracking
+    this._engines.progressTracker = new ProgressTracker();
+
     // V5.1: 去重守卫——plugin-adapter 内部维护已发布 agent ID Set
     // V5.1: Dedup guard — plugin-adapter maintains its own published agent ID Set
     /** @type {Set<string>} */
     this._publishedAgentIds = new Set();
+
+    // ── L6: 监控层 — DashboardService 实例化与启动 ──────────────────────
+    // V7.0-fix: L6 monitoring layer — instantiate and start DashboardService
+    try {
+      const stateBroadcaster = new StateBroadcaster({ messageBus, logger });
+      this._engines.stateBroadcaster = stateBroadcaster;
+
+      const metricsCollector = new MetricsCollector({ messageBus, logger });
+      this._engines.metricsCollector = metricsCollector;
+
+      const dashboardService = new DashboardService({
+        stateBroadcaster,
+        metricsCollector,
+        messageBus,
+        logger,
+        port: config.dashboard?.port || 19100,
+        db: this._engines.dbManager?.db || null,
+        qualityController: this._engines.qualityController,
+        shapleyCredit: this._engines.shapleyCredit,
+        budgetForecaster: this._engines.budgetForecaster,
+        globalModulator: this._engines.globalModulator,
+        dualProcessRouter: this._engines.dualProcessRouter,
+        // V7.0: 传递全引擎引用 — 让 V5.6/V7.0 端点能访问 dagEngine/relayClient 等
+        engines: this._engines,
+      });
+      this._engines.dashboardService = dashboardService;
+
+      // 异步启动, 不阻塞 init / Start async, don't block init
+      dashboardService.start().catch(err => {
+        this._logger.warn?.(`[PluginAdapter] Dashboard start failed: ${err.message}`);
+      });
+
+      // V7.0-fix: 启动 StateBroadcaster 和 MetricsCollector — 缺失导致 /api/metrics 全零、SSE 无推送
+      // V7.0-fix: Start StateBroadcaster & MetricsCollector — missing caused /api/metrics all-zero, SSE silent
+      stateBroadcaster.start();
+      metricsCollector.start();
+
+      this._logger.info?.('[PluginAdapter] L6 DashboardService + StateBroadcaster + MetricsCollector initialized');
+    } catch (err) {
+      this._logger.warn?.(`[PluginAdapter] L6 monitoring init failed (non-fatal): ${err.message}`);
+    }
 
     this._initialized = true;
     this._logger.info?.(`[PluginAdapter] Claw-Swarm V${VERSION} 初始化完成 / Initialized successfully`);
@@ -749,13 +906,31 @@ export class PluginAdapter {
 
         // 更新声誉 / Update reputation
         try {
-          engines.reputationLedger?.recordOutcome?.({
-            agentId: event.subAgentId,
+          // V7.0-fix: recordOutcome 不存在, 改用 recordEvent (与 swarm-core.js auto-hook 3 一致)
+          const repSuccess = qualityResult?.verdict === 'pass';
+          engines.reputationLedger?.recordEvent?.(event.subAgentId, {
+            dimension: 'competence',
+            score: repSuccess ? 70 : 30,
             taskId: event.taskId,
-            success: qualityResult?.verdict === 'pass',
+            context: { verdict: qualityResult?.verdict, source: 'onSubAgentComplete' },
           });
         } catch (err) {
           logger.warn?.(`[Hook:onSubAgentComplete] 声誉更新失败 / Reputation update failed: ${err.message}`);
+        }
+
+        // V6.2: 代理完成时提取模式 / Extract patterns on agent completion
+        if (engines.episodicMemory) {
+          try {
+            engines.episodicMemory.extractPatterns(event.subAgentId, { semanticMemory: engines.semanticMemory });
+          } catch { /* non-fatal */ }
+        }
+
+        // 更新任务状态为已完成 / Update task status to completed
+        try {
+          engines.repos?.taskRepo?.updateTaskStatus?.(event.taskId, 'completed');
+          logger.info?.(`[Hook:onSubAgentComplete] 任务状态已更新 / Task status updated: ${event.taskId} → completed`);
+        } catch (err) {
+          logger.warn?.(`[Hook:onSubAgentComplete] 任务状态更新失败 / Task status update failed: ${err.message}`);
         }
 
         // V5.1: 发布 task.completed 事件 / Publish task.completed event
@@ -806,6 +981,14 @@ export class PluginAdapter {
           reason: event.reason,
           abortedAt: Date.now(),
         });
+
+        // 更新任务状态为失败 / Update task status to failed
+        try {
+          engines.repos?.taskRepo?.updateTaskStatus?.(event.taskId, 'failed', event.reason);
+          logger.info?.(`[Hook:onSubAgentAbort] 任务状态已更新 / Task status updated: ${event.taskId} → failed`);
+        } catch (err) {
+          logger.warn?.(`[Hook:onSubAgentAbort] 任务状态更新失败 / Task status update failed: ${err.message}`);
+        }
 
         // V5.1: 发布 task.failed 事件 / Publish task.failed event
         engines.messageBus?.publish?.(
@@ -1020,31 +1203,39 @@ export class PluginAdapter {
       logger: this._logger,
     };
 
+    // V6.3: 工具精简 9→3 — 废弃工具的功能已吸收到 auto-hooks + swarm_query 扩展 scope
+    // V6.3: Tool consolidation 9→3 — deprecated tool functions absorbed into auto-hooks + swarm_query scopes
     return [
-      // 1. swarm_spawn: 蜂群生成 / Swarm spawning
-      createSpawnTool(toolDeps),
+      // 1. swarm_run: 统一蜂群执行入口 / Unified swarm execution entry
+      createRunTool(toolDeps),
 
-      // 2. swarm_query: 蜂群状态查询 / Swarm state query
+      // 2. swarm_query: 蜂群状态查询 (10 scopes) / Swarm state query (10 scopes)
       createQueryTool(toolDeps),
 
-      // 3. swarm_pheromone: 信息素操作 / Pheromone operations
-      createPheromoneTool(toolDeps),
+      // 3. swarm_dispatch: 外部消息推送 / External message dispatch
+      createDispatchTool(toolDeps),
 
-      // 4. swarm_gate: 质量门控 / Quality gate
-      createGateTool(toolDeps),
-
-      // 5. swarm_memory: 记忆操作 / Memory operations
-      createMemoryTool(toolDeps),
-
-      // 6. swarm_plan: 执行计划 / Execution plan
-      createPlanTool(toolDeps),
-
-      // 7. swarm_zone: Zone 管理 / Zone management
-      createZoneTool(toolDeps),
-
-      // 8. swarm_run: 一键执行 (V5.3) / One-click execution (V5.3)
-      createRunTool(toolDeps),
+      // 4. swarm_checkpoint: 人机协作检查点 / Human-in-the-loop checkpoint (V7.1)
+      createCheckpointTool(toolDeps),
     ];
+  }
+
+  /**
+   * 获取工具清单 (不含 execute 方法, 用于 IPC 代理注册)
+   * Get tool manifests (without execute handler, for IPC proxy registration)
+   *
+   * V6.0: SwarmCore 调用此方法获取清单, 主进程根据清单注册 IPC 代理工具
+   * V6.0: SwarmCore calls this to get manifests, main process registers IPC proxy tools
+   *
+   * @returns {Array<{ name: string, description: string, parameters: Object }>}
+   */
+  getToolManifests() {
+    const tools = this.getTools();
+    return tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    }));
   }
 
   // ━━━ 子 Agent 生命周期辅助 / Sub-Agent Lifecycle Helpers ━━━

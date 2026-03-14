@@ -3,9 +3,9 @@
  * Claw-Swarm V5.2 - Complete Database Schema Definitions
  * Claw-Swarm V5.2 - 完全なデータベーススキーマ定義
  *
- * Defines ALL 44 table DDL statements, PRAGMA settings,
+ * Defines ALL 50 table DDL statements, PRAGMA settings,
  * and the createAllTables() bootstrap function.
- * 全44テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
+ * 全50テーブルのDDL文、PRAGMAの設定、およびcreateAllTables()ブートストラップ関数を定義する。
  *
  * Tables breakdown:
  *   - Metadata:              1 table   (swarm_meta)
@@ -18,7 +18,10 @@
  *   - NEW V5.0:              7 tables  (knowledge_nodes .. execution_plans)
  *   - NEW V5.1:              4 tables  (breaker_state, repair_memory, dead_letter_tasks, task_affinity)
  *   - NEW V5.2:              6 tables  (agent_thresholds, pheromone_type_config, stigmergic_posts, failure_vaccines, trace_spans, skill_symbiosis)
- *   Total:                  44 tables
+ *   - NEW V6.0:              6 tables  (failure_mode_log, quality_audit, vector_index_meta, shapley_credits, sna_snapshots, ipc_call_stats)
+ *   - NEW V6.3:              1 table   (dag_snapshots)
+ *   - NEW V7.1:              1 table   (swarm_user_checkpoints)
+ *   Total:                  52 tables
  */
 
 'use strict';
@@ -26,7 +29,7 @@
 // ---------------------------------------------------------------------------
 // Schema version / スキーマバージョン
 // ---------------------------------------------------------------------------
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 9;
 
 // ---------------------------------------------------------------------------
 // PRAGMA settings (inherited from v4.x, tuned for WAL + concurrent reads)
@@ -1097,6 +1100,188 @@ const TABLE_SCHEMAS = [
       'CREATE INDEX IF NOT EXISTS idx_skill_symbiosis_complementarity ON skill_symbiosis (complementarity DESC)',
     ],
   },
+
+  // =========================================================================
+  //  V6.0: NEW TABLES (6 tables)
+  // =========================================================================
+
+  {
+    // failure_mode_log - Failure root cause classification log
+    // failure_mode_log - 失敗根因分類ログ
+    name: 'failure_mode_log',
+    sql: `
+      CREATE TABLE IF NOT EXISTS failure_mode_log (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        tool_name      TEXT NOT NULL,
+        error_category TEXT NOT NULL,
+        error_message  TEXT,
+        mitigation     TEXT,
+        outcome        TEXT,
+        timestamp      INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_failure_mode_tool       ON failure_mode_log (tool_name)',
+      'CREATE INDEX IF NOT EXISTS idx_failure_mode_category   ON failure_mode_log (error_category)',
+      'CREATE INDEX IF NOT EXISTS idx_failure_mode_timestamp  ON failure_mode_log (timestamp)',
+    ],
+  },
+
+  {
+    // quality_audit - Quality assessment audit trail
+    // quality_audit - 品質評価の監査証跡
+    name: 'quality_audit',
+    sql: `
+      CREATE TABLE IF NOT EXISTS quality_audit (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id         TEXT NOT NULL,
+        tier            TEXT NOT NULL,
+        rubric_scores   TEXT,
+        overall_score   REAL,
+        verdict         TEXT NOT NULL,
+        conflict_notes  TEXT,
+        timestamp       INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_quality_audit_task      ON quality_audit (task_id)',
+      'CREATE INDEX IF NOT EXISTS idx_quality_audit_verdict   ON quality_audit (verdict)',
+      'CREATE INDEX IF NOT EXISTS idx_quality_audit_timestamp ON quality_audit (timestamp)',
+    ],
+  },
+
+  {
+    // vector_index_meta - Vector embedding index metadata
+    // vector_index_meta - ベクトル埋め込みインデックスのメタデータ
+    name: 'vector_index_meta',
+    sql: `
+      CREATE TABLE IF NOT EXISTS vector_index_meta (
+        vector_id    INTEGER PRIMARY KEY,
+        source_table TEXT NOT NULL,
+        source_id    TEXT NOT NULL,
+        dimensions   INTEGER NOT NULL,
+        embedded_at  INTEGER NOT NULL,
+        UNIQUE(source_table, source_id)
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_vector_meta_source ON vector_index_meta (source_table, source_id)',
+    ],
+  },
+
+  {
+    // shapley_credits - Monte Carlo Shapley credit attribution history
+    // shapley_credits - モンテカルロShapley信用帰属履歴
+    name: 'shapley_credits',
+    sql: `
+      CREATE TABLE IF NOT EXISTS shapley_credits (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        dag_id          TEXT NOT NULL,
+        agent_id        TEXT NOT NULL,
+        credit          REAL NOT NULL,
+        coalition_size  INTEGER,
+        computed_at     INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_shapley_dag       ON shapley_credits (dag_id)',
+      'CREATE INDEX IF NOT EXISTS idx_shapley_agent     ON shapley_credits (agent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_shapley_computed  ON shapley_credits (computed_at)',
+    ],
+  },
+
+  {
+    // sna_snapshots - Social Network Analysis metric snapshots
+    // sna_snapshots - ソーシャルネットワーク分析の指標スナップショット
+    name: 'sna_snapshots',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sna_snapshots (
+        id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id                 TEXT NOT NULL,
+        degree_centrality        REAL,
+        betweenness_centrality   REAL,
+        clustering_coefficient   REAL,
+        computed_at              INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_sna_agent     ON sna_snapshots (agent_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sna_computed  ON sna_snapshots (computed_at)',
+    ],
+  },
+
+  {
+    // ipc_call_stats - IPC call latency and success statistics
+    // ipc_call_stats - IPC呼び出しのレイテンシと成功統計
+    name: 'ipc_call_stats',
+    sql: `
+      CREATE TABLE IF NOT EXISTS ipc_call_stats (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        method      TEXT NOT NULL,
+        duration_ms REAL NOT NULL,
+        success     INTEGER NOT NULL DEFAULT 1,
+        timestamp   INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_ipc_stats_method    ON ipc_call_stats (method)',
+      'CREATE INDEX IF NOT EXISTS idx_ipc_stats_timestamp ON ipc_call_stats (timestamp)',
+    ],
+  },
+
+  // =========================================================================
+  //  NEW V7.1: HUMAN-IN-THE-LOOP CHECKPOINTS  (1 table)
+  // =========================================================================
+
+  {
+    // swarm_user_checkpoints - Mid-execution approval requests from sub-agents to user
+    // swarm_user_checkpoints - 子代理执行中途向用户请求确认的检查点
+    name: 'swarm_user_checkpoints',
+    sql: `
+      CREATE TABLE IF NOT EXISTS swarm_user_checkpoints (
+        id            TEXT PRIMARY KEY,
+        question      TEXT NOT NULL,
+        task_id       TEXT,
+        agent_id      TEXT,
+        phase_role    TEXT,
+        phase_desc    TEXT,
+        original_goal TEXT,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        answer        TEXT,
+        created_at    INTEGER NOT NULL,
+        resolved_at   INTEGER
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_user_ckpt_status     ON swarm_user_checkpoints (status)',
+      'CREATE INDEX IF NOT EXISTS idx_user_ckpt_created_at ON swarm_user_checkpoints (created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_user_ckpt_agent_id   ON swarm_user_checkpoints (agent_id)',
+    ],
+  },
+
+  // =========================================================================
+  //  NEW V6.3: DAG PERSISTENCE  (1 table)
+  // =========================================================================
+
+  {
+    // dag_snapshots - DAG state persistence for crash recovery
+    // dag_snapshots - クラッシュリカバリ用DAG状態永続化
+    name: 'dag_snapshots',
+    sql: `
+      CREATE TABLE IF NOT EXISTS dag_snapshots (
+        dag_id       TEXT PRIMARY KEY,
+        status       TEXT NOT NULL DEFAULT 'active',
+        nodes_json   TEXT NOT NULL,
+        metadata_json TEXT DEFAULT '{}',
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      )
+    `,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_dag_snap_status    ON dag_snapshots (status)',
+      'CREATE INDEX IF NOT EXISTS idx_dag_snap_updated   ON dag_snapshots (updated_at)',
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1105,9 +1290,9 @@ const TABLE_SCHEMAS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Creates all 44 tables and their indexes inside a single transaction.
+ * Creates all 51 tables and their indexes inside a single transaction.
  * Also seeds swarm_meta with the current schema version.
- * 単一トランザクション内で全44テーブルとインデックスを作成する。
+ * 単一トランザクション内で全50テーブルとインデックスを作成する。
  * また、現在のスキーマバージョンでswarm_metaをシードする。
  *
  * @param {import('better-sqlite3').Database} db - A better-sqlite3 database instance

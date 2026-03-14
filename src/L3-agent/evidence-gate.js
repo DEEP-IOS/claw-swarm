@@ -83,6 +83,14 @@ export class EvidenceGate {
     /** @type {Map<string, Object>} claim 缓存 */
     this._claims = new Map();
 
+    /**
+     * V6.2: 双过程路由器引用 / DualProcessRouter reference
+     * 用于自适应证据阈值调整
+     * Used for adaptive evidence threshold adjustment
+     * @type {Object|null}
+     */
+    this._dualProcessRouter = null;
+
     /** @type {Object} 统计 */
     this._stats = {
       claimsRegistered: 0,
@@ -204,7 +212,13 @@ export class EvidenceGate {
     this._stats.evaluations++;
     this._computeScore(claim);
 
-    const meetsStandard = claim.score >= this._minScore;
+    // V6.2: 使用自适应阈值 (如果有双过程路由器)
+    // V6.2: Use adaptive threshold when DualProcessRouter is available
+    const effectiveMinScore = this._dualProcessRouter
+      ? this.getAdaptiveMinScore({ taskType: claim.taskId || 'default' })
+      : this._minScore;
+
+    const meetsStandard = claim.score >= effectiveMinScore;
     if (meetsStandard) {
       this._stats.passed++;
     } else {
@@ -326,6 +340,72 @@ export class EvidenceGate {
       }
     }
     return results.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // V6.2: 双过程路由集成 / DualProcessRouter Integration
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * V6.2: 设置双过程路由器 / Set DualProcessRouter instance
+   *
+   * 关联后 evaluateClaim 将使用自适应阈值。
+   * Once set, evaluateClaim uses adaptive threshold based on routing result.
+   *
+   * @param {Object} router - DualProcessRouter 实例 / DualProcessRouter instance
+   */
+  setDualProcessRouter(router) {
+    this._dualProcessRouter = router || null;
+  }
+
+  /**
+   * V6.2: 获取自适应最低证据分数 / Get adaptive minimum evidence score
+   *
+   * 根据 DualProcessRouter 路由结果调整证据阈值:
+   * Adjusts evidence threshold based on DualProcessRouter routing result:
+   * - System 2 (深思模式 / deliberate): 严格阈值 0.6, 要求更充分证据
+   * - System 1 (快速模式 / intuitive):  宽松阈值 0.2, 仅需 PRIMARY 证据
+   * - 无路由器 / No router: 使用默认配置阈值
+   *
+   * @param {Object} [context={}] - 路由上下文 / Routing context
+   * @returns {number} 自适应最低分数 / Adaptive min score
+   */
+  getAdaptiveMinScore(context = {}) {
+    if (!this._dualProcessRouter) {
+      return this._minScore;
+    }
+
+    try {
+      const decision = this._dualProcessRouter.route(context);
+
+      if (decision.system === 2) {
+        // System 2: 严格模式 — 需要充分证据 / Strict mode — require thorough evidence
+        return 0.6;
+      }
+
+      // System 1: 宽松模式 — 仅需 PRIMARY 证据即可 / Relaxed mode — PRIMARY only
+      return 0.2;
+    } catch {
+      // 路由失败时回退到默认 / Fallback to default on routing failure
+      return this._minScore;
+    }
+  }
+
+  /**
+   * V6.2: 获取 claim 的归一化质量分数 / Get normalized claim score for quality
+   *
+   * 返回 0-1 归一化分数, 用于 QualityController 输入信号。
+   * Returns 0-1 normalized score for use as QualityController input signal.
+   *
+   * @param {string} claimId
+   * @returns {number|null} 归一化分数 0-1 / Normalized score 0-1, or null if not found
+   */
+  getClaimScoreForQuality(claimId) {
+    const claim = this._claims.get(claimId);
+    if (!claim) return null;
+
+    this._computeScore(claim);
+    return claim.score; // 已经是 0-1 范围 / Already in 0-1 range
   }
 
   // ══════════════════════════════════════════════════════════════════════════

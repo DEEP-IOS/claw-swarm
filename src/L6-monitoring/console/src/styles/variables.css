@@ -1,0 +1,188 @@
+/**
+ * 蜂群控制台设计令牌 / Swarm Console Design Tokens
+ * @author DEEP-IOS
+ */
+
+:root {
+  /* ── 背景 / Background ── */
+  --bg-primary:    #0F0F23;
+  --bg-surface:    #1A1A2E;
+  --bg-elevated:   #16213E;
+  --bg-hover:      #1E2A4A;
+  --bg-canvas:     #0A0A1A;
+
+  /* ── 文本 / Text ── */
+  --text-primary:  #E8E8F0;
+  --text-secondary:#ACACC0;
+  --text-dim:      #6B6B88;
+  --text-zh:       #9090A8;
+
+  /* ── 边框 / Border ── */
+  --border:        #2A2A4A;
+  --border-active: #3A3A6A;
+  --border-glow:   rgba(245,166,35,0.3);
+
+  /* ── 强调色 / Accent Colors ── */
+  --amber:   #F5A623;
+  --emerald: #10B981;
+  --red:     #EF4444;
+  --blue:    #3B82F6;
+  --purple:  #8B5CF6;
+  --cyan:    #06B6D4;
+  --pink:    #EC4899;
+  --gold:    #FBBF24;
+
+  /* ── 角色色 / Role Colors ── */
+  --role-architect: #8B5CF6;
+  --role-coder:     #10B981;
+  --role-reviewer:  #F5A623;
+  --role-scout:     #06B6D4;
+  --role-designer:  #EC4899;
+  --role-guard:     #EF4444;
+
+  /* ── 状态色 / Status Colors ── */
+  --status-executing: #F5A623;
+  --status-active:    #10B981;
+  --status-idle:      #6B7280;
+  --status-reporting: #8B5CF6;
+  --status-error:     #EF4444;
+
+  /* ── 信息素色 / Pheromone Colors ── */
+  --phero-trail:   #F5A623;
+  --phero-alarm:   #EF4444;
+  --phero-recruit: #3B82F6;
+  --phero-dance:   #10B981;
+  --phero-queen:   #8B5CF6;
+  --phero-food:    #22C55E;
+  --phero-danger:  #EC4899;
+
+  /* ── 模式色 / Mode Colors ── */
+  --mode-explore:  #3B82F6;
+  --mode-exploit:  #10B981;
+  --mode-urgent:   #EF4444;
+  --mode-reliable: #F5A623;
+  --mode-conserve: #6B7280;
+
+  /* ── 视图色 / View Tints ── */
+  --view-hive:      #F5A623;
+  --view-pipeline:  #3B82F6;
+  --view-cognition: #8B5CF6;
+  --view-ecology:   #10B981;
+  --view-network:   #06B6D4;
+  --view-control:   #EF4444;
+
+  /* ── 动画 / Animation ── */
+  --ease-out-expo:  cubic-bezier(0.16,1,0.3,1);
+  --ease-out-back:  cubic-bezier(0.34,1.56,0.64,1);
+  --ease-spring:    cubic-bezier(0.68,-0.55,0.27,1.55);
+  --duration-fast:  150ms;
+  --duration-normal:300ms;
+  --duration-slow:  600ms;
+  --duration-morph: 800ms;
+
+  /* ── 字体 / Fonts ── */
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-sans: 'DM Sans', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-zh:   'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+
+  /* ── 尺寸 / Sizing ── */
+  --header-h:     52px;
+  --sidebar-w:    240px;
+  --inspector-w:  280px;
+  --footer-h:     36px;
+  --timeline-h:   32px;
+  --timeline-h-expanded: 180px;
+  --panel-max-w:  320px;
+  --cmd-palette-w: 480px;
+
+  /* ── 间距 / Spacing ── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* ── 圆角 / Border Radius ── */
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-full: 9999px;
+
+  /* ── 阴影 / Shadows ── */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg:  0 8px 24px rgba(0,0,0,0.5);
+  --shadow-glow: 0 0 15px rgba(245,166,35,0.3);
+
+  /* ── 通知色 / Notification Colors ── */
+  --notif-success:  #10B981;
+  --notif-warning:  #F5A623;
+  --notif-error:    #EF4444;
+  --notif-info:     #3B82F6;
+  --notif-evolution: #8B5CF6;
+
+  /* ── 新鲜度色 / Freshness Colors ── */
+  --fresh-live:  #10B981;
+  --fresh-recent: #F5A623;
+  --fresh-stale: #6B7280;
+  --fresh-disconnected: #EF4444;
+
+  /* ── 层级 / Z-Index ── */
+  --z-canvas-bg: 1;
+  --z-canvas-fx: 2;
+  --z-canvas-fg: 3;
+  --z-overlay:   10;
+  --z-sidebar:   20;
+  --z-header:    30;
+  --z-panel:     35;
+  --z-tooltip:   40;
+  --z-timeline:  42;
+  --z-modal:     50;
+  --z-cmd-palette: 55;
+  --z-notify:    60;
+  --z-onboarding: 70;
+}
+
+/* ── 色盲模式覆盖 / Colorblind Mode Overrides ── */
+.deuteranopia {
+  --role-coder:     #E69500;
+  --status-active:  #E69500;
+  --emerald:        #E69500;
+  --phero-dance:    #E69500;
+  --role-guard:     #FF6B00;
+  --status-error:   #FF6B00;
+  --red:            #FF6B00;
+}
+
+.protanopia {
+  --role-guard:     #FFD700;
+  --status-error:   #FFD700;
+  --red:            #FFD700;
+  --phero-alarm:    #FFD700;
+}
+
+.tritanopia {
+  --blue:           #9B59B6;
+  --phero-recruit:  #9B59B6;
+  --mode-explore:   #9B59B6;
+  --gold:           #FF69B4;
+  --amber:          #FF69B4;
+}
+
+/* ── 减少动画 / Reduced Motion ── */
+.reduced-motion,
+.reduced-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ── 性能模式 / Performance Mode ── */
+.perf-mode {
+  --duration-fast: 0ms;
+  --duration-normal: 0ms;
+  --duration-slow: 0ms;
+  --duration-morph: 100ms;
+}

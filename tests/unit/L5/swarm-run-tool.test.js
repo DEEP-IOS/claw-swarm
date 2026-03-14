@@ -91,6 +91,11 @@ function createMockEngines() {
     soulDesigner: {
       generateSoul: () => 'SOUL snippet',
     },
+    relayClient: {
+      _parentSessionKey: 'agent:main:session:test-parent',
+      listActiveSessions: vi.fn(() => ({ sessions: [] })),
+      endSession: vi.fn(() => ({ status: 'ended', deleted: true })),
+    },
     hierarchicalCoordinator: null, // 默认无并发限制 / No concurrency limit by default
   };
 }
@@ -120,7 +125,7 @@ describe('SwarmRunTool / 蜂群一键执行工具', () => {
       expect(tool.parameters.type).toBe('object');
       expect(tool.parameters.properties.goal).toBeDefined();
       expect(tool.parameters.properties.mode).toBeDefined();
-      expect(tool.parameters.required).toContain('goal');
+      expect(tool.parameters.required || []).not.toContain('goal');
       expect(typeof tool.execute).toBe('function');
       expect(typeof tool.handler).toBe('function');
     });
@@ -352,6 +357,81 @@ describe('SwarmRunTool / 蜂群一键执行工具', () => {
   // 边界情况 / Edge Cases
   // --------------------------------------------------------------------------
   describe('Edge cases / 边界情况', () => {
+    it('cancel mode should not require goal / cancel 模式不应要求 goal', async () => {
+      engines.taskRepo.updateTaskStatus = vi.fn();
+      const tool = createRunTool({ engines, logger: silentLogger });
+      const result = await tool.handler({
+        mode: 'cancel',
+        taskId: 'task-123',
+      });
+
+      expect(result.cancelled).toBe(true);
+      expect(result.taskCancelled).toBe(true);
+      expect(engines.taskRepo.updateTaskStatus).toHaveBeenCalledWith('task-123', 'cancelled');
+    });
+
+    it('cancel mode should fail without dagId/taskId / cancel 模式缺少 dagId/taskId 应失败', async () => {
+      const tool = createRunTool({ engines, logger: silentLogger });
+      const result = await tool.handler({ mode: 'cancel' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('cancel mode requires dagId or taskId');
+    });
+
+    it('cancel mode should terminate matching subagent sessions / cancel 模式应终止匹配的子代理会话', async () => {
+      engines.relayClient.listActiveSessions = vi.fn(() => ({
+        sessions: [
+          {
+            key: 'agent:mpu-d1:subagent:abc',
+            label: 'swarm:task-123:mpu-d1:dag-1:phase-1',
+            spawnedBy: 'agent:main:session:test-parent',
+          },
+          {
+            key: 'agent:mpu-d2:subagent:def',
+            label: 'swarm:task-999:mpu-d2:dag-9:phase-1',
+            spawnedBy: 'agent:main:session:test-parent',
+          },
+        ],
+      }));
+      engines.relayClient.endSession = vi.fn(() => ({ status: 'ended', deleted: true }));
+
+      const tool = createRunTool({ engines, logger: silentLogger });
+      const result = await tool.handler({ mode: 'cancel', taskId: 'task-123' });
+
+      expect(result.cancelled).toBe(true);
+      expect(result.sessionsMatched).toBe(1);
+      expect(result.sessionsEnded).toBe(1);
+      expect(engines.relayClient.endSession).toHaveBeenCalledTimes(1);
+      expect(engines.relayClient.endSession).toHaveBeenCalledWith(
+        'agent:mpu-d1:subagent:abc',
+        expect.objectContaining({ deleteTranscript: false, emitLifecycleHooks: true })
+      );
+    });
+
+    it('cancel mode should report failure when matched sessions cannot be terminated / 匹配会话无法终止时应返回失败', async () => {
+      engines.relayClient.listActiveSessions = vi.fn(() => ({
+        sessions: [
+          {
+            key: 'agent:mpu-d1:subagent:abc',
+            label: 'swarm:task-123:mpu-d1:dag-1:phase-1',
+            spawnedBy: 'agent:main:session:test-parent',
+          },
+        ],
+      }));
+      engines.relayClient.endSession = vi.fn(() => ({ status: 'end_failed', error: 'permission denied' }));
+
+      const tool = createRunTool({ engines, logger: silentLogger });
+      const result = await tool.handler({ mode: 'cancel', taskId: 'task-123' });
+
+      expect(result.success).toBe(false);
+      expect(result.cancelled).toBe(false);
+      expect(result.sessionsMatched).toBe(1);
+      expect(result.sessionsEnded).toBe(0);
+      expect(result.sessionEndErrors).toEqual([
+        expect.objectContaining({ sessionKey: 'agent:mpu-d1:subagent:abc' }),
+      ]);
+    });
+
     it('should handle unknown mode / 应处理未知模式', async () => {
       const tool = createRunTool({ engines, logger: silentLogger });
       const result = await tool.handler({
@@ -363,7 +443,8 @@ describe('SwarmRunTool / 蜂群一键执行工具', () => {
       expect(result.error).toContain('Unknown mode');
     });
 
-    it('should handle no roles found / 应处理未找到角色', async () => {
+    it('should return direct_reply for non-task input / 非任务型输入应返回 direct_reply', async () => {
+      // V6.3: 0 roles → direct_reply 而非通用错误
       engines.executionPlanner.planExecution = () => ({
         roles: [],
         scores: [],
@@ -376,7 +457,8 @@ describe('SwarmRunTool / 蜂群一键执行工具', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('角色');
+      expect(result.mode).toBe('direct_reply');
+      expect(result.reason).toBeDefined();
     });
 
     it('should gracefully handle agentRepo failure / 应优雅处理 agentRepo 失败', async () => {

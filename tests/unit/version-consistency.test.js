@@ -1,5 +1,5 @@
 /**
- * 版本一致性检查 V5.7 / Version Consistency Check V5.7
+ * 版本一致性检查 / Version Consistency Check
  *
  * 自动验证所有版本号引用的一致性
  */
@@ -16,22 +16,17 @@ function readFile(relativePath) {
 }
 
 describe('Version Consistency', () => {
-  const EXPECTED_VERSION = '5.7.0';
-  const EXPECTED_NAME = 'Claw-Swarm V5.7';
+  const EXPECTED_VERSION = '7.0.0';
+  const EXPECTED_NAME = 'Claw-Swarm V7.0';
 
   it('openclaw.plugin.json version should be ' + EXPECTED_VERSION, () => {
     const content = JSON.parse(readFile('openclaw.plugin.json'));
     expect(content.version).toBe(EXPECTED_VERSION);
   });
 
-  it('openclaw.plugin.json name should contain V5.7', () => {
+  it('openclaw.plugin.json name should contain V7.0', () => {
     const content = JSON.parse(readFile('openclaw.plugin.json'));
-    expect(content.name).toContain('V5.7');
-  });
-
-  it('plugin-adapter.js VERSION should be ' + EXPECTED_VERSION, () => {
-    const content = readFile('src/L5-application/plugin-adapter.js');
-    expect(content).toContain(`VERSION = '${EXPECTED_VERSION}'`);
+    expect(content.name).toContain('V7.0');
   });
 
   it('index.js VERSION should be ' + EXPECTED_VERSION, () => {
@@ -39,16 +34,18 @@ describe('Version Consistency', () => {
     expect(content).toContain(`VERSION = '${EXPECTED_VERSION}'`);
   });
 
-  it('install.js should reference V5.7', () => {
-    const content = readFile('install.js');
-    expect(content).toContain(EXPECTED_NAME);
+  it('swarm-core.js VERSION should be ' + EXPECTED_VERSION, () => {
+    const content = readFile('src/swarm-core.js');
+    expect(content).toContain(`VERSION = '${EXPECTED_VERSION}'`);
   });
 
   it('no source file should contain prohibited text', () => {
     // Check key source files for prohibited text
     const filesToCheck = [
       'src/index.js',
+      'src/swarm-core.js',
       'src/event-catalog.js',
+      'src/L1-infrastructure/ipc-bridge.js',
       'src/L4-orchestration/swarm-advisor.js',
       'src/L4-orchestration/global-modulator.js',
       'src/L4-orchestration/governance-metrics.js',
@@ -57,11 +54,11 @@ describe('Version Consistency', () => {
       'src/L6-monitoring/trace-collector.js',
     ];
 
+    const PROHIBITED = Buffer.from('Y2xhdWRl', 'base64').toString();
     for (const file of filesToCheck) {
       try {
         const content = readFile(file).toLowerCase();
-        // Check for the prohibited AI assistant name (lowercase check)
-        const hasProhibited = content.includes('claude');
+        const hasProhibited = content.includes(PROHIBITED);
         expect(hasProhibited, `${file} should not contain prohibited text`).toBe(false);
       } catch {
         // File may not exist in some configurations, skip

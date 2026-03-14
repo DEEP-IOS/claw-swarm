@@ -1,26 +1,34 @@
 /**
  * MessageBus — 统一消息总线 / Unified Message Bus
  *
- * V5.0 基于 eventemitter3 的高性能消息总线, 提供:
+ * V5.0 高性能消息总线, 提供:
  * - Topic 订阅/发布
  * - 消息 zod 校验 (可选)
  * - 死信队列 (DLQ)
  * - 通配符订阅 (topic.*)
  * - 消息历史回放 (最近 N 条)
  *
- * V5.0 high-performance message bus based on eventemitter3:
+ * V6.0 新增:
+ * - 可插拔传输层 (Transport 注入, 默认 EventEmitterTransport)
+ * - 对所有调用者完全透明: API 不变, 只是内部传输可切换
+ *
+ * V5.0 high-performance message bus:
  * - Topic pub/sub
  * - Optional zod message validation
  * - Dead letter queue (DLQ)
  * - Wildcard subscriptions (topic.*)
  * - Recent message replay (last N)
  *
+ * V6.0 additions:
+ * - Pluggable transport layer (injected Transport, defaults to EventEmitterTransport)
+ * - Fully transparent to all callers: API unchanged, only internal transport is swappable
+ *
  * @module L2-communication/message-bus
  * @author DEEP-IOS
  */
 
-import EventEmitter from 'eventemitter3';
 import { nanoid } from 'nanoid';
+import { EventEmitterTransport } from './transports/event-emitter-transport.js';
 
 const MAX_DLQ_SIZE = 100;
 const MAX_HISTORY_SIZE = 200;
@@ -31,10 +39,15 @@ export class MessageBus {
    * @param {Object} [options.logger]
    * @param {boolean} [options.enableHistory=false] - 启用消息历史 / Enable message history
    * @param {boolean} [options.enableDLQ=true] - 启用死信队列 / Enable dead letter queue
+   * @param {import('./transports/transport-interface.js').Transport} [options.transport] - V6.0: 可插拔传输层 / Pluggable transport
    */
   constructor(options = {}) {
-    /** @type {EventEmitter} */
-    this._emitter = new EventEmitter();
+    /**
+     * V6.0: 可插拔传输层 (默认 EventEmitterTransport, 行为与 V5.x 100% 相同)
+     * V6.0: Pluggable transport (defaults to EventEmitterTransport, 100% V5.x compatible)
+     * @type {import('./transports/transport-interface.js').Transport}
+     */
+    this._transport = options.transport || new EventEmitterTransport();
 
     /** @type {Object} */
     this._logger = options.logger || console;
@@ -102,9 +115,9 @@ export class MessageBus {
 
     // 精确匹配订阅 / Exact match subscribers
     try {
-      const listenerCount = this._emitter.listenerCount(topic);
+      const listenerCount = this._transport.listenerCount(topic);
       if (listenerCount > 0) {
-        this._emitter.emit(topic, message);
+        this._transport.emit(topic, message);
         this._stats.delivered += listenerCount;
       }
     } catch (err) {
@@ -115,6 +128,51 @@ export class MessageBus {
     this._deliverToWildcards(topic, message);
 
     return message.id;
+  }
+
+  /**
+   * V6.1: 请求-回复模式 / Request-reply pattern
+   *
+   * 发送带 correlationId 的请求, 等待匹配的回复。
+   * Sends request with correlationId, waits for matching reply.
+   *
+   * @param {string} topic - 请求主题 / Request topic
+   * @param {Object} payload - 请求数据 / Request data
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs=5000] - 超时 (ms)
+   * @param {string} [options.senderId='request-reply']
+   * @returns {Promise<Object>} 回复数据 / Reply data
+   */
+  requestReply(topic, payload, { timeoutMs = 5000, senderId = 'request-reply' } = {}) {
+    const correlationId = `rr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyTopic = `${topic}.reply`;
+
+    return new Promise((resolve, reject) => {
+      let timer;
+      let unsubscribe;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        if (unsubscribe) unsubscribe();
+      };
+
+      // 订阅回复 / Subscribe to reply
+      unsubscribe = this.subscribe(replyTopic, (reply) => {
+        if (reply?.correlationId === correlationId || reply?.payload?.correlationId === correlationId) {
+          cleanup();
+          resolve(reply);
+        }
+      });
+
+      // 超时 / Timeout
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`requestReply timeout on ${topic} after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      // 发送请求 / Send request
+      this.publish(topic, payload, { senderId, correlationId });
+    });
   }
 
   // ━━━ 订阅 / Subscribe ━━━
@@ -146,8 +204,8 @@ export class MessageBus {
     }
 
     // 精确订阅 / Exact subscription
-    this._emitter.on(topic, handler);
-    return () => this._emitter.off(topic, handler);
+    this._transport.on(topic, handler);
+    return () => this._transport.off(topic, handler);
   }
 
   /**
@@ -159,8 +217,8 @@ export class MessageBus {
    * @returns {() => void} unsubscribe function
    */
   once(topic, handler) {
-    this._emitter.once(topic, handler);
-    return () => this._emitter.off(topic, handler);
+    this._transport.once(topic, handler);
+    return () => this._transport.off(topic, handler);
   }
 
   // ━━━ 死信队列 / Dead Letter Queue ━━━
@@ -242,7 +300,7 @@ export class MessageBus {
    * Get list of active topics
    */
   getActiveTopics() {
-    return this._emitter.eventNames();
+    return this._transport.eventNames();
   }
 
   /**
@@ -250,7 +308,7 @@ export class MessageBus {
    * Remove all subscriptions
    */
   removeAllSubscriptions() {
-    this._emitter.removeAllListeners();
+    this._transport.removeAllListeners();
     this._wildcardSubscribers.clear();
   }
 
@@ -262,6 +320,7 @@ export class MessageBus {
     this.removeAllSubscriptions();
     this._history = [];
     this._dlq = [];
+    this._transport.destroy?.();
   }
 
   // ━━━ 内部方法 / Internal ━━━

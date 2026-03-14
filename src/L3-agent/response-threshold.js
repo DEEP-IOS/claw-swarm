@@ -173,6 +173,82 @@ export class ResponseThreshold {
     return count;
   }
 
+  // ━━━ V7.0 §7: 闭环执行 / Closed-Loop Actuation ━━━
+
+  /**
+   * V7.0 §7+§23: 将 PI 控制器输出执行为 session 参数修改
+   * Actuate PI controller adjustments as real session parameter changes
+   *
+   * 策略: 阈值 → 模型选择映射
+   * - 低阈值 (< 0.3) → 需要强模型 (列表尾部, 高成本) — 活跃度不足
+   * - 中阈值 (0.3-0.7) → 中档模型
+   * - 高阈值 (> 0.7) → 便宜模型 (列表头部) — 活跃度充足, 节省成本
+   *
+   * Strategy: threshold → model selection mapping
+   * Low threshold → strong model (agent needs more capability)
+   * High threshold → cheap model (agent is performing well, save cost)
+   *
+   * @param {string} agentId
+   * @param {string} sessionKey - 活跃 session key
+   * @param {Object} relayClient - SwarmRelayClient 实例 (需有 patchSession 方法)
+   * @param {Array<{id: string, costPerKToken?: number}>} availableModels - 可用模型列表 (按成本升序)
+   * @returns {Promise<{ action: string, model?: string, threshold?: number, error?: string }>}
+   */
+  async actuate(agentId, sessionKey, relayClient, availableModels = []) {
+    if (!relayClient?.patchSession || !sessionKey || availableModels.length < 2) {
+      return { action: 'no_op', reason: 'insufficient_resources' };
+    }
+
+    // 获取 agent 的平均阈值
+    const agentMap = this._thresholds.get(agentId);
+    if (!agentMap || agentMap.size === 0) {
+      return { action: 'no_op', reason: 'no_threshold_data' };
+    }
+
+    let avgThreshold = 0;
+    let count = 0;
+    for (const [, state] of agentMap) {
+      avgThreshold += state.threshold;
+      count++;
+    }
+    avgThreshold /= count;
+
+    // 阈值到模型索引映射 / Threshold to model index mapping
+    // 低阈值 → 高索引 (强模型, 贵), 高阈值 → 低索引 (弱模型, 便宜)
+    const modelIndex = Math.min(
+      availableModels.length - 1,
+      Math.floor((1 - avgThreshold) * availableModels.length),
+    );
+    const selectedModel = availableModels[modelIndex];
+
+    try {
+      const result = await relayClient.patchSession(sessionKey, {
+        model: selectedModel.id,
+      });
+
+      this._publish(EventTopics.THRESHOLD_ADJUSTED, {
+        agentId,
+        sessionKey,
+        actuatedModel: selectedModel.id,
+        avgThreshold: Math.round(avgThreshold * 10000) / 10000,
+        action: 'model_switch',
+      });
+
+      this._logger.debug?.(
+        `[ResponseThreshold] Actuated: agent=${agentId}, threshold=${avgThreshold.toFixed(3)}, model=${selectedModel.id}`,
+      );
+
+      return {
+        action: 'model_switch',
+        model: selectedModel.id,
+        threshold: Math.round(avgThreshold * 10000) / 10000,
+        patchResult: result.status,
+      };
+    } catch (err) {
+      return { action: 'actuate_failed', error: err.message };
+    }
+  }
+
   // ━━━ 全局查询 / Global Query ━━━
 
   /**

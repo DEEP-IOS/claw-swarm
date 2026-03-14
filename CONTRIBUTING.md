@@ -1,4 +1,4 @@
-# Contributing to Claw-Swarm V5.0 / 贡献指南
+# Contributing to Claw-Swarm V7.0 / 贡献指南
 
 Thank you for your interest in contributing to Claw-Swarm!
 感谢你有兴趣为蜂群项目做贡献！
@@ -21,21 +21,29 @@ npm test
 
 ### Project Structure / 项目结构
 
+V7.0 organizes 173 source JS files across 6 layers with strict downward dependencies.
+V7.0 将 173 个源文件组织在 6 个层级中，依赖严格向下流动。
+
 ```
 src/
-├── L1-infrastructure/    # 基础设施: 数据库, 配置, 类型, 日志
-├── L2-communication/     # 通信: 消息总线, 信息素引擎, Gossip
-├── L3-agent/             # Agent: 记忆系统, 能力引擎, 人格进化
-├── L4-orchestration/     # 编排: DAG 调度, 质量门控, CNP, ABC
-├── L5-application/       # 应用: OpenClaw 插件适配, 工具
-├── L6-monitoring/        # 监控: 仪表盘, 指标, SSE 广播
-└── index.js              # 插件入口 / Plugin entry point
+├── index.js                      # Plugin entry (19 hooks) / 插件入口（19 个钩子）
+├── swarm-core.js                 # Fork child process entry / 子进程入口
+├── event-catalog.js              # 122 EventTopics / 122 个事件主题
+├── L1-infrastructure/  (25 files)  # Database (52 tables), config, IPC, workers
+├── L2-communication/   (13 files)  # MessageBus, pheromone engine, gossip, relay
+├── L3-agent/           (21 files)  # Memory, persona, reputation, embeddings, SNA
+├── L4-orchestration/   (25 files)  # DAG, contract-net, ABC, Shapley, modulator
+├── L5-application/     (18 files)  # Plugin adapter, tool resilience, 10 tools (4 public)
+└── L6-monitoring/                  # Dashboard service (7 files) + console SPA (98 files)
 ```
 
 **Dependency rule / 依赖规则:** Layers depend strictly downward (L6 -> L5 -> ... -> L1). Never import upward.
 层级严格向下依赖，禁止向上导入。
 
 ### Running Tests / 运行测试
+
+1463 tests across 105 test files, powered by Vitest.
+105 个测试文件，1463 个测试用例，使用 Vitest。
 
 ```bash
 npm test                  # All tests / 全部测试
@@ -50,6 +58,12 @@ npm run test:L3           # Agent
 npm run test:L4           # Orchestration
 npm run test:L5           # Application
 npm run test:L6           # Monitoring
+
+# Watch mode / 监听模式
+npm run test:watch
+
+# Coverage report / 覆盖率
+npm run test:coverage
 ```
 
 ---
@@ -136,7 +150,7 @@ Every source file should have a module-level JSDoc header:
 
 ### Adding a New Pheromone Type / 添加新信息素类型
 
-1. Register via `PheromoneTypeRegistry` or add to `BUILTIN_DEFAULTS` in `L2-communication/pheromone-engine.js`
+1. Register via `PheromoneTypeRegistry` or add to `BUILTIN_DEFAULTS` in `src/L2-communication/pheromone-engine.js`
 2. Define `decayRate`, `maxTTLMin`, `mmasMin`, `mmasMax`
 3. Add tests in `tests/unit/L2/pheromone-engine.test.js`
 
@@ -150,9 +164,29 @@ Every source file should have a module-level JSDoc header:
 ### Adding a New Repository / 添加新仓储
 
 1. Create `src/L1-infrastructure/database/repositories/<name>-repo.js`
-2. Add table DDL in `schemas/database-schemas.js`
+2. Add table DDL in `src/L1-infrastructure/schemas/database-schemas.js`
 3. Wire into `DatabaseManager` and `PluginAdapter.init()`
 4. Add tests in `tests/unit/L1/repositories.test.js`
+
+---
+
+## Documentation Contribution / 文档贡献
+
+Claw-Swarm maintains bilingual documentation in `docs/en/` (English) and `docs/zh-CN/` (Chinese). When contributing documentation:
+
+Claw-Swarm 在 `docs/en/`（英文）和 `docs/zh-CN/`（中文）维护双语文档。贡献文档时请注意：
+
+1. **Parity** — every `docs/en/*.md` file must have a corresponding `docs/zh-CN/*.md` file with equivalent content.
+   每个 `docs/en/*.md` 文件必须有对应的 `docs/zh-CN/*.md` 文件，内容等价。
+
+2. **Glossary** — use the preferred translations defined in [`docs/qa/glossary.yml`](docs/qa/glossary.yml). Do not invent ad-hoc translations for established terms.
+   使用 [`docs/qa/glossary.yml`](docs/qa/glossary.yml) 中定义的术语翻译，不要随意翻译已有术语。
+
+3. **Metrics** — all numeric claims (table count, test count, file count, etc.) must match `docs/metadata.yml`. Run the verification commands listed there before submitting.
+   所有数字指标必须与 `docs/metadata.yml` 一致，提交前请运行其中的验证命令。
+
+4. **Source references** — every technical claim must cite the source file path. Do not describe features without linking to the implementation.
+   每个技术陈述必须引用源文件路径，不要描述没有实现链接的功能。
 
 ---
 
@@ -160,10 +194,11 @@ Every source file should have a module-level JSDoc header:
 
 1. Update version in `package.json` and `openclaw.plugin.json`
 2. Update `CHANGELOG.md` with release notes (bilingual)
-3. Run full test suite: `npm test`
-4. Commit: `git commit -m "release: vX.Y.Z"`
-5. Tag: `git tag vX.Y.Z`
-6. Push: `git push origin main --tags`
+3. Verify metrics in `docs/metadata.yml` still match source code
+4. Run full test suite: `npm test`
+5. Commit: `git commit -m "release: vX.Y.Z"`
+6. Tag: `git tag vX.Y.Z`
+7. Push: `git push origin main --tags`
 
 ---
 

@@ -1,0 +1,90 @@
+# Claw-Swarm V7.0 Documentation Inventory
+# Generated: 2026-03-14
+# Purpose: Evidence index for documentation completeness audit
+
+status: PASS  # 18/18 files verified
+verified_date: "2026-03-14"
+
+root_files:
+  - path: README.md
+    lines: 177
+    language: en
+    status: current
+  - path: README.zh-CN.md
+    lines: 177
+    language: zh-CN
+    status: current  # Rewritten for V7.0 on 2026-03-14
+  - path: CHANGELOG.md
+    lines: 1067
+    language: bilingual
+    status: current
+
+docs_en:  # 7 files, all current
+  - path: docs/en/architecture.md
+    lines: 150
+    title: "Architecture"
+  - path: docs/en/api-reference.md
+    lines: 213
+    title: "API Reference"
+  - path: docs/en/biomimicry.md
+    lines: 151
+    title: "Biomimicry & Design Philosophy"
+  - path: docs/en/console-guide.md
+    lines: 115
+    title: "Console Guide"
+  - path: docs/en/faq-troubleshooting.md
+    lines: 192
+    title: "FAQ & Troubleshooting"
+  - path: docs/en/installation.md
+    lines: 183
+    title: "Installation & Configuration"
+  - path: docs/en/module-guide.md
+    lines: 240
+    title: "Module Guide (L1-L6)"
+
+docs_zh_cn:  # 7 files, all current
+  - path: docs/zh-CN/architecture.md
+    lines: 150
+    title: "\u67B6\u6784\u8BBE\u8BA1"
+  - path: docs/zh-CN/api-reference.md
+    lines: 141
+    title: "API \u53C2\u8003"
+  - path: docs/zh-CN/biomimicry.md
+    lines: 105
+    title: "\u4EFF\u751F\u5B66\u4E0E\u8BBE\u8BA1\u54F2\u5B66"
+  - path: docs/zh-CN/console-guide.md
+    lines: 66
+    title: "\u63A7\u5236\u53F0\u6307\u5357"
+  - path: docs/zh-CN/faq-troubleshooting.md
+    lines: 109
+    title: "\u5E38\u89C1\u95EE\u9898\u4E0E\u6545\u969C\u6392\u67E5"
+  - path: docs/zh-CN/installation.md
+    lines: 142
+    title: "\u5B89\u88C5\u4E0E\u914D\u7F6E"
+  - path: docs/zh-CN/module-guide.md
+    lines: 73
+    title: "\u6A21\u5757\u6307\u5357 (L1-L6)"
+
+metadata:
+  - path: docs/metadata.yml
+    lines: 82
+    purpose: "Canonical metrics baseline for all docs"
+
+legacy_files:  # Pre-V7 root-level docs (NOT linked from current README)
+  - docs/api-reference.md  # V5/V6 era, 16 hooks (outdated)
+  - docs/architecture.md   # V5/V6 era, 16 hooks + 9 tools (outdated)
+  - docs/installation.md   # V5/V6 era
+  - docs/migration-guide.md
+  - docs/model-compatibility.md
+  - docs/pheromone-model.md
+  - docs/soul-designer.md
+  - docs/roadmap.md
+  - docs/production-testing.md
+  - docs/production-test-report.md
+  - docs/install-test-report.md
+
+verification:
+  file_completeness: "18/18 PASS"
+  number_consistency: "All V7.0 docs consistent; legacy root files have outdated numbers"
+  cross_links: "ALL LINKS VALID"
+  bilingual_coverage: "7/7 en-zh pairs complete"

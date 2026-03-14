@@ -1,591 +1,177 @@
 [English](README.md) | **中文**
 
-# Claw-Swarm V5.7 --- 详细中文文档
+# Claw-Swarm
 
-**6 层仿生蜂群智能插件 | OpenClaw 多智能体协作基础设施**
+仿生群体智能插件 —— 基于蜂群协作模型的 [OpenClaw](https://github.com/nicepkg/openclaw) 多代理协调系统。
 
-> Node.js >= 22.0.0 | 85+ 源文件 | 20+ 仿生算法 | 8 工具 | 16 钩子 | 5 蜜蜂人格 | 44 张数据库表 | 66 事件主题
-
-<p align="center">
-  <img src="docs/dashboard-preview.png" alt="Claw-Swarm 实时仪表盘 — 力导向蜂群可视化、质量门禁、信息素信号、RED 指标" width="100%">
-  <br>
-  <em>实时监控仪表盘：Gource 风格蜂群可视化（<code>http://localhost:19100/?demo</code>）</em>
-</p>
-
-
-[1 概述](#1-项目概述) | [2 特性](#2-核心特性) | [3 架构](#3-六层架构详解) | [4 算法](#4-十二个仿生算法) | [5 安装](#5-安装与配置) | [6 信息素](#6-信息素系统) | [7 记忆](#7-记忆系统)
-[8 灵魂](#8-灵魂设计器) | [9 工具](#9-工具参考) | [10 钩子](#10-钩子映射) | [11 仪表盘](#11-仪表盘) | [12 开发](#12-开发指南) | [13 升级](#13-从-v40-升级) | [14 许可证](#14-许可证)
-
-
-## 1. 项目概述
-
-### 解决什么问题？
-
-| 挑战 | 表现 | 解决方案 |
-|------|------|-----------|
-| **协作盲区** | 智能体彼此不知道对方的工作进度 | 信息素间接通信 + Gossip 协议 + 公告板（StigmergicBoard） |
-| **记忆碎片** | 上下文窗口重置后知识丢失 | 三层记忆架构（工作/情景/语义） |
-| **调度低效** | 手动分配任务，缺乏自适应能力 | DAG 分解 + 合同网 + ABC 调度 + Lotka-Volterra 种群动力学 |
-| **工具脆弱** | 单个 API 失败导致全线崩溃 | AJV 预校验 + 工具级断路器 + 重试注入 + 失败免疫 |
-| **可观测性不足** | 无法了解蜂群内部动态 | 实时仪表盘 + RED 指标 + SSE + Jaeger-lite 追踪 |
-| **资源闲置** | Agent 空闲而任务排队等待 | 空闲检测 + 自动招募信息素发射 |
-
-### 为什么 6 层？
-
-v4.0 的 4 层架构在引入 DAG 编排、合同网协议、知识图谱等模块后变得臃肿。V5.0 重新划分职责：
-
-- **L1 基础设施**: 数据持久化、配置校验、迁移 --- 不含业务逻辑
-- **L2 通信**: 消息总线、信息素、Gossip --- 纯通信原语
-- **L3 智能体**: 记忆、能力、人格 --- 单个智能体的认知能力
-- **L4 编排**: DAG、调度、质控 --- 跨智能体的任务协调
-- **L5 应用**: 插件适配、工具工厂 --- OpenClaw 耦合层
-- **L6 监控**: 仪表盘、指标、SSE 推送 --- 可观测性
-
-依赖严格向下流动（L6 -> L5 -> ... -> L1），仅 L5 耦合 OpenClaw，L1-L4 可在任何 Node.js 22+ 环境独立复用。
+![Version](https://img.shields.io/badge/version-7.0.0-blue)
+![Tests](https://img.shields.io/badge/tests-1463_passing-green)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
-## 2. 核心特性
+## 解决什么问题
 
-| 分类 | 特性 | 算法/技术 | 层级 |
-|------|------|-----------|------|
-| 通信 | 发布/订阅消息总线 | 通配符匹配 + DLQ | L2 |
-| 通信 | 信息素引擎 | MMAS + 指数衰减 | L2 |
-| 通信 | 流言协议 | 流行病广播 | L2 |
-| 记忆 | 工作记忆 | 3 层: 焦点/上下文/草稿 | L3 |
-| 记忆 | 情景记忆 | Ebbinghaus 遗忘曲线 | L3 |
-| 记忆 | 语义记忆 | BFS 知识图谱 | L3 |
-| 智能体 | 能力评估 | 4D 评分 (编码/测试/文档/安全) | L3 |
-| 智能体 | 人格进化 | PARL A/B 测试 | L3 |
-| 智能体 | 声誉账本 | 加权移动平均 | L3 |
-| 编排 | 任务分解 / 关键路径 | DAG 拓扑 + CPM | L4 |
-| 编排 | 质量门控 / 级联熔断 | 多维阈值 | L4 |
-| 编排 | 结果综合 / 执行规划 | Jaccard + GEP | L4 |
-| 编排 | 任务招标 / 资源调度 | FIPA CNP + ABC | L4 |
-| 编排 | 角色发现 / 角色路由 | k-means++ + MoE | L4 |
-| 编排 | 区域管理 | 虚拟拓扑分区 | L4 |
-| 编排 | 种群竞争动力学 | V5.2: Lotka-Volterra `dN/dt = rN(1-N/K) - αNP` | L4 |
-| 编排 | 三阶段进化 | V5.2: ABC 进化（雇佣蜂/旁观蜂/侦察蜂） | L4 |
-| 通信 | 信息素压力梯度 | V5.2: 自动升级 + PheromoneResponseMatrix | L2 |
-| 通信 | 公告板协调 | V5.2: StigmergicBoard 持久间接协调 | L2 |
-| 智能体 | 响应阈值 | V5.2: FRTM 固定响应阈值 + PI 控制器 | L3 |
-| 智能体 | 失败免疫 | V5.2: 模式免疫 + 效果反馈循环 | L3 |
-| 智能体 | 技能共生 | V5.2: 余弦相似度互补配对 | L3 |
-| 编排 | 蜂群决策赋能 | V5.3: 9 信号源聚合 + PI 控制器自适应赋能上下文 | L4 |
-| 编排 | 四态自适应仲裁 | V5.4: DIRECT/BIAS_SWARM/PREPLAN/BRAKE 模式路由 | L4 |
-| 编排 | 协作税追踪 | V5.4: 五维预算 + `tax = (actual - baseline) / baseline` | L4 |
-| 智能体 | 证据纪律 | V5.4: 三层证据门控 (PRIMARY/CORROBORATION/INFERENCE) | L3 |
-| 通信 | 协议语义 | V5.4: 9 种语义消息类型 + 会话追踪 + 协议验证 | L2 |
-| 监控 | 统一观测核心 | V5.4: 四类观测 (决策/执行/修复/策略) + 环形缓冲区 | L6 |
-| 应用 | 工具韧性 | AJV 校验 + 断路器 + 自适应修复记忆 | L5 |
-| 应用 | 熔断器 | 半开探测 + 指数退避 | L5 |
-| 监控 | 实时指标 + 状态推送 | RED + SSE | L6 |
-| 监控 | 分布式追踪 | V5.2: Jaeger-lite trace spans | L6 |
-| 监控 | 空闲检测 | V5.2: 自动招募空闲 Agent | L6 |
-| 通信 | 状态收敛 | V5.5: SWIM 故障探测 + 反熵同步 + 收敛指标 | L2 |
-| 编排 | 全局调节器 | V5.5: EXPLORE/EXPLOIT/RELIABLE/URGENT 四工作点 + 滞后切换 | L4 |
-| 编排 | 治理三联指标 | V5.5: 审计 + 策略合规 + ROI 三联治理 | L4 |
-| 编排 | 推测执行 | V5.6: 临界路径任务并行候选执行，首个完成保留 | L4 |
-| 编排 | DAG 桥接 | V5.6: 计划影子化为 DAG + CPM 关键路径分析 + 瓶颈拆分 | L4 |
-| 编排 | Work-Stealing | V5.6: 空闲 Agent 自动窃取任务 + 调节器感知冷却 | L4 |
-| 编排 | 共生调度 | V5.7: SkillSymbiosis 接入 ContractNet (第5权重) + ExecutionPlanner (第4专家) + SwarmAdvisor (第6信号) | L3/L4 |
-| 通信 | 多类型信息素 | V5.7: food (线性衰减) + danger (阶梯衰减); 类型化衰减路由; DB 配置驱动 | L2 |
-| 监控 | Span 收集器 | V5.5: TraceCollector 批量写入 trace_spans 表 | L6 |
-| 监控 | 启动诊断 | V5.5: StartupDiagnostics 模块化健康检查 | L6 |
+协调多个 LLM 代理面临以下困境：代理无法看到彼此的进度，上下文窗口重置后知识丢失，单个工具故障即可导致全线崩溃。手动任务路由无法规模化，且缺乏标准方式在运行时观察代理群体行为。
+
+## Claw-Swarm 做了什么
+
+- **信息素间接通信** —— 代理通过类型化信号踪迹间接协调，无需直接消息传递（`src/L2-communication/pheromone-engine.js`）
+- **三层记忆 + 遗忘曲线** —— 工作记忆、情景记忆、语义记忆跨上下文重置存活（`src/L3-agent/memory/`）
+- **DAG 任务分解 + 合同竞标** —— 自动任务拆分、关键路径分析、拍卖式分配（`src/L4-orchestration/task-dag-engine.js`、`src/L4-orchestration/contract-net.js`）
+- **工具级熔断器 + 重试注入** —— AJV 预校验将故障隔离在扩散之前（`src/L5-application/tool-resilience.js`）
+- **6 视图实时监控控制台** —— React SPA：蜂巢、管线、认知、生态、网络、控制（`src/L6-monitoring/console/`）
+- **人在回路检查点** —— 代理在不可逆操作前暂停执行，等待用户批准（`src/L5-application/tools/swarm-checkpoint-tool.js`）
 
 ---
 
-## 3. 六层架构详解
+## 控制台
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ L6 监控层 (9)   StateBroadcaster(SSE) MetricsCollector(RED)     │
-│   HealthChecker(空闲检测) ObservabilityCore(V5.4统一观测)         │
-│   TraceCollector(V5.5 span收集) StartupDiagnostics(V5.5启动诊断) │
-├─────────────────────────────────────────────────────────────────┤
-│ L5 应用层 (14)  PluginAdapter  ContextService  CircuitBreaker   │
-│   ToolResilience(修复记忆) SkillGovernor  TokenBudgetTracker    │
-│   swarm_spawn/query/pheromone/gate/memory/plan/zone/run         │
-├─────────────────────────────────────────────────────────────────┤
-│ L4 编排层 (18)  Orchestrator  CriticalPath  QualityCtrl         │
-│   PipelineBreaker  ResultSynth  ExecPlanner  ContractNet        │
-│   ReplanEngine  ABCScheduler  RoleDiscovery  RoleManager  Zone  │
-│   HierarchicalCoordinator  TaskDAGEngine  SpeciesEvolver        │
-│   SwarmAdvisor(V5.3赋能+V5.4四态仲裁) BudgetTracker(V5.4协作税) │
-│   GlobalModulator(V5.5工作点) GovernanceMetrics(V5.5治理指标)    │
-│   SpeculativeExecutor(V5.6推测执行)                             │
-├─────────────────────────────────────────────────────────────────┤
-│ L3 智能体层 (13) WorkingMemory  EpisodicMemory  SemanticMemory  │
-│   ContextCompressor  CapabilityEngine  PersonaEvolution         │
-│   ReputationLedger  SoulDesigner  SwarmContextEngine            │
-│   ResponseThreshold(FRTM+PI)  FailureVaccination(免疫)          │
-│   SkillSymbiosisTracker(余弦互补) EvidenceGate(V5.4证据纪律)     │
-├─────────────────────────────────────────────────────────────────┤
-│ L2 通信层 (7)   MessageBus  PheromoneEngine  GossipProtocol     │
-│   PheromoneTypeRegistry  PheromoneResponseMatrix(压力梯度)       │
-│   StigmergicBoard(持久公告板) ProtocolSemantics(V5.4协议语义)    │
-│   StateConvergence(V5.5状态收敛/SWIM/反熵)                      │
-├─────────────────────────────────────────────────────────────────┤
-│ L1 基础设施 (18) DatabaseManager(SQLite/44表/WAL) 8 Repos       │
-│   ConfigManager(Zod) MigrationRunner MonotonicClock schemas/    │
-└─────────────────────────────────────────────────────────────────┘
-```
+![Console](docs/dashboard-preview.png)
 
-### 各层模块一览
-
-| 层 | 模块 | 职责 |
-|----|------|------|
-| L1 | DatabaseManager | SQLite WAL, 44 表, `node:sqlite` DatabaseSync |
-| L1 | MigrationRunner | 版本化迁移，事务回滚，自动备份 |
-| L1 | ConfigManager | Zod 校验，默认值 -> 文件 -> 运行时三层合并 |
-| L1 | 3 Schemas + Types + Logger + 8 Repos | config/message/database 模式; 枚举; pino 日志; 8 个数据仓库 |
-| L2 | MessageBus | 发布/订阅，通配符主题（`task.*`），死信队列 (DLQ) |
-| L2 | PheromoneEngine | MMAS 信息素管理，指数衰减，上下限钳位 |
-| L2 | GossipProtocol | 流行病广播，Agent 状态最终一致 |
-| L2 | PheromoneTypeRegistry | 自定义信息素类型注册，可扩展衰减函数 |
-| L3 | WorkingMemory | 3 层: 焦点 (5 槽) / 上下文 (15 槽) / 草稿 (2000 字符) |
-| L3 | EpisodicMemory | Ebbinghaus 遗忘曲线，按重要性衰减，复习强化 |
-| L3 | SemanticMemory | BFS 知识图谱，实体-关系-实体三元组 |
-| L3 | ContextCompressor | 超长上下文压缩，优先保留高重要性记忆 |
-| L3 | CapabilityEngine | 4D 评分 (coding/testing/documentation/security) |
-| L3 | PersonaEvolution | PARL A/B 测试，自动优化人格分配 |
-| L3 | ReputationLedger / SoulDesigner | 声誉加权平均; 5 蜜蜂人格 + 6 段 SOUL 生成 |
-| L4 | Orchestrator + CriticalPath | DAG 分解 + CPM 关键路径 (ES/EF/LS/LF) |
-| L4 | QualityController + PipelineBreaker | 多维质量门控 + 级联失败熔断 |
-| L4 | ResultSynthesizer + ExecutionPlanner | Jaccard 合并 + GEP 基因规划 |
-| L4 | ContractNet + ReplanEngine | FIPA CNP 招标 + 运行时重规划 |
-| L4 | ABCScheduler | 雇佣蜂 (50%) / 旁观蜂 (45%) / 侦察蜂 (5%) |
-| L4 | RoleDiscovery + RoleManager + ZoneManager | k-means++ 聚类 + MoE 路由 + 虚拟区域 |
-| L4 | HierarchicalCoordinator | V5.1: 层级蜂群，深度/并发限制 |
-| L4 | TaskDAGEngine | V5.1: 拍卖式分配 + 工作窃取 + 死信队列 |
-| L4 | SpeciesEvolver | V5.1+V5.2: GEP 锦标赛 + Lotka-Volterra + ABC 三阶段 |
-| L4 | SwarmAdvisor | V5.3+V5.4: 9 信号聚合 + 赋能上下文 + 四态仲裁 |
-| L4 | BudgetTracker | V5.4: 五维协作成本追踪 + 协作税计算 |
-| L3 | EvidenceGate | V5.4: 三层证据纪律 + 加权评分 |
-| L2 | ProtocolSemantics | V5.4: 9 种语义消息 + 会话追踪 + 协议验证 |
-| L5 | PluginAdapter + ContextService + CircuitBreaker | 引擎组装 + 上下文构建 + 熔断器 |
-| L5 | ToolResilience | V5.1+V5.2: AJV 校验 + 断路器 + 自适应修复记忆 |
-| L5 | 8 Tool Factories | swarm_spawn/query/pheromone/gate/memory/plan/zone/run |
-| L6 | StateBroadcaster + MetricsCollector | SSE 推送 + RED 指标 |
-| L6 | DashboardService | Fastify 服务 + Jaeger-lite 追踪 + 启动诊断 |
-| L6 | HealthChecker | V5.1+V5.2: 多维健康检查 + 空闲检测 |
-| L6 | ObservabilityCore | V5.4: 四类观测 (决策/执行/修复/策略) + 环形缓冲区 |
+6 视图 React SPA 监控面板，端口 19100。视图：Hive、Pipeline、Cognition、Ecology、Network、Control。包含命令面板（Ctrl+K）、事件时间线、代理检查器、实时通知 Toast（通过 SSE）。
 
 ---
 
-## 4. 十八+仿生算法
+## 快速开始
 
-| # | 算法 | 全称 | 应用 | 层 |
-|---|------|------|------|-----|
-| 1 | **MMAS** | Max-Min Ant System | 信息素浓度上下限钳位，防止过早收敛 | L2 |
-| 2 | **ACO 轮盘** | ACO Roulette Selection | 按信息素浓度加权随机选路，平衡探索/利用 | L2 |
-| 3 | **信息素压力梯度** | Pheromone Pressure Gradient | V5.2: `intensity = base * (1 + k * log(1 + age))`，超阈值自动升级 | L2 |
-| 4 | **多类型信息素衰减** | Multi-Type Pheromone Decay | V5.2: trail(线性)、alarm(阶梯)、recruit(指数)各异衰减 | L2 |
-| 5 | **公告板协调** | Stigmergic Coordination | V5.2: 持久间接协调，补充短寿信息素 | L2 |
-| 6 | **Ebbinghaus** | Ebbinghaus Forgetting Curve | 情景记忆衰减 `R(t) = e^(-t/S)`，重要记忆衰减慢 | L3 |
-| 7 | **BFS** | Breadth-First Search | 语义记忆知识图谱遍历，发现关联实体 | L3 |
-| 8 | **PARL** | Persona A/B Reinforcement Learning | 人格 x 任务结果记录，优化匹配 | L3 |
-| 9 | **FRTM** | Fixed Response Threshold Model | V5.2: 每 Agent 自适应阈值 + PI 控制器恒稳调节 | L3 |
-| 10 | **失败免疫** | Failure Vaccination | V5.2: 模式免疫 + 效果反馈循环 | L3 |
-| 11 | **余弦共生** | Cosine Similarity Symbiosis | V5.2: 技能互补性追踪，最优 Agent 配对 | L3 |
-| 12 | **GEP** | Gene Expression Programming | 执行计划生成，基因编码任务依赖和约束 | L4 |
-| 13 | **CPM** | Critical Path Method | 关键路径分析，计算 ES/EF/LS/LF 和松弛时间 | L4 |
-| 14 | **Jaccard** | Jaccard Similarity Index | 结果综合时检测重叠，合并相似子任务输出 | L4 |
-| 15 | **MoE** | Mixture of Experts | 角色路由，Top-K 专家选择 + 置信度阈值 | L4 |
-| 16 | **FIPA CNP** | FIPA Contract Net Protocol | 任务招标: CFP -> Bid -> Award -> Report | L4 |
-| 17 | **ABC** | Artificial Bee Colony | V5.2 增强: ABCScheduler + SpeciesEvolver 三阶段进化 | L4 |
-| 18 | **k-means++** | k-means++ Clustering | 从历史能力数据自动聚类发现角色原型 | L4 |
-| 19 | **Lotka-Volterra** | Lotka-Volterra Dynamics | V5.2: 种群竞争 `dN/dt = rN(1-N/K) - αNP`，适应度淘汰 | L4 |
-
----
-
-## 4.5 模型兼容性
-
-Claw-Swarm 要求模型具备强工具调用能力（7 个工具，复杂 JSON schema）。完整指南见 [docs/model-compatibility.md](docs/model-compatibility.md)。
-
-| 等级 | 模型 | 说明 |
-|---|---|---|
-| **S 强烈推荐** | Opus 4.6, Sonnet 4.6, GPT-5.4, GPT-5.3-Codex, Gemini 2.5 Pro | 工具调用 + 推理最强 |
-| **A 推荐** | Kimi K2.5, Qwen3.5-Plus/Max, DeepSeek-V3, Gemini 2.5 Flash, o4-mini | 能力强，有少量取舍 |
-| **B 可用** | DeepSeek-Reasoner, GLM-5, Qwen3-Coder-Next, MiniMax-M2.5, Llama 4 Maverick | 适合特定角色 |
-
-**经济方案（中文优先）**: 主 Agent 用 Kimi K2.5，子 Agent 用 Qwen3.5-Plus（百炼免费）
-
-**均衡方案**: 主 Agent 用 Sonnet 4.6，子 Agent 用 GPT-5.4 或 Qwen3.5-Plus
-
-**混合策略（推荐）**: 按蜂群角色分配最优模型——D1 侦察蜂用 Qwen3.5-Plus（百万上下文），D2 守卫蜂用 Opus 4.6（最强推理），D3 工蜂用 GPT-5.3-Codex（代码优化），D4 设计蜂用 Kimi K2.5（强代码生成 + 性价比）
-
----
-
-## 5. 安装与配置
-
-### 前置条件
-
-- **Node.js >= 22.0.0** (必须，依赖 `node:sqlite` 的 `DatabaseSync`)
-- OpenClaw CLI 已安装
-
-### 安装步骤
-
-**npm 安装（推荐）：**
+**1. 安装 OpenClaw 和 Claw-Swarm：**
 
 ```bash
-npm install openclaw-swarm
-cd node_modules/openclaw-swarm
-node install.js          # 注册插件到 OpenClaw 配置
-openclaw gateway restart # 加载插件
-```
-
-**Git clone 安装：**
-
-```bash
+npm install -g openclaw
 git clone https://github.com/DEEP-IOS/claw-swarm.git
-cd claw-swarm
-node install.js          # 一键安装（自动注册路径 + 启用插件 + 安装依赖）
-openclaw gateway restart # 加载插件
+cd claw-swarm && node install.js
 ```
 
-安装脚本自动完成以下操作：
-1. 检查 Node.js >= 22 和 OpenClaw 环境
-2. 安装 npm 依赖
-3. 在 `~/.openclaw/openclaw.json` 中注册 `plugins.load.paths`（兼容 Windows）
-4. 启用插件并写入默认配置
-
-手动安装和高级选项请参见 [docs/installation.md](docs/installation.md)。
-
-### 依赖项
-
-| 类别 | 包名 | 用途 |
-|------|------|------|
-| 运行时 | `eventemitter3` | L2 MessageBus 事件发射 |
-| 运行时 | `fastify` | L6 Dashboard HTTP 服务 |
-| 运行时 | `nanoid` | 唯一 ID 生成 |
-| 运行时 | `pino` | 结构化日志 |
-| 运行时 | `zod` | L1 配置校验 |
-| 开发时 | `vitest` | 测试框架 |
-
-### 完整配置示例
-
-插件配置必须嵌套在 `~/.openclaw/openclaw.json` 的 `config` 键内。`api.pluginConfig` 直接接收此对象，全部字段均可选（有 Zod 默认值）：
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "claw-swarm": {
-        "enabled": true,
-        "config": {
-          "dbPath": null,
-          "memory": {
-            "enabled": true,
-            "maxPrependChars": 4000,
-            "workingMemory": { "focusSlots": 5, "contextSlots": 15, "scratchpadMaxChars": 2000 },
-            "episodicMemory": { "maxEvents": 1000, "importanceThreshold": 0.3, "decayLambdaDays": 30 },
-            "knowledgeGraph": { "maxTraversalDepth": 3, "minImportance": 0.3 }
-          },
-          "pheromone": { "enabled": true, "decayIntervalMs": 60000 },
-          "governance": { "enabled": true },
-          "soul": { "enabled": true },
-          "orchestration": {
-            "enabled": true, "maxWorkers": 16, "defaultStrategy": "simulated",
-            "executionMode": "dependency", "maxRoles": 8,
-            "moeRouting": { "enabled": true, "topK": 3, "minConfidence": 0.3, "fallbackRegex": true },
-            "abcScheduler": { "enabled": false, "employedRatio": 0.5, "onlookerRatio": 0.45, "scoutRatio": 0.05 },
-            "contractNet": { "enabled": false, "bidTimeoutMs": 5000 },
-            "replanCooldownMs": 30000
-          },
-          "dashboard": { "enabled": false, "port": 19100 }
-        }
-      }
-    }
-  }
-}
-```
-
----
-
-## 6. 信息素系统
-
-### 信息素类型
-
-V5.0 通过 `PheromoneTypeRegistry` 支持自定义类型，保留 5 种内置类型：
-
-| 类型 | 语义 | 默认衰减 | 典型场景 |
-|------|------|----------|----------|
-| `trail` | "我在 X 工作过" | 120 分钟 | 避免重复工作，发现热点区域 |
-| `alarm` | "X 有问题" | 30 分钟 | 警告危险区域，系统性故障检测 |
-| `recruit` | "X 需要帮助" | 60 分钟 | 请求支援，触发合同网 CFP |
-| `queen` | 优先指令 | 480 分钟 | 战略级指令，全局优先级调整 |
-| `dance` | "在 X 发现资源" | 90 分钟 | 分享发现（类比蜜蜂摇摆舞） |
-
-### 衰减模型与 MMAS 边界
-
-指数衰减公式：`intensity(t) = initial * e^(-decayRate * t)`（t 为分钟数）
-
-| MMAS 参数 | 说明 |
-|-----------|------|
-| `tau_max` | 信息素浓度上限，防止单一路径垄断 |
-| `tau_min` | 信息素浓度下限，保证探索概率不为零 |
-| `rho` | 全局蒸发率 |
-
-衰减定时器按 `decayIntervalMs`（默认 60 秒）周期运行，清理低于 `tau_min` 的信息素。
-
-### 信息素感知困难检测
-
-```
-智能体连续失败 3 次
-  -> 查询附近 ALARM 信息素数量
-  -> >= 2 个 ALARM -> 系统性故障，不发 RECRUIT（避免误报）
-  -> < 2 个 ALARM  -> 个体困难，发射 RECRUIT 信息素请求支援
-```
-
----
-
-## 7. 记忆系统
-
-V5.0 引入 **三层记忆架构**，对应人类认知科学中的短期记忆、情景记忆和语义记忆。
-
-### 工作记忆 (WorkingMemory)
-
-模拟人类短期记忆的容量限制：
-
-| 区域 | 默认容量 | 优先级 | 内容 |
-|------|----------|--------|------|
-| **焦点 (Focus)** | 5 槽位 | 最高 | 当前任务直接相关的信息 |
-| **上下文 (Context)** | 15 槽位 | 中等 | 背景知识、相关历史 |
-| **草稿 (Scratchpad)** | 2000 字符 | 最低 | 临时计算、中间结果 |
-
-上下文注入时，焦点区内容优先写入 `prependContext`，超出 `maxPrependChars` 则由 ContextCompressor 压缩。
-
-### 情景记忆 (EpisodicMemory)
-
-基于 **Ebbinghaus 遗忘曲线** 的长期事件记忆：`R(t) = e^(-t / S)`
-
-- `t` = 距离事件发生的时间（天），`S` = 记忆强度
-- 高重要性事件衰减更慢；复习操作重置衰减并提升强度
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `maxEvents` | 1000 | 保留的最大事件数 |
-| `importanceThreshold` | 0.3 | 低于此阈值的事件不持久化 |
-| `decayLambdaDays` | 30 | 指数衰减 lambda（天） |
-
-### 语义记忆 (SemanticMemory)
-
-基于 **BFS 知识图谱** 的结构化知识存储：
-
-- 三元组存储：`(实体A) --[关系]--> (实体B)`
-- BFS 遍历发现关联知识，默认最大深度 3，节点按重要性排序
-- 上下文注入集成：任务描述 -> 提取关键词 -> BFS 查询 -> 注入上下文
-
----
-
-## 8. 灵魂设计器
-
-### 5 种蜜蜂人格
-
-| 人格 | 中文名 | 性格特征 | 适用场景 |
-|------|--------|----------|----------|
-| `scout-bee` | 侦察蜂 | 好奇、冒险、探索性 | 研究、原型、技术探索 |
-| `worker-bee` | 工蜂 | 可靠、系统、细致 | 实现、测试、构建 |
-| `guard-bee` | 守卫蜂 | 谨慎、彻底、警觉 | 安全审计、代码审查、验证 |
-| `queen-messenger` | 信使蜂 | 战略、协调、权威 | 规划、架构决策、协调 |
-| `designer-bee` | 设计蜂 | 审美、创意、视觉驱动 | 可视化、UI/UX 设计、Dashboard 美化 |
-
-### SOUL 片段结构 (6 段)
-
-SoulDesigner 为每个智能体生成 SOUL 片段，注入 LLM 系统提示：
-
-1. **Identity** --- 身份与角色
-2. **Capability** --- 能力自知（基于 4D 评分）
-3. **Behavior** --- 行为指南（cooperative / independent / aggressive / cautious / adaptive）
-4. **Constraints** --- 约束与限制（基于 tier: trainee / junior / mid / senior / lead）
-5. **Protocol** --- 通信协议（基于 persona 风格）
-6. **Zone** --- Zone 归属与范围
-
-### PARL 人格进化
-
-Persona A/B Reinforcement Learning --- 基于任务结果的自适应人格分配：
-
-1. 记录每次 `(人格, 任务类型, 结果)` 三元组
-2. 计算每种人格在各类任务上的胜率
-3. 新任务到来时，按胜率加权推荐最优人格
-4. 随机分配探索组进行 A/B 测试，持续优化
-
----
-
-## 9. 工具参考
-
-V5.4 提供 8 个 OpenClaw 工具，智能体可在对话中直接调用：
-
-| 工具 | 用途 | 关键参数 |
-|------|------|----------|
-| `swarm_spawn` | 生成子智能体 | persona, tier, taskDescription, zoneId |
-| `swarm_query` | 查询蜂群状态 | 查询类型 (agents / tasks / roles / zones) |
-| `swarm_pheromone` | 信息素操作 | 操作 (emit / query / scan), type, scope |
-| `swarm_gate` | 治理门控 | agentId, action (evaluate / vote / promote) |
-| `swarm_memory` | 记忆操作 | 操作 (store / recall / forget), layer (working / episodic / semantic) |
-| `swarm_plan` | 执行规划 | taskDescription, strategy (dag / sequential / parallel) |
-| `swarm_zone` | 区域管理 | 操作 (create / join / leave / list) |
-| `swarm_run` | V5.3: 一键执行 | taskDescription（自动组合 plan + spawn） |
-
-### 调用示例
-
-```
-swarm_pheromone  操作=emit   type=trail  scope=/task/auth-refactor  intensity=0.8
-swarm_pheromone  操作=scan   scope=/task/*
-swarm_memory     操作=store  layer=semantic  entity="AuthService"  relation="depends_on"  target="UserRepo"
-swarm_plan       taskDescription="重构认证模块"  strategy=dag
-```
-
----
-
-## 10. 钩子映射
-
-V5.4 通过 OpenClaw Plugin SDK 的 `{ id, register(api) }` 模式注册。
-
-### OpenClaw 事件 -> V5.4 映射
-
-通过 Plugin SDK 注册 16 个钩子（V5.0: 6 + V5.1: 8 + V5.3: 2 新增）：
-
-| OpenClaw 事件 | V5.4 内部处理器 | 执行动作 |
-|---------------|-----------------|----------|
-| `gateway_start` | 引擎初始化 | 初始化 + 配置校验 + 特性标志依赖验证 |
-| `before_model_resolve` | 模型能力检测 | 自动检测模型工具调用能力 |
-| `before_tool_call` | ToolResilience | AJV 预校验 + 工具级断路器 |
-| `before_prompt_build` | 上下文注入 | 工具失败提示注入 + 蜂群上下文 |
-| `before_agent_start` | `onAgentStart` + `onPrependContext` | 注册 + SOUL 注入 + 上下文注入（记忆/知识图谱/信息素） |
-| `agent_end` | `onSubAgentComplete`/`onAgentEnd` | 质量门控 + 信息素强化 + 记忆固化 + Gossip 更新 |
-| `after_tool_call` | `onToolCall` + `onToolResult` | 工具韧性 + 健康检查 + 工作记忆记录 + 能力维度更新 |
-| `before_reset` | `onMemoryConsolidate` | 工作记忆 -> 情景记忆固化 |
-| `gateway_stop` | `close()` | 定时器停止 + 引擎销毁 + PID 清理 + 数据库关闭 |
-| `message_sending` | `onSubAgentMessage` | 消息路由（点对点/广播） |
-| `subagent_spawning` | 层级协调器 | 深度/并发限制 + 治理门控 |
-| `subagent_spawned` | 层级追踪 | 子代理层级注册 |
-| `subagent_ended` | 结果收集 | 结果收集 + 信息素更新 |
-| `llm_output` | SOUL 迁移 | SOUL.md 双阶段迁移 |
-
-子 Agent 生命周期由层级协调器管理：深度限制、并发控制和治理门控自动执行。
-
-### V5.0 内部钩子 (通过 L2 MessageBus 触发)
-
-| 内部钩子 | 触发条件 |
-|----------|----------|
-| `onTaskDecompose` | DAG 任务分解完成 |
-| `onReplanTrigger` | 重规划条件满足 |
-| `onZoneEvent` | Zone 内拓扑变更 |
-| `onPheromoneThreshold` | 信息素浓度超过阈值 |
-
----
-
-## 11. 仪表盘
-
-在配置中开启 `"dashboard": { "enabled": true, "port": 19100 }`，浏览器访问 `http://localhost:19100`。
-
-| 组件 | 技术 | 展示内容 |
-|------|------|----------|
-| StateBroadcaster | SSE | 实时推送 Agent 状态、任务进度、信息素变化 |
-| MetricsCollector | RED | Rate (吞吐量)、Error (错误率)、Duration (延迟) |
-| DashboardService | Fastify | HTTP API + 静态页面托管 |
-| dashboard.html | 原生 HTML/JS | 可视化图表、事件流、Agent 拓扑 |
-
-SSE 端点 `/events` 提供实时数据流，前端无需轮询。
-
----
-
-## 12. 开发指南
-
-### 测试
-
-Claw-Swarm 采用多层次测试策略确保生产可用性：
-
-| 层级 | 类型 | 数量 | 覆盖范围 |
-|------|------|------|----------|
-| 单元测试 | vitest | 902 tests / 49 files | 6 层全覆盖，每个模块独立验证 |
-| 集成测试 | 端到端流水线 | 多场景 | 跨工具协作流程、记忆持久化、Zone 治理 |
-| 压力测试 | 高频 & 边界值 | 多场景 | 20+ 连续调用、WAL 并发写入、极端输入 |
-| **生产测试** | **真实 OpenClaw Gateway** | **20 项** | **插件加载、工具调用、MMAS、记忆、质量门控、MoE、集成场景、压力边界** |
-| **安装测试** | **干净 Linux 环境** | **6 项** | **克隆 → install.js → Gateway 重启 → 工具调用全流程** |
-
-生产测试在真实 OpenClaw Gateway 环境中端到端验证 — 非 mock、非模拟。20 项测试全部通过，测试过程中发现并修复了 7 个 bug。完整报告见：**[生产测试报告](docs/production-test-report.md)**
-
-安装测试在干净 Linux 环境（Node.js v22, OpenClaw 2026.2.13）中独立执行 — 从 `git clone` 到 `swarm_query` 调用成功仅需 3 分钟，100% 通过率，零阻断性问题。报告见：**[安装测试报告](docs/install-test-report.md)**
+**2. 启用插件：**
 
 ```bash
-npm test                    # 全部 (902 tests, 49 files)
-npm run test:L1~L6          # 按层级运行 (test:L1, test:L2, ..., test:L6)
-npm run test:unit           # 单元测试
-npm run test:integration    # 集成测试
-npm run test:stress         # 压力测试
-npm run test:watch          # 监视模式
-npm run test:coverage       # 覆盖率
+openclaw gateway restart
 ```
 
-### 项目结构
+**3. 验证插件已加载：**
+
+```bash
+openclaw gateway status
+# 在已加载插件列表中查找 "claw-swarm"
+```
+
+**4. 打开控制台：**
 
 ```
-src/
-├── index.js                        # 插件入口 { id, register(api) }
-├── L1-infrastructure/ (17)         # database-manager, migration-runner, sqlite-binding,
-│                                   # repositories/(8), config-manager, schemas/(3), types, logger
-├── L2-communication/ (6)           # message-bus, pheromone-engine, gossip-protocol, type-registry
-│                                   # + V5.2: pheromone-response-matrix, stigmergic-board
-├── L3-agent/ (12)                  # memory/(working,episodic,semantic,compressor),
-│                                   # capability-engine, persona-evolution, reputation-ledger, soul-designer
-│                                   # swarm-context-engine + V5.2: response-threshold,
-│                                   # failure-vaccination, skill-symbiosis
-├── L4-orchestration/ (15)          # orchestrator, critical-path, quality-controller, pipeline-breaker,
-│                                   # result-synthesizer, execution-planner, contract-net, replan-engine,
-│                                   # abc-scheduler, role-discovery, role-manager, zone-manager
-│                                   # + V5.1: hierarchical-coordinator, task-dag-engine, species-evolver
-├── L5-application/ (13)            # plugin-adapter, context-service, circuit-breaker,
-│                                   # tool-resilience, skill-governor, token-budget-tracker
-│                                   # tools/(spawn,query,pheromone,gate,memory,plan,zone)
-└── L6-monitoring/ (6)              # state-broadcaster, metrics-collector, dashboard-service,
-                                    # health-checker, dashboard.html, dashboard-v2.html
-
-tests/unit/L1~L6/ + integration/ + stress/    # 659 tests across 43 files
+http://127.0.0.1:19100
 ```
+
+详见 [docs/zh-CN/installation.md](docs/zh-CN/installation.md) 了解手动安装、配置选项和模型兼容性。
 
 ---
 
-## 13. 从 v4.0 升级
+## 架构一览
 
-### 架构变更对比
+```
+层     名称           描述                                          文件数
+-----  -----------    -------------------------------------------   -----
+ L1    基础设施       SQLite（52 表）、配置、IPC 桥接、                 25
+                      工作线程池、迁移、8 个仓库
+ L2    通信           消息总线、信息素引擎、Gossip、                     13
+                      痕迹协作板、协议语义
+ L3    代理           三层记忆、人格进化、声誉、                         21
+                      嵌入（HNSW）、SNA、失败疫苗
+ L4    编排           DAG 引擎、合同网、ABC 调度、                       25
+                      种群进化、Shapley 信用、调节器
+ L5    应用           插件适配器、工具弹性、10 个工具                     18
+                      工厂、技能治理、检查点
+ L6    监控           Dashboard 服务（38 REST 端点）、                 7+98
+                      状态广播、指标、控制台 SPA
+```
 
-| 维度 | v4.0 | V5.2 |
-|------|------|------|
-| 层数 | 4 层 | 6 层 |
-| 源文件 | ~35 | 75+ |
-| 测试 | ~200 | 659 (43 文件) |
-| 数据库表 | 25 | 44 |
-| 算法 | ~5 | 18+ |
-| 工具数 | 5 | 7 (新增 swarm_plan, swarm_zone) |
-| 依赖 | 零依赖 | eventemitter3, fastify, nanoid, pino, zod, ajv, tiktoken |
-| 记忆 | 单层 | 三层 (工作/情景/语义) |
-| 信息素 | 基础引擎 | MMAS + TypeRegistry + ACO + 压力梯度 + 多类型衰减 |
-| 编排 | 基础分发 | DAG + CPM + CNP + ABC + MoE + LV + 层级蜂群 |
-| 生态 | 无 | 公告板 + 失败免疫 + 技能共生 + 响应阈值 |
-| 配置 | 手动校验 | Zod Schema + Feature Flags |
-| 监控 | 无 | L6 仪表盘 (SSE + RED + Jaeger-lite + 空闲检测) |
+依赖严格向下流动（L6 -> L1）。仅 L5 耦合 OpenClaw Plugin SDK。L1-L4 和 L6 可在任何 Node.js 22+ 环境复用。
 
-### 迁移步骤
+进程模型：`child_process.fork()` 将蜂群核心与 OpenClaw Gateway 隔离。4 线程 `WorkerPool` 在主事件循环外处理计算密集任务（ACO、k-means、HNSW、Shapley Monte Carlo）。
 
-1. **备份数据库**: 迁移前手动备份 `swarm.db`（MigrationRunner 也会自动备份）
-2. **更新依赖**: `npm install` 安装新增运行时依赖
-3. **更新配置**: v4.0 配置仍兼容，V5.0 新增 `workingMemory`、`episodicMemory`、`knowledgeGraph`、`moeRouting`、`abcScheduler`、`contractNet`、`dashboard` 等配置块
-4. **数据库迁移**: 首次启动时自动从 25 表迁移到 34 表
-5. **目录映射**: `layer1-core/` -> `L1-infrastructure/`; `layer2-engines/` -> `L2-communication/` + `L3-agent/`; `layer3-intelligence/` -> `L3-agent/` + `L4-orchestration/`; `layer4-adapter/` -> `L5-application/`
-
-### 破坏性变更
-
-- 插件入口仍为 `src/index.js`，导出格式不变 (`{ id, register(api) }`)
-- v4.0 旧目录 (`layer1-core/`、`layer2-engines/`、`layer3-intelligence/`、`layer4-adapter/`) 已移除，代码完全迁移至新的 L1-L6 层级
-- 工具名统一为 `swarm_` 前缀（v4.0 的 `collaborate-tool`、`swarm-manage-tool`、`swarm-design-tool` 已重命名）
+-> [完整架构指南](docs/zh-CN/architecture.md)
 
 ---
 
-## 14. 许可证
+## 仿生算法
 
-MIT License. Copyright 2025-2026 DEEP-IOS.
+| 算法 | 来源 | 用途 |
+|---|---|---|
+| MMAS（最大最小蚁群系统） | `src/L2-communication/pheromone-engine.js` | 信息素浓度边界控制 |
+| ACO 轮盘选择 | `src/L2-communication/pheromone-engine.js` | 概率性任务路径选择 |
+| Ebbinghaus 遗忘曲线 | `src/L3-agent/memory/episodic-memory.js` | 记忆随时间衰减 |
+| FRTM + PI 控制器 | `src/L3-agent/response-threshold.js` | 自适应代理任务响应阈值 |
+| 失败疫苗 | `src/L3-agent/failure-vaccination.js` | 基于模式的免疫记忆 |
+| FIPA 合同网协议 | `src/L4-orchestration/contract-net.js` | 拍卖式任务竞标 |
+| ABC（人工蜂群） | `src/L4-orchestration/abc-scheduler.js` | 三阶段雇佣蜂/旁观蜂/侦察蜂调度 |
+| Lotka-Volterra 动力学 | `src/L4-orchestration/species-evolver.js` | 带承载容量的种群竞争 |
+| Monte Carlo Shapley | `src/L4-orchestration/shapley-credit.js` | 跨代理联盟公平信用分配 |
+| 互信息校准 | `src/L4-orchestration/signal-calibrator.js` | 决策信号自动权重校准 |
 
-详见 [LICENSE](LICENSE)。
+-> [完整仿生学指南](docs/zh-CN/biomimicry.md)
+
+---
+
+## 工具与钩子
+
+### 公开工具（暴露给 LLM 代理）
+
+| 工具 | 用途 | 来源 |
+|---|---|---|
+| `swarm_run` | 规划 + 生成一键执行 | `src/L5-application/tools/swarm-run-tool.js` |
+| `swarm_query` | 查询蜂群状态、代理、任务进度 | `src/L5-application/tools/swarm-query-tool.js` |
+| `swarm_dispatch` | 通过中继向子代理分派任务 | `src/L5-application/tools/swarm-dispatch-tool.js` |
+| `swarm_checkpoint` | 暂停执行等待人工批准 | `src/L5-application/tools/swarm-checkpoint-tool.js` |
+
+另有 6 个内部工具（spawn、pheromone、gate、memory、plan、zone）供编排层使用，不直接暴露给终端用户代理。
+
+**钩子：** 19 个 OpenClaw 钩子注册在 `src/index.js`，覆盖完整代理生命周期——Gateway 启停、模型解析、Prompt 组装、工具调用、代理启停、子代理生命周期、LLM 输出、会话重置。
+
+-> [API 参考](docs/zh-CN/api-reference.md)
+
+---
+
+## 关键数字
+
+| 指标 | 值 | 来源 |
+|---|---|---|
+| 版本 | 7.0.0 | `package.json` |
+| 测试通过 | 1463 | `npx vitest run` |
+| 事件主题 | 122 | `src/event-catalog.js` |
+| 数据库表 | 52 | `src/L1-infrastructure/schemas/database-schemas.js` |
+| 注册钩子 | 19 | `src/index.js` |
+| 源 JS 文件 | 173 | `find src -name "*.js"（排除 node_modules）` |
+| 控制台源文件 | 98 | `src/L6-monitoring/console/src/` |
+| 工具文件 | 10（4 个公开） | `src/L5-application/tools/` |
+
+所有指标均源自源代码。验证命令列于 `docs/metadata.yml`。
+
+---
+
+## 文档
+
+| 指南 | 描述 |
+|---|---|
+| [架构设计](docs/zh-CN/architecture.md) | 6 层设计、进程模型、依赖流 |
+| [API 参考](docs/zh-CN/api-reference.md) | 工具、钩子、REST 端点、SSE 事件 |
+| [仿生学与设计哲学](docs/zh-CN/biomimicry.md) | 算法目录及源码引用 |
+| [模块指南 (L1-L6)](docs/zh-CN/module-guide.md) | 每模块职责与接口文档 |
+| [安装与配置](docs/zh-CN/installation.md) | 安装、配置选项、模型兼容性 |
+| [常见问题与故障排查](docs/zh-CN/faq-troubleshooting.md) | 常见问题与解决方案 |
+| [控制台指南](docs/zh-CN/console-guide.md) | Dashboard 视图、快捷键、SSE |
+
+英文文档：[docs/en/](docs/en/)
+
+---
+
+## 贡献
+
+详见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发设置、编码规范、架构规则和 Pull Request 指南。
+
+## 安全
+
+详见 [SECURITY.md](SECURITY.md) 了解支持版本和漏洞报告。
+
+## 许可证
+
+MIT License. Copyright 2025-2026 DEEP-IOS. 详见 [LICENSE](LICENSE)。

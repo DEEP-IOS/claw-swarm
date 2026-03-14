@@ -1,0 +1,80 @@
+# Claw-Swarm 术语统一映射表
+# 用途: 确保中英文档术语翻译一致
+# 格式: english_term: chinese_term
+
+terms:
+  # Core concepts / 核心概念
+  pheromone: 信息素
+  stigmergic board: 痕迹协作板
+  gossip protocol: Gossip 协议
+  message bus: 消息总线
+  circuit breaker: 熔断器
+  checkpoint: 检查点
+  sub-agent: 子代理
+  working memory: 工作记忆
+  episodic memory: 情景记忆
+  semantic memory: 语义记忆
+  forgetting curve: 遗忘曲线
+  knowledge graph: 知识图谱
+  reputation: 声誉
+  persona: 人格
+  soul designer: 灵魂设计器
+
+  # Bio-inspired / 仿生术语
+  ant colony: 蚁群
+  bee colony: 蜂群
+  scout bee: 侦察蜂
+  worker bee: 工蜂
+  guard bee: 守卫蜂
+  queen messenger: 信使蜂
+  designer bee: 设计蜂
+  employed bee: 雇佣蜂
+  onlooker bee: 旁观蜂
+  failure vaccination: 失败疫苗
+  negative selection: 负选择
+  response threshold: 响应阈值
+
+  # Architecture / 架构术语
+  gateway: Gateway
+  dashboard: Dashboard
+  plugin adapter: 插件适配器
+  worker pool: 工作线程池
+  IPC bridge: IPC 桥接
+  tier A hook: Tier A 钩子
+  tier B hook: Tier B 钩子
+  event topic: 事件主题
+  state broadcaster: 状态广播器
+  metrics collector: 指标收集器
+
+  # Orchestration / 编排术语
+  DAG engine: DAG 引擎
+  contract-net: 合同网
+  contract net protocol: 合同网协议
+  ABC scheduler: ABC 调度器
+  species evolver: 种群进化器
+  quality gate: 质量门
+  signal calibrator: 信号校准器
+  dual-process router: 双过程路由器
+  Shapley credit: Shapley 信用
+  budget tracker: 预算追踪器
+  execution planner: 执行规划器
+  global modulator: 全局调节器
+
+  # Technical terms (keep English) / 保持英文的技术术语
+  SQLite: SQLite
+  WAL: WAL
+  SSE: SSE
+  REST: REST
+  HNSW: HNSW
+  ACO: ACO
+  MMAS: MMAS
+  FIPA: FIPA
+  BFS: BFS
+  CPM: CPM
+  GEP: GEP
+  RED: RED
+  SNA: SNA
+  Zustand: Zustand
+  React: React
+  Vite: Vite
+  Fastify: Fastify

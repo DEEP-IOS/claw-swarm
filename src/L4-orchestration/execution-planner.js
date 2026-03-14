@@ -73,13 +73,14 @@ const DEFAULT_HISTORY_SCORE = 0.5;
  * @type {Array<{role: string, pattern: RegExp}>}
  */
 const REGEX_FALLBACK_PATTERNS = [
-  { role: 'architect', pattern: /\b(architect|design|system\s*design|api\s*design|schema|component\s*structure)\b/i },
-  { role: 'developer', pattern: /\b(implement|develop|code|build|create|fix|bug|feature|function|class)\b/i },
-  { role: 'tester', pattern: /\b(test|testing|qa|quality\s*assurance|coverage|unit\s*test|integration\s*test|verify|validate)\b/i },
-  { role: 'reviewer', pattern: /\b(review|audit|code\s*review|feedback|refactor|improve|optimize)\b/i },
-  { role: 'devops', pattern: /\b(deploy|docker|kubernetes|ci\/?cd|pipeline|infrastructure|monitoring|server|cloud)\b/i },
-  { role: 'designer', pattern: /\b(ui|ux|design|interface|layout|style|visual|responsive|accessibility)\b/i },
-  { role: 'analyst', pattern: /\b(analy[sz]e|analysis|data|requirement|report|research|document|metric)\b/i },
+  // 英文 + 中文关键词混合匹配 / Mixed English + Chinese keyword matching
+  { role: 'architect', pattern: /\b(architect|design|system\s*design|api\s*design|schema|component\s*structure|blueprint|roadmap|specification|planning)\b|架构|设计|系统设计|接口设计|方案|规划|蓝图|技术选型|架构设计/i },
+  { role: 'developer', pattern: /\b(implement|develop|code|build|create|fix|bug|feature|function|class|sort|algorithm|parse|server|api|endpoint|database|crud|auth|login|register|websocket|http|cli|script|library|package|module|component|render|compile|debug|refactor|migrate|convert|generate|automate|scrape|crawl|bot|plugin|extension|integration)\b|实现|开发|编写|编码|写代码|创建|修复|功能|程序|脚本|游戏|应用|工具|写一|帮我写|帮写|给我写|代码|函数|算法|排序|搜索|遍历|解析|爬虫|接口|服务|数据库|登录|注册|网站|网页|命令行|自动化|机器人|插件|模块|组件|类|对象|变量|循环|递归|计算|转换|生成|处理|提取|抓取|下载|上传|读取|保存|加载|配置|初始化|运行|执行|调用|封装|继承|多线程|异步|并发|缓存|日志|打印|输出|输入|格式化|验证码|加密|解密|压缩|解压|合并|拆分|过滤|映射|聚合|统计|计数|平均/i },
+  { role: 'tester', pattern: /\b(test|testing|qa|quality\s*assurance|coverage|unit\s*test|integration\s*test|verify|validate)\b|测试|验证|质量|覆盖率/i },
+  { role: 'reviewer', pattern: /\b(review|audit|code\s*review|feedback|refactor|improve|optimize)\b|审查|代码审查|重构|优化|改进/i },
+  { role: 'devops', pattern: /\b(deploy|docker|kubernetes|ci\/?cd|pipeline|infrastructure|monitoring|server|cloud)\b|部署|容器|服务器|运维|监控|云/i },
+  { role: 'designer', pattern: /\b(ui|ux|design|interface|layout|style|visual|responsive|accessibility)\b|界面|布局|样式|视觉|响应式/i },
+  { role: 'analyst', pattern: /\b(analy[sz]e|analysis|data|requirement|report|research|document|metric|investigate|explore|compare|evaluate|benchmark|survey|summarize|explain)\b|分析|数据|需求|报告|研究|文档|调查|调研|比较|评估|基准|总结|概述|解释|说明|梳理|整理/i },
 ];
 
 // ============================================================================
@@ -207,8 +208,19 @@ export class ExecutionPlanner {
     // 获取所有角色模板 / Get all role templates
     const templates = this._getTemplates();
     if (templates.length === 0) {
-      this._logger.warn?.('[ExecutionPlanner] 无角色模板 / No role templates available');
-      return { roles: [], scores: [], fallback: false };
+      // V6.3: 无模板时直接走 regex fallback, 不返回空
+      // V6.3: When no templates, fall back to regex instead of returning empty
+      this._logger.debug?.('[ExecutionPlanner] 无角色模板, 降级 regex / No templates, falling back to regex');
+      this._stats.fallbacks++;
+      const regexResult = this._regexFallback(taskDescription, k);
+      this._emit('planner.fallback', {
+        taskDescription: taskDescription.substring(0, 100),
+        maxScore: 0,
+        minConfidence: confidence,
+        regexMatches: regexResult.roles.map(r => r.name),
+        reason: 'no_templates',
+      });
+      return regexResult;
     }
 
     // 对每个模板计算 MoE 综合分 / Score each template with MoE
@@ -354,6 +366,117 @@ export class ExecutionPlanner {
     );
 
     return plan;
+  }
+
+  // =========================================================================
+  // V7.0 §31: 任务模板遗传进化 / Plan Template Genetic Evolution
+  // =========================================================================
+
+  /**
+   * V7.0 §31: 进化 plan 模板 — 从历史 plan 中提取 DAG 结构, GEP 选择/交叉/变异
+   * V7.0 §31: Evolve plan templates — extract DAG structures from historical plans,
+   * apply GEP selection/crossover/mutation
+   *
+   * @param {string} taskType - 任务类型 (用于过滤同类 plan) / Task type for filtering similar plans
+   * @param {Object} [options]
+   * @param {Object} [options.planRepo] - PlanRepo 实例
+   * @param {Object} [options.semanticMemory] - SemanticMemory 实例
+   * @param {number} [options.mutationRate=0.1] - 变异率
+   * @returns {{ evolved: boolean, templateCount: number, bestTemplate?: Object }}
+   */
+  evolvePlanTemplates(taskType, options = {}) {
+    const { planRepo, semanticMemory, mutationRate = 0.1 } = options;
+
+    // 1. 从 PlanRepo 检索同类 plan / Retrieve similar plans from PlanRepo
+    let historicalPlans = [];
+    if (planRepo) {
+      try {
+        const allPlans = planRepo.list?.({ limit: 50 }) || [];
+        historicalPlans = allPlans.filter(p => {
+          const desc = p.planData?.taskDescription || '';
+          return desc.toLowerCase().includes(taskType.toLowerCase()) ||
+                 (p.planData?.roles || []).some(r => r.toLowerCase().includes(taskType.toLowerCase()));
+        });
+      } catch { /* silent */ }
+    }
+
+    if (historicalPlans.length < 3) {
+      return { evolved: false, templateCount: historicalPlans.length, reason: 'insufficient_plans' };
+    }
+
+    // 2. 提取 DAG 结构作为染色体 / Extract DAG structures as chromosomes
+    const chromosomes = historicalPlans.map(p => ({
+      id: p.id || p.planData?.id,
+      phases: (p.planData?.phases || []).map(ph => ({
+        roleName: ph.roleName,
+        order: ph.order,
+        description: (ph.description || '').substring(0, 60),
+      })),
+      maturityScore: p.planData?.maturityScore || p.maturityScore || 0.5,
+      success: p.status === 'completed' || p.status === 'executing',
+    }));
+
+    // 3. GEP 选择: 按成熟度分数排序, 选 top 50% / Selection: sort by maturity, select top 50%
+    chromosomes.sort((a, b) => b.maturityScore - a.maturityScore);
+    const parents = chromosomes.slice(0, Math.ceil(chromosomes.length / 2));
+
+    // 4. 交叉 + 变异 → 新模板 / Crossover + mutation → new template
+    const bestParent = parents[0];
+    const secondParent = parents.length > 1 ? parents[1] : bestParent;
+
+    // 交叉: 取最佳的前半 + 第二的后半 / Crossover: first half of best + second half of runner-up
+    const crossoverPoint = Math.floor(bestParent.phases.length / 2);
+    const evolvedPhases = [
+      ...bestParent.phases.slice(0, crossoverPoint),
+      ...secondParent.phases.slice(crossoverPoint),
+    ];
+
+    // 变异: 随机交换两个 phase 的顺序 / Mutation: randomly swap two phase orders
+    if (Math.random() < mutationRate && evolvedPhases.length >= 2) {
+      const i = Math.floor(Math.random() * evolvedPhases.length);
+      const j = Math.floor(Math.random() * evolvedPhases.length);
+      [evolvedPhases[i], evolvedPhases[j]] = [evolvedPhases[j], evolvedPhases[i]];
+    }
+
+    // 修正 order / Fix order
+    evolvedPhases.forEach((ph, idx) => { ph.order = idx; });
+
+    const evolvedTemplate = {
+      id: `evolved-${Date.now().toString(36)}`,
+      phases: evolvedPhases,
+      maturityScore: (bestParent.maturityScore + secondParent.maturityScore) / 2,
+      parentIds: [bestParent.id, secondParent.id],
+      generation: 1,
+    };
+
+    // 5. 存入 SemanticMemory (如果可用) / Store in SemanticMemory (if available)
+    if (semanticMemory) {
+      try {
+        semanticMemory.addNode?.({
+          id: evolvedTemplate.id,
+          nodeType: 'plan_template',
+          label: `Evolved plan for ${taskType}`,
+          content: JSON.stringify(evolvedTemplate),
+          metadata: {
+            taskType,
+            maturityScore: evolvedTemplate.maturityScore,
+            phaseCount: evolvedPhases.length,
+            parentIds: evolvedTemplate.parentIds,
+          },
+        });
+      } catch { /* silent */ }
+    }
+
+    this._logger.info?.(
+      `[ExecutionPlanner] Plan template evolved: ${evolvedTemplate.id}, ` +
+      `${evolvedPhases.length} phases, maturity=${evolvedTemplate.maturityScore.toFixed(3)}`
+    );
+
+    return {
+      evolved: true,
+      templateCount: historicalPlans.length,
+      bestTemplate: evolvedTemplate,
+    };
   }
 
   // =========================================================================
@@ -600,6 +723,35 @@ export class ExecutionPlanner {
   }
 
   // =========================================================================
+  // V6.0: 亲和度专家 / Affinity Expert
+  // =========================================================================
+
+  /**
+   * V6.0: 亲和度专家 — 基于 task_affinity 表评估 agent-任务亲和度
+   * V6.0: Affinity expert — evaluates agent-task affinity from task_affinity table
+   *
+   * affinityScore = successRate * log(1 + completionCount) / log(101)
+   *
+   * @param {string} roleName - 角色名称
+   * @param {string} [agentId] - Agent ID (如果可用)
+   * @returns {number} 分数 0-1
+   * @private
+   */
+  _affinityExpert(roleName, agentId) {
+    if (!agentId || !this._taskRepo) return 0.5;
+
+    try {
+      const affinity = this._taskRepo.getAffinityForAgent?.(agentId, roleName);
+      if (!affinity || affinity.completionCount === 0) return 0.5;
+
+      const score = affinity.successRate * Math.log(1 + affinity.completionCount) / Math.log(101);
+      return Math.min(1, score);
+    } catch {
+      return 0.5;
+    }
+  }
+
+  // =========================================================================
   // Regex 降级 / Regex Fallback
   // =========================================================================
 
@@ -625,17 +777,17 @@ export class ExecutionPlanner {
     for (const { role, pattern } of REGEX_FALLBACK_PATTERNS) {
       const matches = taskDescription.match(pattern);
       if (matches) {
-        const template = this._getTemplateByName(role);
-        if (template) {
-          // Regex 匹配数作为伪分数 / Match count as pseudo-score
-          const pseudoScore = Math.min(1, matches.length * 0.3);
-          matchedRoles.push(template);
-          matchedScores.push({
-            role,
-            score: pseudoScore,
-            details: { keyword: pseudoScore, capability: 0, history: 0 },
-          });
-        }
+        // V6.3: 当 roleManager 不可用时, 创建最小角色模板
+        // V6.3: When roleManager unavailable, create minimal role template
+        const template = this._getTemplateByName(role) || this._createMinimalTemplate(role);
+        // Regex 匹配数作为伪分数 / Match count as pseudo-score
+        const pseudoScore = Math.min(1, matches.length * 0.3);
+        matchedRoles.push(template);
+        matchedScores.push({
+          role,
+          score: pseudoScore,
+          details: { keyword: pseudoScore, capability: 0, history: 0 },
+        });
       }
     }
 
@@ -646,18 +798,10 @@ export class ExecutionPlanner {
     const sortedRoles = indices.slice(0, topK).map(i => matchedRoles[i]);
     const sortedScores = indices.slice(0, topK).map(i => matchedScores[i]);
 
-    // 如果 regex 也没匹配到, 返回默认 developer / If no regex match, default to developer
-    if (sortedRoles.length === 0) {
-      const defaultTemplate = this._getTemplateByName('developer');
-      if (defaultTemplate) {
-        sortedRoles.push(defaultTemplate);
-        sortedScores.push({
-          role: 'developer',
-          score: 0.1,
-          details: { keyword: 0, capability: 0, history: 0 },
-        });
-      }
-    }
+    // V6.3: 如果 regex 也没匹配到, 不再默认返回 developer
+    // 让调用方 (designPlan) 处理空角色 → direct_reply
+    // V6.3: If no regex match either, don't default to developer.
+    // Let caller (designPlan) handle empty roles → direct_reply
 
     return {
       roles: sortedRoles,
@@ -681,6 +825,23 @@ export class ExecutionPlanner {
       return this._roleManager.listTemplates();
     }
     return [];
+  }
+
+  /**
+   * 创建最小角色模板 (无 roleManager 时的降级)
+   * Create minimal role template (fallback when no roleManager)
+   *
+   * @private
+   * @param {string} roleName
+   * @returns {Object} 最小角色模板 / Minimal role template
+   */
+  _createMinimalTemplate(roleName) {
+    return {
+      name: roleName,
+      description: `${roleName} role (auto-generated)`,
+      capabilities: [roleName],
+      constraints: { maxFiles: 20, reviewRequired: false },
+    };
   }
 
   /**

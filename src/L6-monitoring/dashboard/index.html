@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claw-Swarm V6.0 — Hive Dashboard</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <span style="font-size:22px">&#x1f41d;</span>
+    Claw-Swarm
+    <span class="version">V6.0</span>
+  </div>
+
+  <div class="view-tabs" id="viewTabs">
+    <button class="view-tab active" data-view="hive">&#x2B21; Hive</button>
+    <button class="view-tab" data-view="dag">&#x2192; DAG</button>
+    <button class="view-tab" data-view="sna">&#x1f310; SNA</button>
+    <button class="view-tab" data-view="workers">&#x2699; Workers</button>
+    <button class="view-tab" data-view="quality">&#x2705; Quality</button>
+    <button class="view-tab" data-view="v6">&#x26A1; V6</button>
+  </div>
+
+  <div class="header-spacer"></div>
+
+  <div class="health-pills">
+    <div class="health-pill">Agents: <span class="val" id="hpAgents">0</span></div>
+    <div class="health-pill">Tasks: <span class="val" id="hpTasks">0</span></div>
+    <div class="health-pill">Err: <span class="val" id="hpErr">0%</span></div>
+    <div class="health-pill">Avg: <span class="val" id="hpAvg">0ms</span></div>
+  </div>
+
+  <div class="conn-badge conn-connecting" id="connBadge">
+    <span class="dot"></span>
+    <span id="connText">CONNECTING</span>
+  </div>
+</header>
+
+<!-- LEFT PANEL -->
+<div class="left-panel">
+  <div class="metrics-grid">
+    <div class="metric-card"><div class="mc-val emerald" id="mcActive">0</div><div class="mc-label">Active</div></div>
+    <div class="metric-card"><div class="mc-val" id="mcDone">0</div><div class="mc-label">Tasks Done</div></div>
+    <div class="metric-card"><div class="mc-val red-val" id="mcErrRate">0%</div><div class="mc-label">Error Rate</div></div>
+    <div class="metric-card"><div class="mc-val blue-val" id="mcAvgDur">0ms</div><div class="mc-label">Avg Duration</div></div>
+  </div>
+
+  <div class="section-title">Agents <span class="count" id="agentCount">0</span></div>
+  <div class="agent-list" id="agentList">
+    <div class="empty-state"><div class="es-icon">&#x1f41d;</div>No agents registered</div>
+  </div>
+
+  <div class="section-title">Pheromones</div>
+  <div class="pheromone-summary" id="phSummary">
+    <div class="ph-row"><span class="ph-type">trail</span><div class="ph-track"><div class="ph-fill" style="width:0%;background:var(--amber)"></div></div><span class="ph-count">0</span></div>
+    <div class="ph-row"><span class="ph-type">alarm</span><div class="ph-track"><div class="ph-fill" style="width:0%;background:var(--red)"></div></div><span class="ph-count">0</span></div>
+    <div class="ph-row"><span class="ph-type">recruit</span><div class="ph-track"><div class="ph-fill" style="width:0%;background:var(--blue)"></div></div><span class="ph-count">0</span></div>
+    <div class="ph-row"><span class="ph-type">territory</span><div class="ph-track"><div class="ph-fill" style="width:0%;background:var(--purple)"></div></div><span class="ph-count">0</span></div>
+    <div class="ph-row"><span class="ph-type">dance</span><div class="ph-track"><div class="ph-fill" style="width:0%;background:var(--emerald)"></div></div><span class="ph-count">0</span></div>
+  </div>
+</div>
+
+<!-- MAIN CANVAS -->
+<div class="main-area" id="mainArea">
+  <canvas id="mainCanvas"></canvas>
+  <div class="glow-overlay" id="glowOverlay"></div>
+  <!-- V6.0 panels render here as overlays -->
+  <div id="panelContainer" style="display:none;position:absolute;inset:0;overflow:auto;background:var(--bg-primary);z-index:5;padding:16px"></div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="right-panel">
+  <div class="section-title" id="rightTitle">Overview</div>
+  <div class="right-panel-content" id="rightContent"></div>
+</div>
+
+<!-- FOOTER LOG -->
+<div class="footer-log" id="footerLog">
+  <div class="log-header" id="logToggle">
+    <span class="lh-title">Event Stream</span>
+    <span class="lh-toggle">&#x25BC;</span>
+    <span class="lh-count" id="logCount">0</span>
+  </div>
+  <div class="log-entries" id="logEntries"></div>
+</div>
+
+<script type="module">
+import { $, $$, state, dataBus, connectSSE, startMetricsPolling, fetchAPI,
+         shortId, fmtTime, fmtDuration, personaColor, personaIcon, hexToRgba,
+         TWO_PI, lerp, clamp, PHEROMONE_COLORS } from './core.js';
+
+// ═══ Canvas Setup ═══
+const canvas = $('#mainCanvas');
+const ctx = canvas.getContext('2d');
+const mainArea = $('#mainArea');
+const bufferCanvas = document.createElement('canvas');
+const bufCtx = bufferCanvas.getContext('2d');
+const panelContainer = $('#panelContainer');
+let canvasW = 0, canvasH = 0, dpr = 1, lastFrameTime = 0, animationId = null;
+const FRAME_INTERVAL = 1000 / 30;
+const PARTICLE_POOL_MAX = 200;
+const LOG_MAX = 50;
+
+function resizeCanvas() {
+  dpr = window.devicePixelRatio || 1;
+  const rect = mainArea.getBoundingClientRect();
+  canvasW = rect.width; canvasH = rect.height;
+  canvas.width = canvasW * dpr; canvas.height = canvasH * dpr;
+  canvas.style.width = canvasW + 'px'; canvas.style.height = canvasH + 'px';
+  bufferCanvas.width = canvas.width; bufferCanvas.height = canvas.height;
+  computeHexLayout(); computeDAGLayout();
+}
+window.addEventListener('resize', resizeCanvas);
+
+// ═══ Hex Layout ═══
+function computeHexLayout() {
+  const agents = [...state.agents.values()].filter(a => a.status !== 'offline');
+  const n = agents.length;
+  if (n === 0) { state.hexPositions = []; return; }
+  const padding = 60, availW = canvasW - padding * 2, availH = canvasH - padding * 2;
+  const cols = Math.ceil(Math.sqrt(n * 1.5)), rows = Math.ceil(n / cols);
+  const hexW = availW / (cols + 0.5), hexH = availH / rows;
+  const hexSize = Math.min(hexW / Math.sqrt(3), hexH / 2, 60);
+  const actualHexW = hexSize * Math.sqrt(3), actualHexH = hexSize * 2;
+  const gridW = cols * actualHexW + actualHexW * 0.5;
+  const gridH = rows * actualHexH * 0.75 + actualHexH * 0.25;
+  const offsetX = (canvasW - gridW) / 2 + actualHexW * 0.5;
+  const offsetY = (canvasH - gridH) / 2 + hexSize;
+
+  const sorted = agents.slice().sort((a, b) => {
+    if (a.persona === 'queen-messenger') return -1;
+    if (b.persona === 'queen-messenger') return 1;
+    return (a.persona || '').localeCompare(b.persona || '');
+  });
+
+  const positions = [], visited = new Set();
+  const centerCol = Math.floor(cols / 2), centerRow = Math.floor(rows / 2);
+  const queue = [[centerCol, centerRow]];
+  visited.add(`${centerCol},${centerRow}`);
+  let idx = 0;
+  while (queue.length > 0 && idx < sorted.length) {
+    const [c, r] = queue.shift();
+    const x = offsetX + c * actualHexW + (r % 2 === 1 ? actualHexW * 0.5 : 0);
+    const y = offsetY + r * actualHexH * 0.75;
+    positions.push({ x, y, size: hexSize, agentId: sorted[idx].id, agent: sorted[idx], targetX: x, targetY: y, currentX: sorted[idx]._hexX ?? x, currentY: sorted[idx]._hexY ?? y });
+    sorted[idx]._hexX = x; sorted[idx]._hexY = y; idx++;
+    const neighbors = r % 2 === 0 ? [[c-1,r],[c+1,r],[c-1,r-1],[c,r-1],[c-1,r+1],[c,r+1]] : [[c-1,r],[c+1,r],[c,r-1],[c+1,r-1],[c,r+1],[c+1,r+1]];
+    for (const [nc, nr] of neighbors) { const key = `${nc},${nr}`; if (!visited.has(key) && nc >= 0 && nc < cols && nr >= 0 && nr < rows) { visited.add(key); queue.push([nc, nr]); } }
+  }
+  state.hexPositions = positions;
+}
+
+function computeDAGLayout() {
+  const tasks = [...state.tasks.values()];
+  if (tasks.length === 0) { state.dagNodes = []; return; }
+  const padding = 80, nodeW = 160, nodeH = 48, gapX = 40, gapY = 20;
+  const statusOrder = { pending: 0, started: 1, executing: 1, completed: 2, failed: 3 };
+  const sorted = tasks.slice().sort((a, b) => (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0));
+  const cols = Math.ceil(Math.sqrt(sorted.length * 2));
+  state.dagNodes = sorted.map((task, i) => ({ x: padding + (i % cols) * (nodeW + gapX), y: padding + Math.floor(i / cols) * (nodeH + gapY), w: nodeW, h: nodeH, task, taskId: task.taskId }));
+}
+
+// ═══ Particle System ═══
+state.particles = []; state.particleFreeList = []; state.hexPositions = []; state.dagNodes = [];
+
+function spawnParticle(fromX, fromY, toX, toY, color, type) {
+  let p;
+  if (state.particleFreeList.length > 0) p = state.particleFreeList.pop();
+  else if (state.particles.length < PARTICLE_POOL_MAX) p = { fx:0,fy:0,tx:0,ty:0,cx:0,cy:0,progress:0,speed:0,color:'',type:'',size:0,trail:[],alive:false };
+  else return;
+  const mx = (fromX+toX)/2, my = (fromY+toY)/2, dx = toX-fromX, dy = toY-fromY, offset = (Math.random()-0.5)*80;
+  Object.assign(p, { fx:fromX,fy:fromY,tx:toX,ty:toY, cx:mx+(-dy/(Math.hypot(dx,dy)||1))*offset, cy:my+(dx/(Math.hypot(dx,dy)||1))*offset, progress:0, speed:0.008+Math.random()*0.012, color, type:type||'trail', size:2+Math.random()*2, trail:[], alive:true });
+  state.particles.push(p);
+}
+
+function quadBezier(p0x,p0y,p1x,p1y,p2x,p2y,t) { const u=1-t; return { x:u*u*p0x+2*u*t*p1x+t*t*p2x, y:u*u*p0y+2*u*t*p1y+t*t*p2y }; }
+
+// ═══ Rendering ═══
+function drawHexPath(c, cx, cy, size) { c.beginPath(); for(let i=0;i<6;i++){const a=TWO_PI/6*i-Math.PI/2;const hx=cx+size*Math.cos(a);const hy=cy+size*Math.sin(a);i===0?c.moveTo(hx,hy):c.lineTo(hx,hy);} c.closePath(); }
+
+function renderHiveView(c, w, h, time) {
+  c.fillStyle='#0F0F23'; c.fillRect(0,0,w*dpr,h*dpr); c.save(); c.scale(dpr,dpr);
+  // Background honeycomb
+  const bgSize=30, bgHexW=bgSize*Math.sqrt(3), bgCols=Math.ceil(w/bgHexW)+2, bgRows=Math.ceil(h/(bgSize*1.5))+2;
+  c.strokeStyle=hexToRgba('#2A2A4A',0.08); c.lineWidth=0.5;
+  for(let r=-1;r<bgRows;r++) for(let col=-1;col<bgCols;col++) { drawHexPath(c,col*bgHexW+(r%2===1?bgHexW*0.5:0),r*bgSize*1.5,bgSize); c.stroke(); }
+
+  const positions = state.hexPositions;
+  if(positions.length===0) { c.fillStyle='#8888AA'; c.font='14px Segoe UI,system-ui,sans-serif'; c.textAlign='center'; c.globalAlpha=0.5; c.fillText('Waiting for swarm activity\u2026',w/2,h/2-10); c.font='10px Segoe UI,system-ui,sans-serif'; c.fillText('Agents will appear as hexagonal cells',w/2,h/2+12); c.globalAlpha=1; c.restore(); return; }
+
+  // Connections
+  c.strokeStyle=hexToRgba('#2A2A4A',0.4); c.lineWidth=1;
+  for(let i=0;i<positions.length;i++) for(let j=i+1;j<positions.length;j++) { if(positions[i].agent.persona===positions[j].agent.persona) { const d=Math.hypot(positions[i].x-positions[j].x,positions[i].y-positions[j].y); if(d<positions[i].size*5) { c.globalAlpha=0.15; c.beginPath(); c.moveTo(positions[i].x,positions[i].y); c.lineTo(positions[j].x,positions[j].y); c.stroke(); c.globalAlpha=1; }}}
+
+  // Particles
+  for(let i=state.particles.length-1;i>=0;i--) { const p=state.particles[i]; if(!p.alive){state.particles.splice(i,1);continue;} p.progress+=p.speed; if(p.progress>=1){state.particles.splice(i,1);state.particleFreeList.push(p);continue;} const pos=quadBezier(p.fx,p.fy,p.cx,p.cy,p.tx,p.ty,p.progress); p.trail.push({x:pos.x,y:pos.y}); if(p.trail.length>3)p.trail.shift(); if(p.trail.length>1){for(let j=1;j<p.trail.length;j++){c.strokeStyle=hexToRgba(p.color,j/p.trail.length*0.5);c.lineWidth=p.size*0.6;c.beginPath();c.moveTo(p.trail[j-1].x,p.trail[j-1].y);c.lineTo(p.trail[j].x,p.trail[j].y);c.stroke();}} c.fillStyle=p.color;c.shadowColor=p.color;c.shadowBlur=8;c.beginPath();c.arc(pos.x,pos.y,p.size,0,TWO_PI);c.fill();c.shadowBlur=0; }
+
+  // Hex cells
+  for(const pos of positions) { const agent=pos.agent, color=personaColor(agent.persona), icon=personaIcon(agent.persona), isSelected=state.selectedAgentId===agent.id, size=pos.size;
+    pos.currentX=lerp(pos.currentX,pos.targetX,0.1); pos.currentY=lerp(pos.currentY,pos.targetY,0.1); const cx=pos.currentX,cy=pos.currentY;
+    if(agent.status==='active'||agent.status==='busy'){const pulse=0.6+0.4*Math.sin(time*0.002+agent._phase);const gs=size*1.6*pulse;const grad=c.createRadialGradient(cx,cy,size*0.5,cx,cy,gs);grad.addColorStop(0,hexToRgba(color,0.2*pulse));grad.addColorStop(1,hexToRgba(color,0));c.fillStyle=grad;c.beginPath();c.arc(cx,cy,gs,0,TWO_PI);c.fill();}
+    drawHexPath(c,cx,cy,size); c.fillStyle=hexToRgba(color,0.15); c.fill();
+    drawHexPath(c,cx,cy,size); c.strokeStyle=isSelected?'#FFFFFF':color; c.lineWidth=isSelected?3:2; c.stroke();
+    if(isSelected){drawHexPath(c,cx,cy,size+4);c.strokeStyle=hexToRgba(color,0.4);c.lineWidth=1;c.setLineDash([4,4]);c.stroke();c.setLineDash([]);}
+    c.font=Math.floor(size*0.55)+'px serif'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(icon,cx,cy-2);
+    c.font='bold '+Math.max(8,Math.floor(size*0.22))+'px Segoe UI,system-ui,sans-serif'; c.fillStyle='#E8E8F0'; c.textBaseline='top'; c.fillText(shortId(agent.id),cx,cy+size*0.35);
+    const dotX=cx+size*0.65,dotY=cy-size*0.65,dotR=Math.max(3,size*0.1); c.beginPath();c.arc(dotX,dotY,dotR,0,TWO_PI); c.fillStyle=agent.status==='active'?'#10B981':agent.status==='busy'?'#F5A623':agent.status==='error'?'#EF4444':'#555577'; c.fill();
+    if(agent.status==='active'){c.beginPath();c.arc(dotX,dotY,dotR*2,0,TWO_PI);c.fillStyle=hexToRgba('#10B981',0.2);c.fill();}
+  }
+  c.restore();
+}
+
+function renderDAGView(c, w, h, time) {
+  c.fillStyle='#0F0F23'; c.fillRect(0,0,w*dpr,h*dpr); c.save(); c.scale(dpr,dpr);
+  const nodes = state.dagNodes;
+  if(nodes.length===0){c.fillStyle='#8888AA';c.font='14px Segoe UI,system-ui,sans-serif';c.textAlign='center';c.globalAlpha=0.5;c.fillText('No tasks in DAG',w/2,h/2);c.globalAlpha=1;c.restore();return;}
+  const SC={pending:'#555577',started:'#3B82F6',executing:'#3B82F6',completed:'#10B981',failed:'#EF4444'};
+  for(let i=0;i<nodes.length-1;i++){const f=nodes[i],t=nodes[i+1];if(Math.abs(f.y-t.y)<t.h){c.strokeStyle=hexToRgba('#2A2A4A',0.5);c.lineWidth=1.5;c.beginPath();c.moveTo(f.x+f.w,f.y+f.h/2);c.lineTo(t.x,t.y+t.h/2);c.stroke();}}
+  for(const node of nodes){const task=node.task,color=SC[task.status]||SC.pending,r=8; c.fillStyle=hexToRgba(color,0.12);c.strokeStyle=color;c.lineWidth=1.5;c.beginPath();c.roundRect(node.x,node.y,node.w,node.h,r);c.fill();c.stroke();c.fillStyle=color;c.font='14px Segoe UI,system-ui,sans-serif';c.textAlign='left';c.textBaseline='middle';c.fillText(task.status==='completed'?'\u2713':task.status==='failed'?'\u2717':'\u25CB',node.x+10,node.y+node.h/2);c.fillStyle='#E8E8F0';c.font='11px Segoe UI,system-ui,sans-serif';c.fillText((task.description||task.taskId||'?').slice(0,20),node.x+28,node.y+node.h/2);}
+  c.restore();
+}
+
+function animate(time) {
+  animationId = requestAnimationFrame(animate);
+  if(time-lastFrameTime<FRAME_INTERVAL) return;
+  lastFrameTime=time;
+  if(canvasW===0||canvasH===0) return;
+  if(state.activeView==='hive') renderHiveView(bufCtx,canvasW,canvasH,time);
+  else if(state.activeView==='dag') renderDAGView(bufCtx,canvasW,canvasH,time);
+  else return; // non-canvas views
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(bufferCanvas,0,0);
+}
+
+// ═══ Event Handlers ═══
+dataBus.on('agent.*', (data, topic) => {
+  const id = data.agentId || data.id; if(!id) return;
+  if(topic==='agent.registered'||topic==='agent.online'||!state.agents.has(id)){
+    if(!state.agents.has(id)) state.agents.set(id, { id, persona:data.persona||'default', tier:data.tier||'', status:data.status||'active', tasks:[], successCount:0, failCount:0, qualityScores:[], capabilities:null, _phase:Math.random()*TWO_PI, _hexX:null, _hexY:null });
+    else { const a=state.agents.get(id); a.status=data.status||'active'; if(data.persona)a.persona=data.persona; }
+  } else if(topic==='agent.end') { const a=state.agents.get(id); if(a)a.status='offline'; }
+  refreshLeftPanel(); computeHexLayout();
+});
+
+dataBus.on('task.*', (data, topic) => {
+  const id=data.taskId||data.id; if(!id) return;
+  if(topic==='task.completed') { state.swarm.tasksCompleted++; const t=state.tasks.get(id); if(t){t.status='completed';t.duration=data.duration||(Date.now()-(t.startTime||Date.now()));} else state.tasks.set(id,{taskId:id,agentId:data.agentId,description:data.description||id,status:'completed',duration:data.duration}); if(data.agentId){const a=state.agents.get(data.agentId);if(a){a.successCount++;a.status='active';}} spawnTaskParticles(data,'completed');
+  } else if(topic==='task.failed') { state.swarm.tasksFailed++; if(!state.tasks.has(id))state.tasks.set(id,{taskId:id,agentId:data.agentId,description:data.description||id,status:'failed'}); else state.tasks.get(id).status='failed'; if(data.agentId){const a=state.agents.get(data.agentId);if(a){a.failCount++;a.status='active';}} spawnTaskParticles(data,'failed');
+  } else if(topic==='task.started'||topic==='task.assigned') { state.tasks.set(id,{taskId:id,agentId:data.agentId,description:data.description||id,status:'executing',startTime:Date.now()}); if(data.agentId){const a=state.agents.get(data.agentId);if(a)a.status='busy';}
+  }
+  refreshLeftPanel(); computeDAGLayout();
+});
+
+dataBus.on('pheromone.*', (data) => {
+  state.swarm.pheromoneEvents++;
+  const pType=data.type||'trail', key=pType==='queen'?'territory':(state.pheromonesByType[pType]!=null?pType:'trail');
+  state.pheromonesByType[key]=(state.pheromonesByType[key]||0)+1;
+  updatePheromoneUI();
+  const p=state.hexPositions; if(p.length>=2){const a=p[Math.floor(Math.random()*p.length)];let b=p[Math.floor(Math.random()*p.length)];if(a===b)b=p[(p.indexOf(a)+1)%p.length];spawnParticle(a.x,a.y,b.x,b.y,PHEROMONE_COLORS[pType]||'#F5A623',pType);}
+});
+
+dataBus.on('quality.*', (data) => { if(data.agentId){const a=state.agents.get(data.agentId);if(a){a.qualityScores.push(data.score||0);if(a.qualityScores.length>20)a.qualityScores.shift();}} });
+
+function spawnTaskParticles(data, status) {
+  const p=state.hexPositions; if(p.length<2) return;
+  let from=data.agentId?p.find(pp=>pp.agentId===data.agentId):null;
+  if(!from) from=p[Math.floor(Math.random()*p.length)];
+  const to=p[Math.floor(Math.random()*p.length)];
+  spawnParticle(from.x,from.y,to.x,to.y,status==='completed'?'#10B981':'#EF4444','task');
+}
+
+// ═══ UI Updates ═══
+function refreshLeftPanel() {
+  const agents=[...state.agents.values()], active=agents.filter(a=>a.status!=='offline');
+  $('#mcActive').textContent=active.length; $('#mcDone').textContent=state.swarm.tasksCompleted;
+  const total=state.swarm.tasksCompleted+state.swarm.tasksFailed;
+  const errRate=total>0?((state.swarm.tasksFailed/total)*100).toFixed(1):'0';
+  $('#mcErrRate').textContent=errRate+'%'; $('#mcAvgDur').textContent=fmtDuration(state.red.avgDuration);
+  $('#hpAgents').textContent=active.length; $('#hpTasks').textContent=state.swarm.tasksCompleted;
+  $('#hpErr').textContent=errRate+'%'; $('#hpAvg').textContent=fmtDuration(state.red.avgDuration);
+  $('#agentCount').textContent=agents.length;
+  const listEl=$('#agentList');
+  if(agents.length===0){listEl.innerHTML='<div class="empty-state"><div class="es-icon">&#x1f41d;</div>No agents registered</div>';return;}
+  listEl.innerHTML=agents.map(a=>{const icon=personaIcon(a.persona);const sc=a.status==='active'?'ai-status-active':a.status==='busy'?'ai-status-busy':a.status==='error'?'ai-status-error':'ai-status-offline';const sel=state.selectedAgentId===a.id?' selected':'';return`<div class="agent-item${sel}" data-agent-id="${a.id}"><span class="ai-icon">${icon}</span><span class="ai-name">${shortId(a.id)}</span><span class="ai-status ${sc}"></span></div>`;}).join('');
+  listEl.querySelectorAll('.agent-item').forEach(el=>{el.addEventListener('click',function(){const id=this.dataset.agentId;state.selectedAgentId=state.selectedAgentId===id?null:id;refreshLeftPanel();refreshRightPanel();});});
+}
+
+function updatePheromoneUI() {
+  const types=['trail','alarm','recruit','territory','dance'];
+  const max=Math.max(1,...types.map(t=>state.pheromonesByType[t]||0));
+  const rows=$('#phSummary').children;
+  types.forEach((t,i)=>{const count=state.pheromonesByType[t]||0;rows[i].querySelector('.ph-fill').style.width=Math.round((count/max)*100)+'%';rows[i].querySelector('.ph-count').textContent=count;});
+}
+
+function refreshRightPanel() {
+  const titleEl=$('#rightTitle'), contentEl=$('#rightContent');
+  if(state.selectedAgentId) renderAgentDetail(titleEl,contentEl);
+  else renderAggregateView(titleEl,contentEl);
+}
+
+function renderAgentDetail(titleEl, contentEl) {
+  const agent=state.agents.get(state.selectedAgentId);
+  if(!agent){state.selectedAgentId=null;renderAggregateView(titleEl,contentEl);return;}
+  const icon=personaIcon(agent.persona), color=personaColor(agent.persona);
+  const totalT=agent.successCount+agent.failCount, sr=totalT>0?Math.round(agent.successCount/totalT*100):0;
+  titleEl.textContent='Agent Detail';
+  contentEl.innerHTML=`<div class="detail-card"><div class="dc-header"><span class="dc-icon">${icon}</span><div class="dc-info"><h3>${shortId(agent.id)}</h3><div class="dc-persona">${agent.persona}${agent.tier?' \u00B7 '+agent.tier:''}</div><span class="dc-status" style="background:${hexToRgba(color,0.2)};color:${color}">${agent.status}</span></div></div><div class="stat-row"><span class="sr-label">Tasks Done</span><span class="sr-val" style="color:var(--emerald)">${agent.successCount}</span></div><div class="stat-row"><span class="sr-label">Tasks Failed</span><span class="sr-val" style="color:var(--red)">${agent.failCount}</span></div><div class="stat-row"><span class="sr-label">Success Rate</span><span class="sr-val">${sr}%</span></div><div class="success-bar"><div class="sb-fill" style="width:${sr}%;background:${sr>60?'var(--emerald)':sr>30?'var(--amber)':'var(--red)'}"></div></div></div>`;
+}
+
+function renderAggregateView(titleEl, contentEl) {
+  titleEl.textContent='Overview';
+  const total=state.swarm.tasksCompleted+state.swarm.tasksFailed;
+  contentEl.innerHTML=`<div class="aggregate-section"><h4>Swarm Activity</h4><div class="agg-row"><span>Tasks Completed</span><span class="ar-val" style="color:var(--emerald)">${state.swarm.tasksCompleted}</span></div><div class="agg-row"><span>Tasks Failed</span><span class="ar-val" style="color:var(--red)">${state.swarm.tasksFailed}</span></div><div class="agg-row"><span>Pheromone Events</span><span class="ar-val">${state.swarm.pheromoneEvents}</span></div><div class="agg-row"><span>Memory Events</span><span class="ar-val">${state.swarm.memoryEvents}</span></div></div>`;
+}
+
+// ═══ Log Stream ═══
+const logEntriesEl=$('#logEntries');
+dataBus.on('*', (data, topic) => {}); // catch-all for logging via SSE
+
+// Override dataBus emit for logging
+const origEmit = dataBus.emit.bind(dataBus);
+dataBus.emit = function(topic, data) {
+  origEmit(topic, data);
+  if(!topic || topic==='metrics.snapshot') return;
+  const logType=topic.startsWith('task.')?'task':topic.startsWith('agent.')?'agent':topic.startsWith('pheromone.')?'pheromone':topic.startsWith('quality.')?'quality':topic.startsWith('memory.')?'memory':'';
+  addLogEntry(topic, data, logType);
+};
+
+function addLogEntry(topic, data, type) {
+  const entry=document.createElement('div');
+  entry.className='log-entry'+(type?' le-'+type:'');
+  entry.innerHTML=`<span class="le-ts">${fmtTime()}</span><span class="le-topic">${topic}</span>${data.agentId?shortId(data.agentId):''}`;
+  logEntriesEl.prepend(entry);
+  while(logEntriesEl.children.length>LOG_MAX) logEntriesEl.lastChild.remove();
+  $('#logCount').textContent=logEntriesEl.children.length;
+}
+
+$('#logToggle').addEventListener('click',()=>{$('#footerLog').classList.toggle('collapsed');state.logCollapsed=!state.logCollapsed;});
+
+// ═══ V6.0 Panel Loading ═══
+let activePanel = null;
+
+const V6_PANELS = {
+  sna:      () => import('./panels/sna-topology.js'),
+  workers:  () => import('./panels/worker-pool.js'),
+  quality:  () => import('./panels/quality-timeline.js'),
+  v6:       () => import('./panels/v6-overview.js'),
+};
+
+async function switchView(view) {
+  // Cleanup active panel
+  if(activePanel) { try { activePanel.destroy?.(); } catch(_){} activePanel=null; }
+
+  state.activeView = view;
+  $$('.view-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));
+
+  if(view==='hive'||view==='dag') {
+    canvas.style.display='block'; panelContainer.style.display='none';
+    if(!animationId) animationId=requestAnimationFrame(animate);
+  } else {
+    canvas.style.display='none'; panelContainer.style.display='block';
+    panelContainer.innerHTML='<div class="empty-state">Loading panel...</div>';
+    const loader = V6_PANELS[view];
+    if(loader) {
+      try {
+        const mod = await loader();
+        panelContainer.innerHTML='';
+        activePanel=mod;
+        mod.init(panelContainer, dataBus, state, fetchAPI);
+      } catch(e) { panelContainer.innerHTML=`<div class="empty-state">Panel load error: ${e.message}</div>`; }
+    } else {
+      panelContainer.innerHTML='<div class="empty-state">Unknown panel: '+view+'</div>';
+    }
+  }
+}
+
+$('#viewTabs').addEventListener('click',(e)=>{const btn=e.target.closest('.view-tab');if(btn)switchView(btn.dataset.view);});
+
+// ═══ V6.0 Data Polling ═══
+async function pollV6Data() {
+  const base = '';
+  const endpoints = [
+    ['workers', '/api/v1/workers'],
+    ['sna', '/api/v1/sna'],
+    ['shapley', '/api/v1/shapley'],
+    ['dualProcess', '/api/v1/dual-process'],
+    ['failureModes', '/api/v1/failure-modes'],
+    ['budgetForecast', '/api/v1/budget-forecast'],
+    ['qualityAudit', '/api/v1/quality-audit'],
+    ['agentStates', '/api/v1/agent-states'],
+    ['vectorStats', '/api/v1/vectors'],
+    ['ipcStats', '/api/v1/ipc-stats'],
+    ['traceAnalysis', '/api/v1/trace-analysis'],
+  ];
+  for (const [key, path] of endpoints) {
+    const data = await fetchAPI(base + path);
+    if (data) { state.v6[key] = data; dataBus.emit('v6.' + key, data); }
+  }
+}
+
+// ═══ Init ═══
+resizeCanvas();
+animationId = requestAnimationFrame(animate);
+connectSSE('');
+startMetricsPolling('', 5000);
+refreshLeftPanel();
+refreshRightPanel();
+setInterval(pollV6Data, 10000);
+setTimeout(pollV6Data, 2000);
+</script>
+</body>
+</html>

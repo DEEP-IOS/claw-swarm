@@ -323,6 +323,97 @@ export class TraceCollector {
     };
   }
 
+  // ━━━ V6.0: 延迟分析 / Latency Analysis ━━━
+
+  /**
+   * V6.0: 分析延迟百分位数
+   * V6.0: Analyze latency percentiles
+   *
+   * @param {Object} [options]
+   * @param {number} [options.since] - 起始时间戳 / Start timestamp
+   * @param {string} [options.operation] - 过滤操作名 / Filter by operation name
+   * @param {number} [options.limit=1000] - 最大 span 数 / Max spans to analyze
+   * @returns {Object} { p50, p95, p99, count, avg, max }
+   */
+  analyzeLatency({ since, operation, limit = 1000 } = {}) {
+    if (!this._db) {
+      return { p50: 0, p95: 0, p99: 0, count: 0, avg: 0, max: 0 };
+    }
+
+    try {
+      let sql = 'SELECT duration_ms FROM trace_spans WHERE duration_ms > 0';
+      const params = [];
+
+      if (since) {
+        sql += ' AND timestamp >= ?';
+        params.push(since);
+      }
+      if (operation) {
+        sql += ' AND operation = ?';
+        params.push(operation);
+      }
+      sql += ' ORDER BY duration_ms ASC LIMIT ?';
+      params.push(limit);
+
+      const rows = this._db.prepare(sql).all(...params);
+      if (rows.length === 0) {
+        return { p50: 0, p95: 0, p99: 0, count: 0, avg: 0, max: 0 };
+      }
+
+      const durations = rows.map((r) => r.duration_ms);
+      const count = durations.length;
+      const avg = durations.reduce((s, d) => s + d, 0) / count;
+      const max = durations[count - 1];
+
+      const percentile = (arr, p) => {
+        const idx = Math.ceil(p / 100 * arr.length) - 1;
+        return arr[Math.max(0, idx)];
+      };
+
+      return {
+        p50: percentile(durations, 50),
+        p95: percentile(durations, 95),
+        p99: percentile(durations, 99),
+        count,
+        avg: Math.round(avg * 100) / 100,
+        max,
+      };
+    } catch (err) {
+      this._logger.warn?.(`[TraceCollector] analyzeLatency error: ${err.message}`);
+      return { p50: 0, p95: 0, p99: 0, count: 0, avg: 0, max: 0 };
+    }
+  }
+
+  /**
+   * V6.0: 检测瓶颈 span
+   * V6.0: Detect bottleneck spans
+   *
+   * @param {Object} [options]
+   * @param {number} [options.since] - 起始时间戳 / Start timestamp
+   * @param {number} [options.topN=10] - 返回前 N 个最慢 span / Return top N slowest spans
+   * @returns {Array<Object>} 瓶颈 span 列表 / Bottleneck span list
+   */
+  detectBottlenecks({ since, topN = 10 } = {}) {
+    if (!this._db) return [];
+
+    try {
+      let sql = 'SELECT trace_id, span_id, operation, duration_ms, timestamp FROM trace_spans WHERE duration_ms > 0';
+      const params = [];
+
+      if (since) {
+        sql += ' AND timestamp >= ?';
+        params.push(since);
+      }
+      sql += ' ORDER BY duration_ms DESC LIMIT ?';
+      params.push(topN);
+
+      return this._db.prepare(sql).all(...params);
+    } catch (err) {
+      this._logger.warn?.(`[TraceCollector] detectBottlenecks error: ${err.message}`);
+      return [];
+    }
+  }
+
   /**
    * 停止收集器 / Stop collector
    */

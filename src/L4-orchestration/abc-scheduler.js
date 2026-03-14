@@ -578,6 +578,36 @@ export class ABCScheduler {
   // 统计 / Statistics
   // =========================================================================
 
+  // =========================================================================
+  // V7.0 §6: 角色查询 / Role Query
+  // =========================================================================
+
+  /**
+   * V7.0 §6: 获取 agent 的 ABC 角色
+   * V7.0 §6: Get agent's current ABC role
+   *
+   * 用于 spawn 前注入角色差异化行为:
+   * - employed: 精确执行已知策略
+   * - onlooker: 根据质量选择最佳方案
+   * - scout: 鼓励探索未知方案
+   *
+   * Used to inject role-differentiated behavior before spawn:
+   * - employed: execute known strategies precisely
+   * - onlooker: select best approach by quality
+   * - scout: encourage exploring unknown approaches
+   *
+   * @param {string} agentId - Agent ID
+   * @returns {string} 'employed' | 'onlooker' | 'scout' | 'unknown'
+   */
+  getAgentRole(agentId) {
+    const state = this._agentStates.get(agentId);
+    return state?.role || 'unknown';
+  }
+
+  // =========================================================================
+  // 统计 / Statistics
+  // =========================================================================
+
   /**
    * 获取调度器统计
    * Get scheduler statistics
@@ -632,6 +662,7 @@ export class ABCScheduler {
    */
   _setAgentRole(agentId, role) {
     let state = this._agentStates.get(agentId);
+    const oldRole = state?.role || null;
     if (!state) {
       state = {
         role,
@@ -643,6 +674,14 @@ export class ABCScheduler {
       this._agentStates.set(agentId, state);
     } else {
       state.role = role;
+    }
+    // 角色变更时通知前端 / Notify frontend on role change
+    if (this._messageBus && role !== oldRole) {
+      try {
+        this._messageBus.publish('abc.role_changed', {
+          agentId, oldRole, newRole: role, timestamp: Date.now(),
+        });
+      } catch { /* non-fatal */ }
     }
   }
 

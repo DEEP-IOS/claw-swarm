@@ -141,6 +141,91 @@ export const EventTopics = {
   // ── V5.7: 多类型信息素 / Multi-type pheromones ──
   PHEROMONE_TYPE_REGISTERED: 'pheromone.type.registered',
   PHEROMONE_FOOD_ATTRACTION: 'pheromone.food.attraction',
+
+  // ── V6.0: 休眠模块激活 / Dormant module activation ──
+  SKILL_RECOMMENDATION_INJECTED: 'skill.recommendation.injected',
+  EVOLUTION_CLUSTER_FORMED: 'evolution.cluster.formed',
+  DEAD_LETTER_RETRIED: 'task.dead_letter.retried',
+  DEAD_LETTER_EXHAUSTED: 'task.dead_letter.exhausted',
+  CIRCUIT_BREAKER_RESTORED: 'circuit_breaker.restored',
+  TRACE_BOTTLENECK_DETECTED: 'trace.bottleneck.detected',
+
+  // ── V6.0: 自适应闭环 / Adaptive closed-loop ──
+  SIGNAL_WEIGHTS_CALIBRATED: 'signal.weights.calibrated',
+  SIGNAL_CALIBRATOR_PHASE_CHANGED: 'signal.calibrator.phase_changed',
+  FAILURE_MODE_CLASSIFIED: 'failure.mode.classified',
+  FAILURE_TREND_ALERT: 'failure.trend.alert',
+  BUDGET_EXHAUSTION_WARNING: 'budget.exhaustion.warning',
+  METRICS_ALERT_TRIGGERED: 'metrics.alert.triggered',
+  AGENT_STATE_CHANGED: 'agent.state.changed',
+  REPUTATION_DECAYED: 'reputation.decayed',
+
+  // ── V6.0: 向量检索 + swarm base / Vector retrieval + swarm base ──
+  VECTOR_INDEX_UPDATED: 'vector.index.updated',
+  HYBRID_RETRIEVAL_EXECUTED: 'hybrid.retrieval.executed',
+  EMBEDDING_MODEL_LOADED: 'embedding.model.loaded',
+  SHAPLEY_CREDIT_COMPUTED: 'shapley.credit.computed',
+  SNA_METRICS_UPDATED: 'sna.metrics.updated',
+  DUAL_PROCESS_ROUTED: 'dual_process.routed',
+
+  // ── V6.0: Worker 池 / Worker pool ──
+  WORKER_TASK_COMPLETED: 'worker.task.completed',
+  WORKER_POOL_RESIZED: 'worker.pool.resized',
+
+  // ── V6.2: 冲突解决 + 共识投票 / Conflict resolution + consensus voting ──
+  CONFLICT_DETECTED: 'conflict.detected',
+  CONFLICT_RESOLVED: 'conflict.resolved',
+  CONFLICT_ESCALATED: 'conflict.escalated',
+  CONSENSUS_VOTE_STARTED: 'consensus.vote.started',
+  CONSENSUS_VOTE_COMPLETED: 'consensus.vote.completed',
+
+  // ── V6.2: Agent 生命周期 / Agent lifecycle ──
+  AGENT_LIFECYCLE_TRANSITION: 'agent.lifecycle.transition',
+
+  // ── V6.2: 记忆巩固 / Memory consolidation ──
+  MEMORY_PATTERN_EXTRACTED: 'memory.pattern.extracted',
+
+  // ── V6.2: 异常检测 / Anomaly detection ──
+  ANOMALY_DETECTED: 'anomaly.detected',
+  ANOMALY_BASELINE_UPDATED: 'anomaly.baseline.updated',
+
+  // ── V6.2: Gossip 同步 / Gossip sync ──
+  GOSSIP_SYNC_MERGED: 'gossip.sync.merged',
+
+  // ── V6.2: 寄生检测 / Parasite detection ──
+  PARASITE_DETECTED: 'parasite.detected',
+
+  // ── V6.2: Zone 选举 / Zone election ──
+  ZONE_LEADER_ELECTED: 'zone.leader.elected',
+  ZONE_LEADER_DEMOTED: 'zone.leader.demoted',
+
+  // ── V6.3: 工具精简 + Relay + 级联 / Tool consolidation + Relay + Cascade ──
+  RELAY_SPAWN_REQUESTED: 'relay.spawn.requested',
+  RELAY_SPAWN_COMPLETED: 'relay.spawn.completed',
+  RELAY_SPAWN_FAILED: 'relay.spawn.failed',
+  AUTO_QUALITY_GATE: 'auto.quality.gate',
+  AUTO_SHAPLEY_CREDIT: 'auto.shapley.credit',
+  AUTO_MEMORY_WRITE: 'auto.memory.write',
+  AUTO_PHEROMONE_FEEDBACK: 'auto.pheromone.feedback',
+  CONTEXT_INJECTION_GATED: 'context.injection.gated',
+  MODEL_BID_AWARDED: 'model.bid.awarded',
+  COLD_START_PHASE_COMPLETED: 'coldstart.phase.completed',
+  DAG_PHASE_CASCADE: 'dag.phase.cascade',
+  PROGRESS_UPDATE_PUSHED: 'progress.update.pushed',
+
+  // ── V7.0: 闭环执行 / Closed-loop actuation ──
+  SESSION_PATCHED: 'session.patched',
+  PI_CONTROLLER_ACTUATED: 'pi.controller.actuated',
+  CROSS_AGENT_KNOWLEDGE_TRANSFERRED: 'cross_agent.knowledge.transferred',
+  COMMUNICATION_SENSED: 'communication.sensed',
+  SPECIES_CONFIG_APPLIED: 'species.config.applied',
+  LIVE_CFP_COMPLETED: 'live.cfp.completed',
+  SPECULATION_REAL_SPAWNED: 'speculation.real.spawned',
+  NEGATIVE_SELECTION_TRIGGERED: 'negative_selection.triggered',
+  BUDGET_DEGRADATION_APPLIED: 'budget.degradation.applied',
+  DREAM_CONSOLIDATION_COMPLETED: 'dream.consolidation.completed',
+  EVIDENCE_GATE_REJECTED: 'evidence.gate.rejected',
+  PERSONA_EVOLUTION_PROMOTED: 'persona.evolution.promoted',
 };
 
 // ============================================================================

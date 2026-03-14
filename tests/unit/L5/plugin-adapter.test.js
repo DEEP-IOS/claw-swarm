@@ -187,22 +187,18 @@ describe('PluginAdapter', () => {
       try { adapter?.close(); } catch { /* ignore */ }
     });
 
-    it('should return an array of 8 tool definitions / 返回包含 8 个工具定义的数组', () => {
+    it('should return an array of 4 tool definitions / 返回包含 4 个工具定义的数组 (V7.1 新增 checkpoint)', () => {
       const tools = adapter.getTools();
 
-      // 验证工具数量 / Verify tool count
-      expect(tools).toHaveLength(8);
+      // V7.1: 新增 swarm_checkpoint / Added swarm_checkpoint
+      expect(tools).toHaveLength(4);
 
-      // 期望的工具名称 / Expected tool names
+      // 期望的工具名称 / Expected tool names (V7.1)
       const expectedToolNames = [
-        'swarm_spawn',
-        'swarm_query',
-        'swarm_pheromone',
-        'swarm_gate',
-        'swarm_memory',
-        'swarm_plan',
-        'swarm_zone',
         'swarm_run',
+        'swarm_query',
+        'swarm_dispatch',
+        'swarm_checkpoint',
       ];
 
       // 验证每个工具的结构 / Verify each tool's structure
