@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/dashboard-preview.png" alt="Claw-Swarm Console" width="90%">
+  <img src="docs/console-demo.gif" alt="Claw-Swarm Console" width="90%">
 </p>
 
 <h1 align="center">Claw-Swarm</h1>

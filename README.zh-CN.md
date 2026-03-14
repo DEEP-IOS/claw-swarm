@@ -27,7 +27,7 @@
 
 ## 控制台
 
-![Console](docs/dashboard-preview.png)
+![Console](docs/console-demo.gif)
 
 6 视图 React SPA 监控面板，端口 19100。视图：Hive、Pipeline、Cognition、Ecology、Network、Control。包含命令面板（Ctrl+K）、事件时间线、代理检查器、实时通知 Toast（通过 SSE）。
 
