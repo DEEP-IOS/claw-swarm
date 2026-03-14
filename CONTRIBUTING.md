@@ -211,5 +211,5 @@ Be respectful, constructive, and collaborative.
 
 ## License / 许可证
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
-通过贡献代码，你同意你的贡献将在 MIT 许可证下发布。
+By contributing, you agree that your contributions will be licensed under the AGPL-3.0 License.
+通过贡献代码，你同意你的贡献将在 AGPL-3.0 许可证下发布。

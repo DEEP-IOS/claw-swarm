@@ -1,0 +1,25 @@
+# Console build artifacts & dependencies
+src/L6-monitoring/console/node_modules/
+src/L6-monitoring/console/dist/
+src/L6-monitoring/console/.vite/
+
+# Tests
+tests/
+playwright.config.ts
+
+# Docs (large assets)
+docs/console-demo.gif
+
+# Tools (dev only)
+tools/
+
+# CI
+.github/
+
+# QA
+docs/qa/
+.markdown-link-check.json
+
+# Config
+.ai-tool-config/
+.sisyphus/

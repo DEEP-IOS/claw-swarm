@@ -6,7 +6,7 @@
 
 ![Version](https://img.shields.io/badge/version-7.0.0-blue)
 ![Tests](https://img.shields.io/badge/tests-1463_passing-green)
-![License](https://img.shields.io/badge/license-MIT-yellow)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
 ---
 

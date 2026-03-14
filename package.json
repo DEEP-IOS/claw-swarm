@@ -1,6 +1,6 @@
 {
   "name": "openclaw-swarm",
-  "version": "7.0.0",
+  "version": "7.0.1",
   "description": "Claw-Swarm V7.0 — 蜂群智能插件 / Hybrid-architecture swarm intelligence plugin with closed-loop actuation, speculative execution, and full system landing for OpenClaw",
   "type": "module",
   "engines": {
@@ -55,7 +55,7 @@
   },
   "homepage": "https://github.com/DEEP-IOS/claw-swarm#readme",
   "author": "DEEP-IOS",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "keywords": [
     "swarm",
     "multi-agent",

@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/version-7.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-1463_passing-green" alt="Tests">
-  <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License">
   <img src="https://img.shields.io/badge/Node.js-≥22-green" alt="Node">
 </p>
 
