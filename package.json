@@ -1,6 +1,6 @@
 {
   "name": "openclaw-swarm",
-  "version": "7.0.1",
+  "version": "7.0.2",
   "description": "Claw-Swarm V7.0 — 蜂群智能插件 / Hybrid-architecture swarm intelligence plugin with closed-loop actuation, speculative execution, and full system landing for OpenClaw",
   "type": "module",
   "engines": {
@@ -104,8 +104,23 @@
     "zustand": "^5.0.11"
   },
   "files": [
-    "src/",
-    "docs/",
+    "src/L1-infrastructure/",
+    "src/L2-communication/",
+    "src/L3-agent/",
+    "src/L4-orchestration/",
+    "src/L5-application/",
+    "src/L6-monitoring/*.js",
+    "src/L6-monitoring/*.html",
+    "src/L6-monitoring/console/src/",
+    "src/L6-monitoring/console/index.html",
+    "src/L6-monitoring/console/vite.config.js",
+    "src/L6-monitoring/console/package.json",
+    "src/L6-monitoring/console/postcss.config.js",
+    "src/L6-monitoring/console/tailwind.config.js",
+    "src/L6-monitoring/dashboard/",
+    "src/index.js",
+    "src/swarm-core.js",
+    "src/event-catalog.js",
     "openclaw.plugin.json",
     "LICENSE",
     "README.md",
