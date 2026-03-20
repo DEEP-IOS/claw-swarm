@@ -127,9 +127,9 @@ describe('createRunTool (swarm_run)', () => {
       expect(deps.quality.startPipelineTracking).toHaveBeenCalledWith('dag-test', 300000);
     });
 
-    it('emits agent.spawned field signal', async () => {
+    it('emits task_load field signal', async () => {
       await tool.execute('tc-6', { task: 'build module' });
-      expect(deps.core.field.emit).toHaveBeenCalledWith('agent.spawned', expect.objectContaining({ agentId: 'agent-abc' }));
+      expect(deps.core.field.emit).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'task_load', strength: 0.6 }));
     });
   });
 

@@ -40,13 +40,15 @@ export class HookAdapter {
    * @param {Object} deps.spawnClient      - SpawnClient instance
    * @param {Object} [deps.config={}]      - Hook-specific config overrides
    */
-  constructor({ core, quality, observe, sessionBridge, modelFallback, spawnClient, config = {} }) {
+  constructor({ core, quality, observe, sessionBridge, modelFallback, spawnClient, bus, field, config = {} }) {
     this._core = core;
     this._quality = quality;
     this._observe = observe;
     this._sessionBridge = sessionBridge;
     this._modelFallback = modelFallback;
     this._spawnClient = spawnClient;
+    this._bus = bus || core?.bus;
+    this._field = field || core?.field;
     this._config = config;
     this._stats = {
       hooksFired: 0,
@@ -54,6 +56,20 @@ export class HookAdapter {
       blockedToolCalls: 0,
       agentsAdvised: 0,
     };
+  }
+
+  // ─── Signal helpers ───────────────────────────────────────────────
+
+  /** Safely publish an event to the EventBus. */
+  _publish(topic, data) {
+    try { this._bus?.publish?.(topic, data, 'hook-adapter'); } catch (_) { /* non-fatal */ }
+  }
+
+  /** Safely emit a signal to the SignalField. */
+  _emitSignal(dimension, scope, strength, metadata) {
+    try {
+      this._field?.emit?.({ dimension, scope: scope || 'global', strength, emitterId: 'hook-adapter', metadata });
+    } catch (_) { /* non-fatal */ }
   }
 
   // ─── Registration ─────────────────────────────────────────────────
@@ -121,7 +137,10 @@ export class HookAdapter {
    */
   onSessionStart(session) {
     this._stats.hooksFired++;
-    return safe(() => this._sessionBridge?.startSession(session));
+    return safe(() => {
+      this._sessionBridge?.startSession(session);
+      this._publish('session.started', { sessionId: session?.id });
+    });
   }
 
   /**
@@ -129,7 +148,10 @@ export class HookAdapter {
    */
   onSessionEnd(session) {
     this._stats.hooksFired++;
-    return safe(() => this._sessionBridge?.endSession(session));
+    return safe(() => {
+      this._sessionBridge?.endSession(session);
+      this._publish('session.ended', { sessionId: session?.id });
+    });
   }
 
   // ─── Message Hook ─────────────────────────────────────────────────
@@ -142,8 +164,11 @@ export class HookAdapter {
     this._stats.hooksFired++;
     return safe(() => {
       const content = message?.content || '';
+      const sessionId = session?.id;
       const intent = this._core?.intelligence?.classifyIntent?.(content) ?? null;
       const scope = this._core?.intelligence?.estimateScope?.(content) ?? null;
+      this._publish('message.created', { sessionId, intent, scope });
+      this._emitSignal('task_load', sessionId, 0.4, { intent });
       return { intent, scope };
     }, { intent: null, scope: null });
   }
@@ -209,6 +234,9 @@ export class HookAdapter {
         agent.role = advice.role;
       }
 
+      this._publish('spawn.advised', { sessionId, role: advice.role || requestedRole, task: taskDesc });
+      this._emitSignal('coherence', sessionId, 0.5, { role: advice.role || requestedRole });
+
       return { advised: true, role: advice.role || requestedRole };
     } catch (err) {
       this._stats.hookErrors++;
@@ -226,6 +254,8 @@ export class HookAdapter {
       const sessionId = session?.id;
       this._observe?.startSpan?.(agentId, null, sessionId);
       this._sessionBridge?.trackAgent(sessionId, agentId);
+      this._publish('agent.lifecycle.spawned', { agentId, sessionId, role: agent?.role });
+      this._emitSignal('task_load', agentId, 0.6, { sessionId, role: agent?.role });
     });
   }
 
@@ -251,9 +281,15 @@ export class HookAdapter {
       // Quality: audit on success, classify failure otherwise
       if (success) {
         this._quality?.auditOutput?.({ agentId, result });
+        this._publish('agent.lifecycle.completed', { agentId, sessionId });
+        this._emitSignal('trust', agentId, 0.7, { success: true });
+        this._emitSignal('quality', agentId, 0.6);
       } else {
         this._quality?.classifyFailure?.({ agentId, error: result?.error });
+        this._publish('agent.lifecycle.failed', { agentId, sessionId, error: result?.error });
+        this._emitSignal('error_rate', agentId, 0.8, { error: result?.error });
       }
+      this._publish('agent.lifecycle.ended', { agentId, sessionId, success });
     });
   }
 
@@ -287,6 +323,8 @@ export class HookAdapter {
       const canExec = this._quality?.canExecuteTool?.(name);
       if (canExec && !canExec.allowed) {
         this._stats.blockedToolCalls++;
+        this._publish('quality.breaker.tripped', { toolName: name, reason: canExec.reason });
+        this._emitSignal('error_rate', name, 0.7, { breaker: true });
         return { blocked: true, reason: canExec.reason || 'Circuit breaker open' };
       }
 
@@ -312,11 +350,14 @@ export class HookAdapter {
     this._stats.hooksFired++;
     return safe(() => {
       const name = toolCall?.name;
-      if (result?.success !== false) {
+      const success = result?.success !== false;
+      if (success) {
         this._quality?.recordToolSuccess?.(name);
       } else {
         this._quality?.recordToolFailure?.(name, result?.error);
       }
+      this._publish('tool.executed', { toolName: name, success });
+      this._emitSignal('task_load', name, success ? 0.3 : 0.1, { tool: name });
     });
   }
 
@@ -349,6 +390,7 @@ export class HookAdapter {
     this._stats.hooksFired++;
     return safe(() => {
       this._core?.store?.snapshot?.();
+      this._publish('store.snapshot.completed', { trigger: 'shutdown' });
     });
   }
 
@@ -363,6 +405,8 @@ export class HookAdapter {
     return safe(() => {
       const model = session?.model || 'balanced';
       const role = session?.role || 'default';
+      this._publish('quality.anomaly.detected', { type: 'runtime_error', severity: 'high', error: error?.message });
+      this._emitSignal('error_rate', 'system', 0.9, { error: error?.message });
       return this._modelFallback?.handleError?.(error, model, role);
     });
   }
@@ -376,13 +420,16 @@ export class HookAdapter {
     this._stats.hooksFired++;
     return safe(() => {
       const agentId = session?.agentId || session?.id;
+      const toolName = result?.toolName || result?.name;
+      const success = result?.success !== false;
       this._quality?.recordAgentEvent?.(agentId, {
         type: 'tool_result',
-        tool: result?.toolName || result?.name,
-        success: result?.success !== false,
+        tool: toolName,
+        success,
         ts: Date.now(),
         ...result,
       });
+      this._publish('tool.result.recorded', { agentId, toolName, success });
     });
   }
 
@@ -410,6 +457,9 @@ export class HookAdapter {
         content,
         ts: Date.now(),
       });
+
+      this._publish('channel.message', { channelId: sessionId, from: agentId });
+      this._emitSignal('novelty', sessionId, 0.4, { from: agentId });
     });
   }
 

@@ -1,0 +1,8 @@
+{
+  "ignorePatterns": [
+    { "pattern": "^https?://" }
+  ],
+  "replacementPatterns": [],
+  "retryOn429": false,
+  "aliveStatusCodes": [200]
+}

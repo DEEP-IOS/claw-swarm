@@ -1,0 +1,38 @@
+{
+  "name": "claw-swarm-console",
+  "private": true,
+  "version": "9.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "@visx/visx": "^3.12.0",
+    "@visx/responsive": "^3.12.0",
+    "d3-force": "^3.0.0",
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0",
+    "@react-three/fiber": "^8.17.10",
+    "@react-three/drei": "^9.117.0",
+    "three": "^0.170.0",
+    "framer-motion": "^11.13.0",
+    "zustand": "^5.0.2",
+    "immer": "^10.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-scale": "^4.0.8",
+    "@types/d3-shape": "^3.1.6",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

@@ -137,16 +137,16 @@ describe('StateBroadcaster', () => {
   it('start subscribes to SSE_TOPICS and V8 aliases on the bus', () => {
     broadcaster.start();
 
-    // StateBroadcaster subscribes to 27 SSE_TOPICS + 5 EVENT_ALIASES = 32 subscriptions
+    // StateBroadcaster subscribes to SSE_TOPICS + EVENT_ALIASES
     expect(bus.subscribe).toHaveBeenCalled();
     const subscribeCount = bus.subscribe.mock.calls.length;
-    expect(subscribeCount).toBeGreaterThanOrEqual(27);
+    expect(subscribeCount).toBeGreaterThanOrEqual(30);
 
-    // Verify specific topics are subscribed
+    // Verify specific V9 topics are subscribed
     const subscribedTopics = bus.subscribe.mock.calls.map(c => c[0]);
-    expect(subscribedTopics).toContain('agent.spawned');
+    expect(subscribedTopics).toContain('agent.lifecycle.spawned');
     expect(subscribedTopics).toContain('field.signal.emitted');
-    expect(subscribedTopics).toContain('quality.gate.evaluated');
+    expect(subscribedTopics).toContain('quality.gate.passed');
   });
 
   // ── 7. stop unsubscribes and closes all clients ───────────────

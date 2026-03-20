@@ -9,6 +9,7 @@ import { DashboardService } from './dashboard/dashboard-service.js';
 import { HealthChecker } from './health/health-checker.js';
 import { TraceCollector } from './health/trace-collector.js';
 import { StateBroadcaster } from './broadcast/state-broadcaster.js';
+import { AdaptiveTicker } from './tick/adaptive-ticker.js';
 
 /**
  * Create the entire Observe subsystem.
@@ -31,6 +32,8 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
     metricsCollector, stateBroadcaster, healthChecker, traceCollector,
     domains, config: config.dashboard,
   });
+
+  const adaptiveTicker = new AdaptiveTicker({ field, bus, metricsCollector, healthChecker, config: config.ticker });
 
   return {
     // ── Metrics ────────────────────────────────────────────────
@@ -57,8 +60,11 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
     getClientCount: () => stateBroadcaster.getClientCount(),
 
     // ── Internal module references ─────────────────────────────
-    _modules: { metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster },
-    allModules: () => [metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster],
+    // ── Ticker ────────────────────────────────────────────────
+    getTickerStats: () => adaptiveTicker.getStats(),
+
+    _modules: { metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker },
+    allModules: () => [metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker],
 
     // ── Lifecycle ──────────────────────────────────────────────
     async start() {
@@ -67,9 +73,11 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
       healthChecker.start();
       traceCollector.start();
       await dashboardService.start();
+      await adaptiveTicker.start();
     },
 
     async stop() {
+      await adaptiveTicker.stop();
       await dashboardService.stop();
       healthChecker.stop();
       traceCollector.stop();
@@ -85,3 +93,4 @@ export { DashboardService } from './dashboard/dashboard-service.js';
 export { HealthChecker } from './health/health-checker.js';
 export { TraceCollector } from './health/trace-collector.js';
 export { StateBroadcaster } from './broadcast/state-broadcaster.js';
+export { AdaptiveTicker } from './tick/adaptive-ticker.js';

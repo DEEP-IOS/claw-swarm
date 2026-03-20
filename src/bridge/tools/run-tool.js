@@ -220,14 +220,20 @@ export function createRunTool({ core, quality, sessionBridge, spawnClient }) {
         // 8. Start pipeline tracking for quality monitoring
         quality?.startPipelineTracking?.(plan.dagId, plan.timeBudgetMs || 300000);
 
-        // 9. Record in field if available
-        core?.field?.emit?.('agent.spawned', {
+        // 9. Record in field + bus
+        core?.field?.emit?.({
+          dimension: 'task_load',
+          scope: scope || agentId,
+          strength: 0.6,
+          emitterId: 'run-tool',
+          metadata: { role: advice.role, dagId: plan.dagId },
+        });
+        core?.bus?.publish?.('task.created', {
+          taskId: plan.dagId,
           agentId,
           role: advice.role,
-          dagId: plan.dagId,
-          scope,
-          timestamp: Date.now(),
-        });
+          type: intent?.type || 'unknown',
+        }, 'run-tool');
 
         return toolResponse({
           status: 'dispatched',

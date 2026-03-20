@@ -4,33 +4,54 @@
  * Implements rate limiting for high-frequency events (e.g. field.signal.emitted).
  */
 
-/** Topics this broadcaster subscribes to */
+/**
+ * Topics this broadcaster subscribes to.
+ * Aligned with EventCatalog (src/core/bus/event-catalog.js) standard names.
+ */
 const SSE_TOPICS = [
-  'agent.spawned', 'agent.completed', 'agent.failed',
-  'orchestration.dag.created', 'orchestration.dag.completed', 'orchestration.dag.failed',
-  'orchestration.task.started', 'orchestration.task.completed',
-  'orchestration.spawn.advised', 'orchestration.replan.triggered',
-  'quality.gate.evaluated', 'quality.breaker.opened', 'quality.breaker.closed',
-  'quality.failure.classified', 'quality.anomaly.detected', 'quality.compliance.violation',
-  'quality.pipeline.broken', 'quality.audit.completed',
-  'quality.tool.validation_failed',
-  'pheromone.emitted', 'pheromone.decayed',
-  'channel.created', 'channel.closed', 'channel.message.posted',
-  'field.signal.emitted',
-  'system.health.degraded',
-  'memory.episodic.recorded', 'memory.retrieval.completed',
+  // Field
+  'field.signal.emitted', 'field.gc.completed', 'field.emergency_gc',
+  'field.snapshot', 'field.stats.snapshot',
+  // Store
+  'store.snapshot.completed', 'store.restore.completed',
+  // Communication
+  'channel.created', 'channel.closed', 'channel.message',
+  'pheromone.deposited', 'pheromone.evaporated',
+  // Intelligence
+  'agent.lifecycle.spawned', 'agent.lifecycle.ready',
+  'agent.lifecycle.completed', 'agent.lifecycle.failed', 'agent.lifecycle.ended',
+  'memory.episode.recorded', 'memory.consolidated',
+  // Orchestration
+  'task.created', 'task.completed', 'dag.state.changed',
+  'spawn.advised', 'reputation.updated',
+  // Quality
+  'quality.gate.passed', 'quality.gate.failed',
+  'quality.breaker.tripped', 'quality.anomaly.detected', 'quality.compliance.violation',
+  // Observe
+  'observe.metrics.collected', 'observe.health.snapshot',
+  // Bridge (non-catalog but useful for SSE)
+  'session.started', 'session.ended', 'message.created',
+  'tool.executed', 'tool.result.recorded',
 ];
 
 /**
  * V8 backward-compatible event aliases.
  * When one of these V8 topics arrives, it is re-broadcast under the V9 key.
  */
+/**
+ * Legacy event aliases: V8 topic names → V9 canonical names.
+ * Ensures backward compatibility during transition.
+ */
 const EVENT_ALIASES = {
-  'agent.state.changed': 'agent.spawned',
-  'swarm.agent.spawned': 'agent.spawned',
-  'agent.end': 'agent.completed',
-  'circuit_breaker.transition': 'quality.breaker.opened',
-  'contract.live_cfp.completed': 'orchestration.task.completed',
+  'agent.spawned': 'agent.lifecycle.spawned',
+  'agent.completed': 'agent.lifecycle.completed',
+  'agent.failed': 'agent.lifecycle.failed',
+  'agent.state.changed': 'agent.lifecycle.spawned',
+  'agent.end': 'agent.lifecycle.ended',
+  'pheromone.emitted': 'pheromone.deposited',
+  'pheromone.decayed': 'pheromone.evaporated',
+  'circuit_breaker.transition': 'quality.breaker.tripped',
+  'quality.breaker.opened': 'quality.breaker.tripped',
 };
 
 export class StateBroadcaster {
@@ -59,16 +80,18 @@ export class StateBroadcaster {
    * @returns {Function} cleanup function to manually remove this client
    */
   addClient(response) {
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'X-Accel-Buffering': 'no',
-    });
-
-    // Send an initial comment so the client knows the connection is alive
-    response.write(':ok\n\n');
+    // SSE headers are already set by DashboardService._handleSSE()
+    // Only write headers if not yet sent (standalone usage)
+    if (!response.headersSent) {
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no',
+      });
+      response.write(':ok\n\n');
+    }
 
     this._clients.add(response);
     this._stats.clientsServed++;

@@ -1,6 +1,6 @@
 {
   "name": "openclaw-swarm",
-  "version": "9.0.0",
+  "version": "9.1.0",
   "description": "Claw-Swarm V9.0 — Field-mediated swarm intelligence plugin / 场中介蜂群智能引擎: 12-dimensional signal field, 7-domain architecture, forward-decay encoding, dual-process routing, species evolution, zero feature flags for OpenClaw",
   "type": "module",
   "engines": {

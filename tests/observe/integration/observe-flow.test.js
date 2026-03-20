@@ -192,9 +192,9 @@ describe('createObserveSystem integration', () => {
     expect(count).toBeGreaterThanOrEqual(55);
   });
 
-  // ── 8. _modules contains all 5 module instances ───────────────
+  // ── 8. _modules contains all 6 module instances ───────────────
 
-  it('_modules contains all 5 module instances', () => {
+  it('_modules contains all 6 module instances', () => {
     const mods = observe._modules;
     expect(mods).toBeDefined();
     expect(mods.metricsCollector).toBeDefined();
@@ -202,15 +202,16 @@ describe('createObserveSystem integration', () => {
     expect(mods.healthChecker).toBeDefined();
     expect(mods.traceCollector).toBeDefined();
     expect(mods.stateBroadcaster).toBeDefined();
-    expect(Object.keys(mods)).toHaveLength(5);
+    expect(mods.adaptiveTicker).toBeDefined();
+    expect(Object.keys(mods)).toHaveLength(6);
   });
 
-  // ── 9. allModules returns array of 5 modules ─────────────────
+  // ── 9. allModules returns array of 6 modules ─────────────────
 
-  it('allModules returns array of exactly 5 modules', () => {
+  it('allModules returns array of exactly 6 modules', () => {
     const all = observe.allModules();
     expect(Array.isArray(all)).toBe(true);
-    expect(all).toHaveLength(5);
+    expect(all).toHaveLength(6);
 
     // Each module should be an object (class instance)
     for (const mod of all) {
@@ -235,8 +236,9 @@ describe('createObserveSystem integration', () => {
     await expect(observe.start()).resolves.toBeUndefined();
 
     // Verify sub-modules got started (metrics subscribes to bus topics)
-    // MetricsCollector.start() calls bus.on() for each subscription
-    expect(bus.on.mock.calls.length).toBeGreaterThan(0);
+    // MetricsCollector.start() uses bus.subscribe (preferred) or bus.on (fallback)
+    const subCalls = (bus.subscribe?.mock?.calls?.length ?? 0) + (bus.on?.mock?.calls?.length ?? 0);
+    expect(subCalls).toBeGreaterThan(0);
 
     await expect(observe.stop()).resolves.toBeUndefined();
 
