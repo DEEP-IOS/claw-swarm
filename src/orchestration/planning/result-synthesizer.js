@@ -73,6 +73,35 @@ export class ResultSynthesizer extends ModuleBase {
     /** @private */ this._bus = bus
     /** @private */ this._artifactRegistry = artifactRegistry ?? null
     /** @private */ this._threshold = similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD
+    /** @private */ this._unsubscribers = []
+  }
+
+  async start() {
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('dag.completed', async (payload) => {
+        const dagId = payload?.dagId
+        const nodes = Array.isArray(payload?.nodes) ? payload.nodes : []
+        if (!dagId || nodes.length === 0) return
+
+        const nodeResults = new Map()
+        for (const node of nodes) {
+          if (!node?.id || node.result == null) continue
+          nodeResults.set(node.id, node.result)
+        }
+
+        if (nodeResults.size === 0) return
+        await this.merge(dagId, nodeResults)
+      }),
+    )
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -127,6 +156,8 @@ export class ResultSynthesizer extends ModuleBase {
       texts: dedupTexts,
       avgQuality,
     }
+    const summary = dedupTexts[0]
+      || (resolved.length > 0 ? `${resolved.length} file(s) merged.` : `DAG ${dagId} completed.`)
 
     if (this._bus) {
       this._bus.publish('synthesis.completed', {
@@ -136,6 +167,10 @@ export class ResultSynthesizer extends ModuleBase {
         conflictCount: conflicts.length,
         deduplicatedCount,
         avgQuality,
+        summary,
+        mergedResult,
+        conflicts,
+        artifacts,
       })
     }
 

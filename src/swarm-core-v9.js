@@ -2,8 +2,9 @@
  * SwarmCoreV9 - Top-level V9 orchestrator.
  *
  * Creates the dual foundation (SignalStore field + DomainStore persistence),
- * lazily imports all 5 domain subsystems, verifies field-mediated coupling,
- * and manages the full lifecycle.
+ * lazily imports the 5 runtime subsystems, verifies field-mediated coupling,
+ * and manages the full lifecycle for the full V9 design
+ * (7 autonomous domains + dual foundation).
  *
  * @module swarm-core-v9
  * @version 9.0.0
@@ -12,6 +13,7 @@
 import { SignalStore } from './core/field/signal-store.js';
 import { EventBus } from './core/bus/event-bus.js';
 import { DomainStore } from './core/store/domain-store.js';
+import { ALL_DIMENSIONS } from './core/field/types.js';
 
 // ─── Safe dynamic import helper ─────────────────────────────────────────────
 
@@ -36,7 +38,22 @@ async function tryImport(specifier) {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const DOMAIN_COUNT = 5; // communication, intelligence, orchestration, quality, observe
+const RUNTIME_DOMAIN_IDS = Object.freeze([
+  'communication',
+  'intelligence',
+  'orchestration',
+  'quality',
+  'observe',
+]);
+
+const ARCHITECTURE_DOMAIN_IDS = Object.freeze([
+  'core',
+  ...RUNTIME_DOMAIN_IDS,
+  'bridge',
+]);
+
+const RUNTIME_DOMAIN_COUNT = RUNTIME_DOMAIN_IDS.length;
+const ARCHITECTURE_DOMAIN_COUNT = ARCHITECTURE_DOMAIN_IDS.length;
 const VERSION = '9.0.0';
 
 // ─── SwarmCoreV9 ────────────────────────────────────────────────────────────
@@ -55,10 +72,8 @@ export class SwarmCoreV9 {
 
     // ── Dual foundation ───────────────────────────────────────────
     this.field = new SignalStore({
-      field: null,
-      bus: this.bus,
-      store: null,
-      config: config.field || {},
+      eventBus: this.bus,
+      ...(config.field || {}),
     });
     const storeConfig = config.store || {};
     this.store = new DomainStore({
@@ -75,10 +90,19 @@ export class SwarmCoreV9 {
     this.orchestration = null;
     this.quality = null;
     this.observe = null;
+    this.bridge = null;
 
     // ── Initialization metadata ───────────────────────────────────
     this._initErrors = [];
     this._couplingResult = null;
+    this._domainRefs = {
+      communication: null,
+      intelligence: null,
+      orchestration: null,
+      quality: null,
+      observe: null,
+      bridge: null,
+    };
   }
 
   // ─── Initialization ───────────────────────────────────────────────
@@ -110,6 +134,7 @@ export class SwarmCoreV9 {
           store: this.store,
           config: this.config.communication || {},
         });
+        this._domainRefs.communication = this.communication;
       } catch (err) {
         this._initErrors.push({ domain: 'communication', error: err.message });
       }
@@ -122,8 +147,10 @@ export class SwarmCoreV9 {
           field: this.field,
           bus: this.bus,
           store: this.store,
+          communication: this.communication,
           config: this.config.intelligence || {},
         });
+        this._domainRefs.intelligence = this.intelligence;
       } catch (err) {
         this._initErrors.push({ domain: 'intelligence', error: err.message });
       }
@@ -141,8 +168,11 @@ export class SwarmCoreV9 {
           roleRegistry: this.intelligence?.getRoleRegistry?.() ?? null,
           modelCapability: this.intelligence?.getModelCapability?.() ?? null,
           artifactRegistry: this.intelligence?.getArtifactRegistry?.() ?? null,
+          intentClassifier: this.intelligence?.understanding?.intent ?? null,
+          scopeEstimator: this.intelligence?.understanding?.scope ?? null,
           config: this.config.orchestration || {},
         });
+        this._domainRefs.orchestration = this.orchestration;
       } catch (err) {
         this._initErrors.push({ domain: 'orchestration', error: err.message });
       }
@@ -160,6 +190,7 @@ export class SwarmCoreV9 {
           reputationCRDT,
           config: this.config.quality || {},
         });
+        this._domainRefs.quality = this.quality;
       } catch (err) {
         this._initErrors.push({ domain: 'quality', error: err.message });
       }
@@ -172,14 +203,10 @@ export class SwarmCoreV9 {
           field: this.field,
           bus: this.bus,
           store: this.store,
-          domains: {
-            communication: this.communication,
-            intelligence: this.intelligence,
-            orchestration: this.orchestration,
-            quality: this.quality,
-          },
+          domains: this._domainRefs,
           config: this.config.observe || {},
         });
+        this._domainRefs.observe = this.observe;
       } catch (err) {
         this._initErrors.push({ domain: 'observe', error: err.message });
       }
@@ -211,6 +238,8 @@ export class SwarmCoreV9 {
     const consumers = new Map();   // dimension -> [moduleName]
     const publishers = new Map();  // event -> [moduleName]
     const subscribers = new Map(); // event -> [moduleName]
+    const errors = [];
+    const warnings = [];
 
     for (const mod of allModules) {
       const name = mod?.constructor?.name || 'AnonymousModule';
@@ -218,12 +247,20 @@ export class SwarmCoreV9 {
       // Field dimensions
       const produced = mod?.constructor?.produces?.() || [];
       for (const dim of produced) {
+        if (!ALL_DIMENSIONS.includes(dim)) {
+          errors.push(`Invalid produced dimension: "${dim}" declared by [${name}]`);
+          continue;
+        }
         if (!producers.has(dim)) producers.set(dim, []);
         producers.get(dim).push(name);
       }
 
       const consumed = mod?.constructor?.consumes?.() || [];
       for (const dim of consumed) {
+        if (!ALL_DIMENSIONS.includes(dim)) {
+          errors.push(`Invalid consumed dimension: "${dim}" declared by [${name}]`);
+          continue;
+        }
         if (!consumers.has(dim)) consumers.set(dim, []);
         consumers.get(dim).push(name);
       }
@@ -243,8 +280,6 @@ export class SwarmCoreV9 {
     }
 
     // Validate: every produced dim should have a consumer and vice versa
-    const errors = [];
-    const warnings = [];
 
     for (const [dim, prods] of producers) {
       if (!consumers.has(dim)) {
@@ -330,7 +365,18 @@ export class SwarmCoreV9 {
    * 6. Mark ready
    */
   async start() {
-    const initResult = await this.initialize();
+    await this.initialize();
+    const missingDomains = Object.entries(this._getDomainStatus())
+      .filter(([, ready]) => !ready)
+      .map(([domain]) => domain);
+
+    if (this._initErrors.length > 0 || missingDomains.length > 0) {
+      const details = [
+        ...this._initErrors.map(({ domain, error }) => `${domain}: ${error}`),
+        ...missingDomains.map((domain) => `${domain}: not initialized`),
+      ];
+      throw new Error(`SwarmCoreV9 initialization failed:\n  ${details.join('\n  ')}`);
+    }
 
     // Restore persisted state
     if (typeof this.store.restore === 'function') {
@@ -343,14 +389,7 @@ export class SwarmCoreV9 {
     }
 
     // Verify field-mediated coupling
-    // Wrapped in try/catch so coupling warnings don't prevent startup
-    try {
-      this._verifyCoupling();
-    } catch (err) {
-      this._initErrors.push({ domain: 'coupling', error: err.message });
-      // Publish warning but continue startup
-      this.bus.publish('swarm.coupling.warning', { error: err.message });
-    }
+    this._verifyCoupling();
 
     // Start domains in dependency order
     const startOrder = [
@@ -363,13 +402,17 @@ export class SwarmCoreV9 {
 
     for (const domain of startOrder) {
       if (domain && typeof domain.start === 'function') {
-        try {
-          await domain.start();
-        } catch (err) {
-          this._initErrors.push({ domain: domain.constructor?.name || 'unknown', error: err.message });
-        }
+        await domain.start();
       }
     }
+
+    // Wire SignalCalibrator → SignalStore: calibration weights flow into field superposition
+    this.bus.on('calibration.completed', (envelope) => {
+      const weights = envelope?.data?.weights ?? envelope?.weights;
+      if (weights && typeof this.field.setCalibrationWeights === 'function') {
+        this.field.setCalibrationWeights(weights);
+      }
+    });
 
     this._ready = true;
     this._startedAt = Date.now();
@@ -386,6 +429,11 @@ export class SwarmCoreV9 {
       domains: this._getDomainStatus(),
       initErrors: this._initErrors,
     };
+  }
+
+  setBridge(bridge) {
+    this.bridge = bridge ?? null;
+    this._domainRefs.bridge = this.bridge;
   }
 
   /**
@@ -450,6 +498,23 @@ export class SwarmCoreV9 {
   }
 
   /**
+   * Return the full V9 architecture status using design semantics.
+   * Runtime domains stay separate from the dual foundation and bridge domain.
+   *
+   * @returns {Object}
+   */
+  _getArchitectureStatus() {
+    const runtimeStatus = this._getDomainStatus();
+    const foundationReady = this.field !== null && this.bus !== null && this.store !== null;
+
+    return {
+      core: foundationReady,
+      ...runtimeStatus,
+      bridge: this.bridge !== null,
+    };
+  }
+
+  /**
    * Return aggregate statistics.
    * @returns {Object}
    */
@@ -458,6 +523,7 @@ export class SwarmCoreV9 {
       this.communication, this.intelligence, this.orchestration,
       this.quality, this.observe,
     ].filter(Boolean).length;
+    const architectureStatus = this._getArchitectureStatus();
 
     return {
       ready: this._ready,
@@ -465,8 +531,17 @@ export class SwarmCoreV9 {
       startedAt: this._startedAt,
       uptimeMs: this._startedAt ? Date.now() - this._startedAt : 0,
       domains: activeDomains,
-      totalDomains: DOMAIN_COUNT,
+      totalDomains: RUNTIME_DOMAIN_COUNT,
       domainStatus: this._getDomainStatus(),
+      runtimeSubsystems: {
+        active: activeDomains,
+        total: RUNTIME_DOMAIN_COUNT,
+      },
+      architectureDomains: {
+        active: Object.values(architectureStatus).filter(Boolean).length,
+        total: ARCHITECTURE_DOMAIN_COUNT,
+      },
+      architectureStatus,
       coupling: this._couplingResult,
       initErrors: this._initErrors.length,
       moduleCount: this._collectAllModules().length,

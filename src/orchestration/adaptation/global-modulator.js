@@ -63,10 +63,28 @@ export class GlobalModulator extends ModuleBase {
     this._taskHistory = []
     /** @type {number} total mode changes */
     this._modeChanges = 0
+    this._unsubscribers = []
   }
 
-  async start() {}
-  async stop() {}
+  async start() {
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('agent.lifecycle.completed', (payload) => {
+        this.recordOutcome(true, payload?.result?.taskType ?? payload?.taskType ?? payload?.roleId ?? 'workflow')
+      }),
+      listen('agent.lifecycle.failed', (payload) => {
+        this.recordOutcome(false, payload?.taskType ?? payload?.roleId ?? 'workflow')
+      }),
+    )
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
+  }
 
   // ━━━ Core API ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -163,6 +181,39 @@ export class GlobalModulator extends ModuleBase {
 
   /** @returns {'EXPLOIT'|'EXPLORE'} */
   getMode() { return this._mode }
+
+  /**
+   * Explicitly switch to a named mode.
+   * Convenience method called by cross-wiring in index-v9.js
+   * (e.g. on stagnation detection).
+   *
+   * @param {'exploit'|'explore'|'EXPLOIT'|'EXPLORE'} modeName
+   */
+  switchMode(modeName) {
+    const normalized = (modeName || '').toUpperCase()
+    const target = normalized === 'EXPLORE' ? 'EXPLORE' : 'EXPLOIT'
+    if (target === this._mode) return
+
+    const prev = this._mode
+    this._mode = target
+    this._modeChanges++
+
+    this._field?.emit?.({
+      dimension: DIM_COORDINATION,
+      scope: 'global',
+      strength: target === 'EXPLORE' ? 0.8 : 0.3,
+      emitterId: 'global-modulator',
+      metadata: { mode: target, reason: 'switchMode', successRate: this._recentSuccessRate },
+    })
+
+    this._bus?.publish?.('modulator.mode.changed', {
+      from: prev,
+      to: target,
+      reason: 'explicit_switch',
+      successRate: this._recentSuccessRate,
+      timestamp: Date.now(),
+    })
+  }
 
   /** @returns {number} */
   getExplorationRate() { return MODES[this._mode].explorationRate }

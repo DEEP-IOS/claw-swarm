@@ -1,6 +1,6 @@
 # Installation & Configuration
 
-> Claw-Swarm V9.0.0 — Bio-inspired swarm intelligence plugin for OpenClaw
+> Claw-Swarm V9.2.0 — Bio-inspired swarm intelligence plugin for OpenClaw
 
 [← Back to README](../../README.md) | [中文版](../zh-CN/installation.md)
 
@@ -79,7 +79,7 @@ openclaw gateway status
 Expected output should include:
 
 ```
-claw-swarm  9.0.0  enabled
+claw-swarm  9.2.0  enabled
 ```
 
 ### Step 6 — Open the Console
@@ -90,7 +90,7 @@ Navigate to `http://127.0.0.1:19100/v9/console` in your browser. The console is 
 
 ## Architecture Mode
 
-V9.0 runs as a **single-process in-gateway** architecture. All 7 domains (~121 source files) run within the OpenClaw gateway process. No child process fork, no IPC bridge, no worker threads.
+V9.2 runs as a **single-process in-gateway** architecture. All 7 domains (~121 source files) run within the OpenClaw gateway process. No child process fork, no IPC bridge, no worker threads.
 
 | Property              | Value                                                    |
 |-----------------------|----------------------------------------------------------|
@@ -126,7 +126,7 @@ All configuration lives in `~/.openclaw/openclaw.json` under `plugins.entries.op
 | Setting              | Default     | Description                        |
 |----------------------|-------------|------------------------------------|
 | `dashboard.enabled`  | `true`      | Enable the DashboardService        |
-| `dashboard.port`     | `19100`     | HTTP/SSE port                      |
+| `dashboard.port`     | `19100`     | HTTP dashboard + console SPA port  |
 
 ### Embedding
 
@@ -162,9 +162,41 @@ All configuration lives in `~/.openclaw/openclaw.json` under `plugins.entries.op
 
 ---
 
+## Patch Configuration
+
+The installer supports multiple patch modes that control how Claw-Swarm integrates with the OpenClaw gateway.
+
+```bash
+node install.js                          # default: --patch-mode=both
+node install.js --patch-mode=loader      # loader hook only
+node install.js --patch-mode=patcher     # patcher only
+node install.js --patch-mode=both        # patcher + loader hook (default)
+node install.js --patch-mode=none        # register plugin without patching
+```
+
+| Mode | Description |
+|------|-------------|
+| `loader` | Installs only the loader hook into the gateway runtime |
+| `patcher` | Applies only the static patcher to gateway source files |
+| `both` | Applies both patcher and loader hook (default, recommended) |
+| `none` | Registers the plugin entry without any gateway modification |
+
+### Building the Console
+
+The console SPA is pre-built in the npm package. If you cloned from git or need to rebuild:
+
+```bash
+cd console
+npx vite build
+```
+
+The build output is placed in `src/observe/dashboard/console/` and served automatically by DashboardService.
+
+---
+
 ## 12-Dimensional Signal Field
 
-The signal field is the foundational substrate of the V9.0 architecture. It provides the reactive communication layer upon which all 7 domains depend.
+The signal field is the foundational substrate of the V9.2 architecture. It provides the reactive communication layer upon which all 7 domains depend.
 
 The signal field operates through `SignalStore` (12-dimensional signal storage and query), `ModuleBase` subclasses (~110 module types that declare `produces` and `consumes` signal dimensions), and field-mediated coupling (modules interact exclusively through signal deposit and subscription).
 
@@ -174,7 +206,7 @@ No explicit configuration is required. The signal field initializes automaticall
 
 ## Data Storage
 
-Claw-Swarm V9.0 uses DomainStore with JSON snapshots for persistence, replacing the SQLite database from V8.
+Claw-Swarm V9.2 uses DomainStore with JSON snapshots for persistence, replacing the SQLite database from V8.
 
 | Property         | Value                                              |
 |------------------|----------------------------------------------------|
@@ -206,7 +238,7 @@ Unknown models default to 10% failure rate. Failure rate affects circuit breaker
 
 ## Module Activation
 
-V9.0 uses a **zero feature flag** architecture. All ~110 modules across 7 domains are always active. Module activation is controlled exclusively through the `ModuleBase` produces/consumes coupling mechanism: a module that declares `consumes: ['signal_type']` automatically activates when signals of that type are deposited in the field. No manual flag configuration is needed.
+V9.2 uses a **zero feature flag** architecture. All ~110 modules across 7 domains are always active. Module activation is controlled exclusively through the `ModuleBase` produces/consumes coupling mechanism: a module that declares `consumes: ['signal_type']` automatically activates when signals of that type are deposited in the field. No manual flag configuration is needed.
 
 ---
 
@@ -217,6 +249,7 @@ V9.0 uses a **zero feature flag** architecture. All ~110 modules across 7 domain
 | OpenClaw Gateway       | 18789       | `http://127.0.0.1:18789`              |
 | Claw-Swarm Dashboard   | 19100       | `http://127.0.0.1:19100`              |
 | Console SPA            | 19100       | `http://127.0.0.1:19100/v9/console`   |
+| Console WS Bridge      | 19101       | `ws://127.0.0.1:19101`                |
 
 **Important:** The gateway uses `127.0.0.1`, not `localhost`. All internal WebSocket and HTTP connections must use `127.0.0.1` to avoid DNS resolution inconsistencies.
 
@@ -224,15 +257,15 @@ V9.0 uses a **zero feature flag** architecture. All ~110 modules across 7 domain
 
 ## Verifying the Installation
 
-After `openclaw gateway start`, verify each layer:
+After `openclaw gateway start`, verify the runtime path:
 
 ```bash
-openclaw gateway status                        # should show: claw-swarm 9.0.0 enabled
+openclaw gateway status                        # should show: claw-swarm 9.2.0 enabled
 curl http://127.0.0.1:19100/api/metrics        # should return RED metrics JSON
-curl -N http://127.0.0.1:19100/events          # should stream real-time SSE events
+curl http://127.0.0.1:19100/api/v9/bridge/status
 ```
 
-Then open `http://127.0.0.1:19100/v9/console` in a browser (should load 6 views), and confirm the agent in an OpenClaw chat session has access to 10 tools.
+Then open `http://127.0.0.1:19100/v9/console` in a browser, confirm the V9 console loads all 10 views, and verify the browser establishes a WebSocket connection to port `19101`. The legacy SSE stream still exists for debugging, but the live V9 console uses the WebSocket bridge.
 
 ---
 

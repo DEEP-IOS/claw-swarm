@@ -71,12 +71,15 @@ export class SpawnAdvisor extends ModuleBase {
    * @param {Object}  [opts.modelCapability]- model capability reference
    * @param {Object}  [opts.config]         - optional overrides
    */
-  constructor({ field, bus, roleRegistry, modelCapability, config = {} }) {
+  constructor({ field, bus, roleRegistry, modelCapability, speciesEvolver, globalModulator, budgetTracker, config = {} }) {
     super()
     /** @private */ this._field = field
     /** @private */ this._bus = bus
     /** @private */ this._roleRegistry = roleRegistry ?? null
     /** @private */ this._modelCapability = modelCapability ?? null
+    /** @private */ this._speciesEvolver = speciesEvolver ?? null
+    /** @private */ this._globalModulator = globalModulator ?? null
+    /** @private */ this._budgetTracker = budgetTracker ?? null
 
     // ── mutable state ──────────────────────────────────────────────
     /** @private @type {'EXPLOIT'|'EXPLORE'} */
@@ -113,7 +116,7 @@ export class SpawnAdvisor extends ModuleBase {
 
     const advice = {
       role: this._selectRole(fv, requestedRole, taskContext),
-      model: this._selectModel(fv, requestedRole),
+      model: this._selectModel(fv, requestedRole, taskContext),
       priority: this._selectPriority(fv),
       companions: this._selectCompanions(fv),
       constraints: this._selectConstraints(fv, calibrationWeight, speciesWeight),
@@ -176,7 +179,7 @@ export class SpawnAdvisor extends ModuleBase {
    * @returns {'EXPLOIT'|'EXPLORE'}
    */
   getMode() {
-    return this._mode
+    return this._globalModulator?.getMode?.() ?? this._mode
   }
 
   /**
@@ -258,6 +261,21 @@ export class SpawnAdvisor extends ModuleBase {
    * @returns {string} roleId
    */
   _selectRole(fv, requestedRole, taskContext) {
+    // 优先使用物种进化器的最佳物种推荐
+    // Prefer species evolver's best species recommendation
+    if (this._speciesEvolver) {
+      try {
+        const bestSpecies = this._speciesEvolver.getBestByRole?.(requestedRole)
+        if (bestSpecies?.sensitivity) {
+          // Species evolution has converged — use evolved sensitivity as role scoring boost
+          // The evolved species' preferred role is authoritative when fitness is high
+          if (bestSpecies.fitness > 0.7 && bestSpecies.roleId) {
+            return bestSpecies.roleId
+          }
+        }
+      } catch (_) { /* fall through to vector scoring */ }
+    }
+
     const knowledge = dimVal(fv, DIM_KNOWLEDGE)
     const alarm     = dimVal(fv, DIM_ALARM)
     const task      = dimVal(fv, DIM_TASK)
@@ -317,7 +335,28 @@ export class SpawnAdvisor extends ModuleBase {
    * @param {string} roleId
    * @returns {string} 'strong'|'balanced'|'fast'
    */
-  _selectModel(fv, roleId) {
+  _selectModel(fv, roleId, taskContext) {
+    // 预算约束优先：BudgetTracker 建议降级时遵守
+    // Budget constraint first: honour BudgetTracker downgrade suggestion
+    const dagId = taskContext?.dagId
+    if (this._budgetTracker && dagId) {
+      try {
+        const suggestion = this._budgetTracker.suggestModel?.(dagId)
+        if (suggestion?.model) return suggestion.model
+      } catch (_) { /* ignore */ }
+    }
+
+    // 物种进化器的模型偏好
+    // Species evolver's preferred model
+    if (this._speciesEvolver) {
+      try {
+        const bestSpecies = this._speciesEvolver.getBestByRole?.(roleId)
+        if (bestSpecies?.preferredModel && bestSpecies.fitness > 0.5) {
+          return bestSpecies.preferredModel
+        }
+      } catch (_) { /* ignore */ }
+    }
+
     const emotion  = dimVal(fv, DIM_EMOTION)
     const trust    = dimVal(fv, DIM_TRUST)
     const learning = dimVal(fv, DIM_LEARNING)
@@ -327,8 +366,10 @@ export class SpawnAdvisor extends ModuleBase {
     // Improving learning -> can use fast model
     if (learning > 0.6) return 'fast'
 
-    // EXPLORE mode allows experimenting with different tiers
-    if (this._mode === 'EXPLORE') {
+    // 使用 GlobalModulator 的模式代替内部模式
+    // Use GlobalModulator's mode instead of internal mode
+    const mode = this._globalModulator?.getMode?.() ?? this._mode
+    if (mode === 'EXPLORE') {
       const hash = (roleId || '').length % 3
       return ['fast', 'balanced', 'strong'][hash]
     }

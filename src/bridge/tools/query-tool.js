@@ -1,5 +1,7 @@
 // R8 Bridge - swarm_query tool
-// Unified query interface with 10 sub-commands via scope parameter
+// Unified query interface with 16 scopes via scope parameter
+
+import { ALL_DIMENSIONS } from '../../core/field/types.js';
 
 function toolResponse(data) {
   return { content: [{ type: 'text', text: JSON.stringify(data) }] };
@@ -7,6 +9,26 @@ function toolResponse(data) {
 
 function errorResponse(error) {
   return toolResponse({ status: 'error', error: String(error) });
+}
+
+function normalizeBudgetStats(rawBudget = {}) {
+  const dags = Array.isArray(rawBudget.dags) ? rawBudget.dags : [];
+  const globalSource = rawBudget.global || {};
+  const spent = globalSource.spent ?? rawBudget.spent ?? rawBudget.used ?? 0;
+  const totalSession = globalSource.totalSession ?? rawBudget.totalSession ?? rawBudget.limit ?? 0;
+  const remaining = globalSource.remaining ?? Math.max(0, totalSession - spent);
+  const utilization = globalSource.utilization ?? (totalSession > 0 ? spent / totalSession : 0);
+
+  return {
+    dagCount: rawBudget.dagCount ?? dags.length,
+    dags,
+    global: {
+      totalSession,
+      spent,
+      remaining,
+      utilization,
+    },
+  };
 }
 
 /**
@@ -20,7 +42,7 @@ const queryHandlers = {
     const agents = core?.intelligence?.getActiveAgents?.() ?? [];
     const fieldSummary = core?.field?.superpose?.('status') ?? { dimensions: 0 };
     const pipelines = quality?.getActivePipelines?.() ?? [];
-    const budget = core?.orchestration?.getBudget?.() ?? { used: 0, limit: 0 };
+    const budget = normalizeBudgetStats(core?.orchestration?.getBudget?.() ?? {});
 
     return toolResponse({
       scope: 'status',
@@ -32,7 +54,8 @@ const queryHandlers = {
         elapsed: a.elapsed,
       })),
       activePipelines: pipelines.length,
-      budget: { used: budget.used, limit: budget.limit },
+      budget: budget.global,
+      budgetDagCount: budget.dagCount,
       field: fieldSummary,
       timestamp: Date.now(),
     });
@@ -87,6 +110,90 @@ const queryHandlers = {
   },
 
   /**
+   * tasks: List orchestration task/DAG summaries
+   */
+  async tasks({ core }) {
+    const tasks = core?.orchestration?.getTasks?.() ?? [];
+
+    return toolResponse({
+      scope: 'tasks',
+      count: tasks.length,
+      tasks: tasks.map(task => ({
+        id: task.id ?? task.dagId,
+        dagId: task.dagId ?? task.id,
+        state: task.state ?? task.status ?? 'unknown',
+        summary: task.summary ?? '',
+        nodeCount: Array.isArray(task.nodes) ? task.nodes.length : 0,
+        edgeCount: Array.isArray(task.edges) ? task.edges.length : 0,
+        createdAt: task.createdAt ?? null,
+      })),
+    });
+  },
+
+  /**
+   * health: Observe-domain health status
+   */
+  async health({ core }) {
+    const health = core?.observe?.getHealth?.() ?? { status: 'unknown', score: 0 };
+
+    return toolResponse({
+      scope: 'health',
+      ...health,
+    });
+  },
+
+  /**
+   * budget: Budget tracker state — reads real token data from BudgetTracker
+   */
+  async budget({ core }) {
+    // Prefer direct BudgetTracker access for real spend data
+    const tracker = core?.orchestration?.adaptation?.budgetTracker;
+    if (tracker) {
+      const stats = tracker.getStats?.() ?? {};
+      const global = tracker.getGlobalBudget?.() ?? {};
+      return toolResponse({
+        scope: 'budget',
+        dagCount: stats.dagCount ?? 0,
+        dags: (stats.dags || []).map(d => ({
+          dagId: d.dagId,
+          totalBudget: d.totalBudget,
+          spent: d.spent,
+          remaining: d.remaining,
+          utilization: d.utilization,
+          overrun: d.overrun,
+        })),
+        global: {
+          totalSession: global.totalSession ?? 0,
+          spent: global.spent ?? 0,
+          remaining: global.remaining ?? 0,
+          utilization: global.utilization ?? 0,
+        },
+      });
+    }
+
+    // Fallback: facade getBudget()
+    const budget = normalizeBudgetStats(core?.orchestration?.getBudget?.() ?? {});
+    return toolResponse({
+      scope: 'budget',
+      dagCount: budget.dagCount,
+      dags: budget.dags,
+      global: budget.global,
+    });
+  },
+
+  /**
+   * species: Evolution/adaptation state
+   */
+  async species({ core }) {
+    const species = core?.orchestration?.getSpeciesState?.() ?? {};
+
+    return toolResponse({
+      scope: 'species',
+      ...species,
+    });
+  },
+
+  /**
    * pheromones: Current pheromone state in the communication field
    */
   async pheromones({ core }) {
@@ -107,6 +214,33 @@ const queryHandlers = {
         age: t.age,
         depositor: t.depositor,
       })),
+    });
+  },
+
+  /**
+   * channels: Active communication channels and recent messages
+   */
+  async channels({ core }) {
+    const state = core?.communication?.getActiveChannels?.() ?? { count: 0, channels: [] };
+
+    return toolResponse({
+      scope: 'channels',
+      count: state.count || 0,
+      channels: state.channels || [],
+    });
+  },
+
+  /**
+   * stigmergy: Stigmergic board entries
+   */
+  async stigmergy({ core }) {
+    const state = core?.communication?.getStigmergy?.() ?? { scope: 'all', entryCount: 0, entries: [] };
+
+    return toolResponse({
+      scope: 'stigmergy',
+      boardScope: state.scope || 'all',
+      count: state.entryCount || 0,
+      entries: state.entries || [],
     });
   },
 
@@ -167,7 +301,9 @@ const queryHandlers = {
       return errorResponse('dagId is required for progress scope');
     }
 
-    const prog = core?.orchestration?.getProgress?.(dagId) ?? quality?.getPipelineProgress?.(dagId);
+    const prog = core?.bridge?.getProgress?.(dagId)
+      ?? core?.orchestration?.getProgress?.(dagId)
+      ?? quality?.getPipelineProgress?.(dagId);
     if (!prog) {
       return toolResponse({ scope: 'progress', dagId, found: false });
     }
@@ -190,21 +326,16 @@ const queryHandlers = {
    * cost: Budget and token usage information
    */
   async cost({ core }) {
-    const budget = core?.orchestration?.getBudget?.() ?? {
-      used: 0,
-      limit: 0,
-      byModel: {},
-      byRole: {},
-    };
+    const budget = normalizeBudgetStats(core?.orchestration?.getBudget?.() ?? {});
 
     return toolResponse({
       scope: 'cost',
-      totalUsed: budget.used || 0,
-      limit: budget.limit || 0,
-      remaining: (budget.limit || 0) - (budget.used || 0),
-      byModel: budget.byModel || {},
-      byRole: budget.byRole || {},
-      currency: budget.currency || 'tokens',
+      totalSpent: budget.global.spent,
+      totalSession: budget.global.totalSession,
+      remaining: budget.global.remaining,
+      utilization: budget.global.utilization,
+      dagCount: budget.dagCount,
+      dags: budget.dags,
     });
   },
 
@@ -217,21 +348,34 @@ const queryHandlers = {
       return errorResponse('dagId is required for artifacts scope');
     }
 
+    // Get formal artifacts from intelligence layer
     const arts = core?.intelligence?.getArtifacts?.(dagId) ?? [];
+
+    // Also get actual sub-agent outputs from DAG nodes
+    const dagInfo = core?.orchestration?.getDAG?.(dagId);
+    const nodeOutputs = (dagInfo?.nodes || [])
+      .filter(n => n.state === 'COMPLETED' && n.result)
+      .map(n => {
+        const output = typeof n.result === 'string' ? n.result
+          : n.result?.output || JSON.stringify(n.result).slice(0, 2000);
+        return {
+          nodeId: n.id,
+          role: n.role,
+          output,
+          completedAt: n.completedAt,
+        };
+      });
 
     return toolResponse({
       scope: 'artifacts',
       dagId,
-      count: arts.length,
+      artifactCount: arts.length,
+      nodeOutputCount: nodeOutputs.length,
       artifacts: arts.map(a => ({
-        id: a.id,
-        type: a.type,
-        name: a.name,
-        path: a.path,
-        size: a.size,
-        createdAt: a.createdAt,
-        producedBy: a.producedBy,
+        id: a.id, type: a.type, name: a.name, path: a.path,
+        size: a.size, createdAt: a.createdAt, producedBy: a.producedBy,
       })),
+      nodeOutputs,
     });
   },
 
@@ -239,32 +383,18 @@ const queryHandlers = {
    * field: Superposition of all 12 signal dimensions
    */
   async field({ core }) {
-    const superposition = core?.field?.superpose?.('all') ?? {
-      dimensions: {},
-      coherence: 0,
-      lastUpdate: 0,
-    };
-
-    const dimensionNames = [
-      'urgency', 'complexity', 'risk', 'progress',
-      'quality', 'cost', 'collaboration', 'knowledge',
-      'innovation', 'stability', 'momentum', 'entropy',
-    ];
+    const superposition = core?.field?.superpose?.('all') ?? {};
 
     const dimensions = {};
-    for (const dim of dimensionNames) {
-      dimensions[dim] = superposition.dimensions?.[dim] ?? {
-        value: 0,
-        confidence: 0,
-        contributors: 0,
-      };
+    for (const dim of ALL_DIMENSIONS) {
+      dimensions[dim] = superposition[dim] ?? 0;
     }
 
     return toolResponse({
       scope: 'field',
       dimensions,
-      coherence: superposition.coherence || 0,
-      lastUpdate: superposition.lastUpdate || 0,
+      dimensionsCount: ALL_DIMENSIONS.length,
+      supportedDimensions: ALL_DIMENSIONS,
       totalSignals: superposition.totalSignals || 0,
     });
   },
@@ -273,13 +403,40 @@ const queryHandlers = {
 /**
  * createQueryTool - Factory for the swarm_query tool
  *
- * Provides a unified query interface with 10 sub-commands:
- * status, plan, agents, pheromones, reputation, memory,
+ * Provides a unified query interface with 16 sub-commands:
+ * status, plan, agents, tasks, health, budget, species,
+ * pheromones, channels, stigmergy, reputation, memory,
  * progress, cost, artifacts, field
  */
+// Rate limit state to prevent model tool-calling loops
+let _queryCallCount = 0;
+let _queryFirstCall = Date.now();
+
 export function createQueryTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_query',
+    description: [
+      'Query swarm system state. Returns real-time information about agents,',
+      'tasks, budget, health, signals, and more.',
+      '',
+      'Scopes:',
+      '  status — Overall swarm status (active agents, mode, DAGs)',
+      '  plan — View DAG execution plan for a task',
+      '  agents — List active agents and their roles',
+      '  tasks — Current task queue and progress',
+      '  health — System health metrics',
+      '  budget — Token/cost usage and limits',
+      '  progress — Task completion percentage and ETA',
+      '  cost — Detailed cost breakdown per DAG',
+      '  species — Agent species/roles configuration',
+      '  pheromones — Active pheromone trails',
+      '  channels — Communication channel status',
+      '  stigmergy — Shared knowledge board',
+      '  reputation — Agent reputation scores',
+      '  memory — Episodic memory search',
+      '  artifacts — Task output artifacts',
+      '  field — Signal field state (12 dimensions)',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -287,8 +444,9 @@ export function createQueryTool({ core, quality, sessionBridge, spawnClient }) {
         scope: {
           type: 'string',
           enum: [
-            'status', 'plan', 'agents', 'pheromones', 'reputation',
-            'memory', 'progress', 'cost', 'artifacts', 'field',
+            'status', 'plan', 'agents', 'tasks', 'health', 'budget',
+            'species', 'pheromones', 'channels', 'stigmergy',
+            'reputation', 'memory', 'progress', 'cost', 'artifacts', 'field',
           ],
           description: 'Query scope determining what information to retrieve',
         },
@@ -306,6 +464,18 @@ export function createQueryTool({ core, quality, sessionBridge, spawnClient }) {
 
     async execute(toolCallId, params) {
       try {
+        // Rate limit: prevent model tool-calling loops (kimi k2p5 issue)
+        _queryCallCount++;
+        if (_queryCallCount > 3 && (Date.now() - _queryFirstCall) < 30000) {
+          return toolResponse({
+            scope: params.scope,
+            rateLimited: true,
+            message: '查询频率过高，请等待后重试。不要重复调用此工具。',
+          });
+        }
+        if (_queryCallCount === 1) _queryFirstCall = Date.now();
+        if ((Date.now() - _queryFirstCall) > 30000) { _queryCallCount = 1; _queryFirstCall = Date.now(); }
+
         const handler = queryHandlers[params.scope];
         if (!handler) {
           return errorResponse(`Unknown query scope: ${params.scope}`);

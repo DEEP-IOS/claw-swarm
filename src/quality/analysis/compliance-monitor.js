@@ -75,7 +75,9 @@ export class ComplianceMonitor extends ModuleBase {
    * @param {Object} [deps.config]
    */
   constructor({ field, bus, config = {} }) {
-    super({ field, bus, config });
+    super();
+    /** @private */ this.field = field;
+    /** @private */ this.bus = bus;
     this._violationCounters = new Map();
     this._stats = {
       totalViolations: 0,
@@ -116,6 +118,7 @@ export class ComplianceMonitor extends ModuleBase {
     this._violationCounters.set(sessionId, newCount);
 
     const escalationLevel = Math.min(newCount, 3);
+    const shouldTerminate = escalationLevel >= 3;
 
     // Signal field emission
     const strength = Math.min(0.3 + escalationLevel * 0.2, 1.0);
@@ -144,7 +147,7 @@ export class ComplianceMonitor extends ModuleBase {
       this._stats.escalationDistribution[escalationLevel]++;
     }
 
-    return { compliant: false, violations, escalationLevel };
+    return { compliant: false, violations, escalationLevel, shouldTerminate };
   }
 
   // ─── Escalation Prompts ──────────────────────────────────────────

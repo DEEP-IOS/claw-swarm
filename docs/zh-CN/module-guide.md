@@ -1,6 +1,6 @@
 # 模块指南（7 域架构）
 
-**Claw-Swarm V9.0** | ~110 模块 | 7 域 + 双基座
+**Claw-Swarm V9.2** | ~110 模块 | 7 域 + 双基座
 
 Claw-Swarm V9 将所有源码组织为 **7 个域**，构建于**双基座**（SwarmField + DomainStore）之上。模块间交互完全通过**场中介耦合**实现：向 12 维 SwarmField 释放信号、从中感知信号。不存在跨域直接函数调用。
 
@@ -185,7 +185,7 @@ V9 模块间仅通过以下四种方式交互：
 
 | 文件 | 行数 | 职责 | produces | consumes |
 |------|------|------|----------|----------|
-| `intelligence/understanding/intent-classifier.js` | -- | 意图分类：bug/feature/refactor/optimize/explore。将任务路由到合适的规划策略。 | -- | DIM_TASK |
+| `intelligence/understanding/intent-classifier.js` | -- | 意图分类，包含 8 个 PHASE_TEMPLATES（bug_fix、new_feature、refactor、optimize、explore、analyze、content、question）。模板支持并行 fork+merge 分支（如 new_feature fork 到 [backend, frontend] 后在 review 合并）。将任务路由到合适的规划策略。 | -- | DIM_TASK |
 | `intelligence/understanding/requirement-clarifier.js` | -- | 需求澄清对话。检测歧义并生成针对性问题以消除歧义。 | -- | DIM_TASK |
 | `intelligence/understanding/scope-estimator.js` | -- | 范围评估：影响文件数、复杂度、风险等级。输入到预算和调度决策中。 | -- | DIM_TASK, DIM_KNOWLEDGE, DIM_LEARNING |
 
@@ -199,7 +199,7 @@ V9 模块间仅通过以下四种方式交互：
 
 | 文件 | 行数 | 职责 | produces | consumes |
 |------|------|------|----------|----------|
-| `orchestration/planning/dag-engine.js` | 669 | DAG 构建、拓扑排序、状态机、依赖解析、work-stealing、死信队列、拍卖集成。核心执行引擎。 | DIM_TASK | DIM_TRAIL, DIM_ALARM |
+| `orchestration/planning/dag-engine.js` | 669 | DAG 构建、拓扑排序、状态机（NODE_STATE: PENDING → SPAWNING → ASSIGNED → EXECUTING → COMPLETED / DEAD_LETTER）、依赖解析、work-stealing、死信队列、拍卖集成。暴露 `spawnNode(dagId, nodeId)` 用于 SPAWNING 状态转换。核心执行引擎。 | DIM_TASK | DIM_TRAIL, DIM_ALARM |
 | `orchestration/planning/execution-planner.js` | 427 | MoE Top-k 规划。基于关键词、能力和历史的专家评分。将复杂任务分解为阶段序列。 | -- | DIM_TASK, DIM_SNA, DIM_KNOWLEDGE |
 | `orchestration/planning/result-synthesizer.js` | 421 | 多角色输出合成：Jaccard 去重、质量聚合、Trust 加权合并。 | -- | DIM_REPUTATION, DIM_TRUST |
 | `orchestration/planning/critical-path.js` | 325 | 关键路径分析：前向传递（ES/EF）、后向传递（LS/LF）、松弛量计算。输出到 DeadlineTracker。 | -- | DIM_TASK |
@@ -273,15 +273,15 @@ V9 模块间仅通过以下四种方式交互：
 
 | 文件 | 行数 | 职责 | produces | consumes |
 |------|------|------|----------|----------|
-| `observe/dashboard/dashboard-service.js` | 662 | Fastify REST API 服务器（端口 19100）。57+ REST 端点覆盖代理、任务、信息素、声誉、物种、DAG、健康、追踪、拓扑、亲和、死信、治理、指标。提供控制台 SPA 静态文件和 SSE 实时流端点。 | -- | -- |
+| `observe/dashboard/dashboard-service.js` | 662 | Fastify REST API 服务器（端口 19100）。58 个 REST 端点覆盖代理、任务、信息素、声誉、物种、DAG、健康、追踪、拓扑、亲和、死信、治理、指标、bridge 与控制台诊断。提供控制台 SPA 静态文件和 bridge status 端点。 | -- | -- |
 | `observe/metrics/metrics-collector.js` | 249 | RED 指标聚合：Rate（事件/秒）、Error（失败率）、Duration（延迟百分位）。订阅所有域事件，计算滚动窗口。 | -- | 全部维度（只读） |
 | `observe/health/trace-collector.js` | 227 | 分布式追踪 span 收集。桥接 EventBus 追踪事件到持久存储。父子 span 关系支持端到端任务追踪。 | -- | -- |
 | `observe/health/health-checker.js` | 185 | 多维健康评分（0-100），事件驱动更新与自适应轮询回退。维度：场连通性、代理响应性、总线吞吐量、内存使用、错误率。 | -- | DIM_ALARM |
-| `observe/broadcast/state-broadcaster.js` | 192 | SSE 实时事件流推送至已连接的控制台客户端。100ms 批量发送。订阅所有域事件主题。 | -- | -- |
+| `observe/broadcast/state-broadcaster.js` | 192 | Legacy SSE 事件流，仅用于诊断和向后兼容。100ms 批量发送。订阅所有域事件主题；主控制台路径已切换到 WebSocket bridge。支持 `setVerbosity(level)` 控制事件过滤（0=仅关键、1=默认、2=详细）。 | -- | -- |
 
 ### 控制台 SPA（前端资产）
 
-React 18 应用，从 `observe/dashboard/console/` 提供服务。Zustand 状态管理，SSE 实时更新，6 个可视化视图。Vite 构建。
+React 18 应用，从 `observe/dashboard/console/` 提供服务。Zustand 状态管理，通过 `ConsoleDataBridge` 在 19101 端口进行 WebSocket 实时更新，10 个可视化视图。Vite 构建。
 
 | 视图 | 功能 |
 |------|------|
@@ -291,6 +291,10 @@ React 18 应用，从 `observe/dashboard/console/` 提供服务。Zustand 状态
 | **Ecology**（生态） | 种群动力学：Lotka-Volterra 曲线、物种竞争、信息素粒子动画 |
 | **Network**（网络） | 社会网络图：代理通信拓扑、中心性热力图 |
 | **Control**（控制） | 运维面板：全局调制器控制、熔断器状态、预算仪表、手动干预 |
+| **Field** | 12 维信号场概览与原始场压力 |
+| **System** | 运行时架构、工作流证据与健康遥测 |
+| **Adaptation** | Explore/Exploit 平衡、校准与物种演化 |
+| **Communication** | 活跃通道、信息素流动与协调流量 |
 
 附加组件：CommandPalette (Ctrl+K)、SettingsDrawer、EventTimeline、Inspector、Toast 通知。
 
@@ -353,7 +357,7 @@ React 18 应用，从 `observe/dashboard/console/` 提供服务。Zustand 状态
 | 文件 | 行数 | 职责 | produces | consumes |
 |------|------|------|----------|----------|
 | `bridge/interaction/task-presenter.js` | 295 | 结果格式化与修改摘要生成。产出面向用户的任务完成报告。 | -- | DIM_TRAIL |
-| `bridge/interaction/progress-tracker.js` | 160 | 子代理步骤追踪与节流进度推送。通过 SSE 实时报告进度。 | -- | DIM_TRAIL |
+| `bridge/interaction/progress-tracker.js` | 160 | 子代理步骤追踪与节流进度推送。通过 bridge/事件流提供实时进度证据。 | -- | DIM_TRAIL |
 | `bridge/interaction/user-notifier.js` | 149 | 重要事件主动通知（失败、完成、检查点）。 | -- | DIM_ALARM |
 
 ### connectors/ -- 外部集成
@@ -411,7 +415,7 @@ core（双基座）
 | intelligence | 34 | ~5,606 | 三层记忆、10 角色、6D 情绪、CRDT 声誉、SNA、信任 |
 | orchestration | 24 | ~6,889 | DAG 引擎、合同网、SpawnAdvisor (12D)、Lotka-Volterra、GEP、Shapley |
 | quality | 10 | ~2,738 | 质量门、熔断器、失败疫苗、异常检测 |
-| observe | 13 | ~1,651 | 57+ REST 端点、SSE 推送、React 18 SPA (6 视图)、健康检查 |
+| observe | 13 | ~1,651 | 58 REST 端点、WS bridge + legacy SSE、React 18 SPA (10 视图)、健康检查 |
 | bridge | 24 | ~4,526 | 10 工具 (4 公开 + 6 内部)、16 Hook、Session 桥接、7 层可靠性 |
 | **总计** | **~125** | **~24,644** | 零空转模块、零 Feature Flag、12 维场中介耦合 |
 

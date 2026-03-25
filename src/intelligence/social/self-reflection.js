@@ -7,7 +7,10 @@ import { DIM_TRAIL, DIM_ALARM } from '../../core/field/types.js';
 
 class SelfReflection extends ModuleBase {
   constructor({ field, bus, store, capabilityEngine, reputationCRDT }) {
-    super({ field, bus, store });
+    super();
+    this.field = field;
+    this.bus = bus;
+    this.store = store;
     this._capabilityEngine = capabilityEngine || null;
     this._reputationCRDT = reputationCRDT || null;
   }

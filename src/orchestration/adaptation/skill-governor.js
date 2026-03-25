@@ -45,6 +45,7 @@ export class SkillGovernor extends ModuleBase {
 
     /** @type {Map<string, Map<string, { usageCount: number, lastUsed: number, masteryLevel: number }>>} */
     this._skillInventory = new Map()
+    this._unsubscribe = null
   }
 
   // --------------------------------------------------------------------------
@@ -162,15 +163,58 @@ export class SkillGovernor extends ModuleBase {
     return entry ? entry.masteryLevel : 0
   }
 
+  /**
+   * Get aggregate skill inventory stats for dashboards/facades.
+   * @returns {{ roleCount: number, totalSkills: number, perRole: Object<string, number>, topSkills: Array<{roleId: string, skillName: string, masteryLevel: number, usageCount: number}> }}
+   */
+  getStats() {
+    const perRole = {}
+    const topSkills = []
+    let totalSkills = 0
+
+    for (const [roleId, skills] of this._skillInventory.entries()) {
+      perRole[roleId] = skills.size
+      totalSkills += skills.size
+
+      for (const [skillName, entry] of skills.entries()) {
+        topSkills.push({
+          roleId,
+          skillName,
+          masteryLevel: entry.masteryLevel,
+          usageCount: entry.usageCount,
+        })
+      }
+    }
+
+    topSkills.sort((left, right) => right.masteryLevel - left.masteryLevel)
+
+    return {
+      roleCount: this._skillInventory.size,
+      totalSkills,
+      perRole,
+      topSkills: topSkills.slice(0, 10),
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Lifecycle
   // --------------------------------------------------------------------------
 
   async start() {
     await this.restore()
+    this._unsubscribe = this._bus?.on?.('agent.lifecycle.completed', (payload) => {
+      const roleId = payload?.roleId ?? payload?.role
+      if (!roleId) return
+
+      for (const skillName of this._extractSkills(payload)) {
+        this.recordUsage(roleId, skillName, true)
+      }
+    }) ?? null
   }
 
   async stop() {
+    this._unsubscribe?.()
+    this._unsubscribe = null
     await this.persist()
   }
 
@@ -215,5 +259,29 @@ export class SkillGovernor extends ModuleBase {
   _tokenize(text) {
     if (!text) return []
     return text.toLowerCase().split(/[\s\-_.,;:!?/\\|]+/).filter(w => w.length > 1)
+  }
+
+  _extractSkills(payload) {
+    const result = payload?.result
+    const skills = new Set()
+
+    const maybeAdd = (value) => {
+      if (typeof value === 'string' && value.trim()) {
+        skills.add(value.trim().toLowerCase())
+      }
+    }
+
+    maybeAdd(result?.skillName)
+    maybeAdd(result?.taskType)
+    maybeAdd(payload?.taskType)
+
+    if (Array.isArray(result?.skills)) {
+      for (const skill of result.skills) maybeAdd(skill)
+    }
+    if (Array.isArray(result?.toolsUsed)) {
+      for (const toolName of result.toolsUsed) maybeAdd(toolName)
+    }
+
+    return [...skills]
   }
 }

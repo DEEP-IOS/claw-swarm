@@ -18,7 +18,7 @@ const FAST_INTERVAL_MS = 2000;
 const FIELD_STATS_INTERVAL_MS = 30000;
 
 export class AdaptiveTicker extends ModuleBase {
-  static produces() { return ['resource_pressure']; }
+  static produces() { return []; }
   static consumes() { return []; }
   static publishes() { return ['observe.metrics.collected', 'observe.health.snapshot', 'field.snapshot', 'field.stats.snapshot']; }
   static subscribes() { return ['quality.anomaly.detected']; }

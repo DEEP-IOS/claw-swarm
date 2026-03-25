@@ -1,6 +1,6 @@
 # Biomimicry & Algorithm Design Reference
 
-**Claw-Swarm V9.0.0** | 20 Bio-Inspired Algorithms
+**Claw-Swarm V9.2.0** | 20 Bio-Inspired Algorithms
 
 Claw-Swarm draws from biological systems, cognitive science, and social dynamics to solve
 the fundamental challenges of LLM multi-agent coordination: task allocation without central
@@ -61,7 +61,7 @@ where:
   tau_max    = upper bound (prevents dominance lock-in)
 ```
 
-Seven pheromone types are defined, each with biologically-motivated decay rates:
+Historically seven pheromone types were documented. In the live V9 runtime, the canonical set is six types (`trail`, `alarm`, `recruit`, `queen`, `dance`, `food`); `danger` survives only as a historical alias in older notes.
 
 | Type      | Decay  | TTL (min) | Analog                        |
 |-----------|--------|-----------|-------------------------------|
@@ -71,7 +71,7 @@ Seven pheromone types are defined, each with biologically-motivated decay rates:
 | `queen`   | 0.02   | 480       | Colony-wide coordination      |
 | `dance`   | 0.08   | 90        | Waggle dance information      |
 | `food`    | 0.04   | 180       | Food source quality marking   |
-| `danger`  | 0.20   | 20        | Threat warning (fastest)      |
+| `danger`  | 0.20   | 20        | Historical alias only; not a canonical V9 runtime type |
 
 Decay is computed lazily on read, avoiding timer-based overhead on unvisited paths.
 

@@ -329,9 +329,9 @@ ZONE_LEADER_ELECTED, ZONE_LEADER_DEMOTED
 
 ### Enhancement: Cross-Audit Fixes + Dead Code Activation / 增强：交叉审计修复 + 死代码激活
 
-**Core Theme**: Activate dormant pipelines identified by cross-LLM audit (3×Opus + GPT-5.4); fix memory subsystem formulas; wire Shapley/SNA/DualProcess into live event flows; add pheromone propagation and MessageBus request-reply.
+**Core Theme**: Activate dormant pipelines identified by cross-LLM audit; fix memory subsystem formulas; wire Shapley/SNA/DualProcess into live event flows; add pheromone propagation and MessageBus request-reply.
 
-核心主题：激活交叉 LLM 审计（3×Opus + GPT-5.4）发现的休眠管道；修复记忆子系统公式；将 Shapley/SNA/双过程路由接入实时事件流；新增信息素传播和消息总线请求-回复模式。
+核心主题：激活交叉 LLM 审计发现的休眠管道；修复记忆子系统公式；将 Shapley/SNA/双过程路由接入实时事件流；新增信息素传播和消息总线请求-回复模式。
 
 #### P0 Critical Fixes / 关键修复
 

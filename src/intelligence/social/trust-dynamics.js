@@ -7,7 +7,10 @@ import { DIM_TRUST, DIM_REPUTATION } from '../../core/field/types.js';
 
 class TrustDynamics extends ModuleBase {
   constructor({ field, bus, store }) {
-    super({ field, bus, store });
+    super();
+    this.field = field;
+    this.bus = bus;
+    this.store = store;
     this._trustScores = new Map(); // agentId -> {score, consistency, interactions, lastUpdated, lastQuality}
   }
 
@@ -64,9 +67,29 @@ class TrustDynamics extends ModuleBase {
     return { agentId, ...trust };
   }
 
+  /**
+   * Convenience method for cross-wiring: record a success/failure outcome
+   * Delegates to update() with a default quality of 0.8 for success, 0.2 for failure
+   * @param {string} agentId
+   * @param {boolean} success
+   * @returns {Object}
+   */
+  record(agentId, success) {
+    const quality = success ? 0.8 : 0.2;
+    return this.update(agentId, quality, success);
+  }
+
   getTrust(agentId) {
     const trust = this._ensureScore(agentId);
     return { agentId, ...trust };
+  }
+
+  getAll() {
+    const scores = {};
+    for (const agentId of this._trustScores.keys()) {
+      scores[agentId] = this.getTrust(agentId);
+    }
+    return scores;
   }
 
   getReliable(minScore = 0.7, minInteractions = 5) {

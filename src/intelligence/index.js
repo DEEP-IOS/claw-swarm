@@ -1,21 +1,15 @@
 /**
- * Intelligence System Factory - Creates and wires all intelligence domain modules
- *
- * Composes three sub-domain factories (social, artifacts, understanding) with
- * individually-instantiated identity and memory modules into a unified facade.
- * Provides cross-domain accessor methods required by SwarmCoreV9 wiring and
- * dashboard query methods for the observation layer.
+ * Intelligence System Factory - Creates and wires all intelligence domain modules.
  *
  * @module intelligence/index
  * @version 9.0.0
  */
 
-// --- Sub-domain factories -----------------------------------------------------
 import { createSocialSystem } from './social/index.js'
 import { createArtifactSystem } from './artifacts/index.js'
 import { createUnderstandingSystem } from './understanding/index.js'
 
-// --- Identity modules (no barrel index.js) ------------------------------------
+import { ABCClassifier } from './identity/abc-classifier.js'
 import { CapabilityEngine } from './identity/capability-engine.js'
 import { CrossProvider } from './identity/cross-provider.js'
 import { LifecycleManager } from './identity/lifecycle-manager.js'
@@ -25,7 +19,6 @@ import { RoleRegistry } from './identity/role-registry.js'
 import { SensitivityFilter } from './identity/sensitivity-filter.js'
 import { SoulDesigner } from './identity/soul-designer.js'
 
-// --- Memory modules (no barrel index.js) --------------------------------------
 import { ContextEngine } from './memory/context-engine.js'
 import { EmbeddingEngine } from './memory/embedding-engine.js'
 import { EpisodicMemory } from './memory/episodic-memory.js'
@@ -35,37 +28,118 @@ import { UserProfile } from './memory/user-profile.js'
 import { VectorIndex } from './memory/vector-index.js'
 import { WorkingMemory } from './memory/working-memory.js'
 
-/**
- * Create the complete intelligence system with all sub-domains wired together.
- *
- * @param {Object} deps
- * @param {Object} deps.field       - SignalStore instance
- * @param {Object} deps.bus         - EventBus instance
- * @param {Object} deps.store       - DomainStore instance
- * @param {Object} [deps.config={}] - Per-module config overrides
- * @returns {Object} Intelligence system facade
- */
-export function createIntelligenceSystem({ field, bus, store, config = {} }) {
-  // --- Sub-domain systems -----------------------------------------------------
+const BRIDGE_MEMORY_COLLECTION = 'bridge-memory'
 
-  const social = createSocialSystem({ field, bus, store })
-  const artifacts = createArtifactSystem({ field, bus, store })
-  const understanding = createUnderstandingSystem({ field, bus })
+function mapEpisodeToMemoryEntry(result) {
+  const episode = result?.episode ?? result
+  return {
+    id: episode.id,
+    type: episode.type || 'episode',
+    content: episode.content || episode.goal || '',
+    relevance: result?.score ?? episode.relevance ?? 0,
+    score: result?.score ?? episode.score ?? 0,
+    tags: episode.tags || [],
+    source: episode.source || 'episodic',
+    createdAt: episode.recordedAt || episode.createdAt || Date.now(),
+    role: episode.role,
+    lesson: episode.lessons?.[0] || null,
+  }
+}
 
-  // --- Identity modules -------------------------------------------------------
+function normalizeAgentRecord(agent) {
+  if (!agent) return null
+  return {
+    id: agent.agentId ?? agent.id,
+    agentId: agent.agentId ?? agent.id,
+    role: agent.roleId ?? agent.role ?? 'unknown',
+    roleId: agent.roleId ?? agent.role ?? 'unknown',
+    state: agent.state ?? 'unknown',
+    parentId: agent.parentId ?? null,
+    spawnedAt: agent.spawnedAt ?? agent.startedAt ?? null,
+    sessionId: agent.sessionId ?? agent.options?.sessionId ?? null,
+    taskId: agent.taskId ?? null,
+    model: agent.model ?? agent.options?.model ?? null,
+    raw: agent,
+  }
+}
 
+function getSoulPayload(soulDesigner, agentId) {
+  return {
+    soul: soulDesigner.loadSoulInstance(agentId),
+    archetype: soulDesigner.getAgentArchetype(agentId),
+  }
+}
+
+function makeBridgeMemoryFacade(store) {
+  const getAll = () => store?.query?.(BRIDGE_MEMORY_COLLECTION, () => true) || []
+
+  return {
+    getAll,
+    async record(entry) {
+      store?.put?.(BRIDGE_MEMORY_COLLECTION, entry.id, entry)
+      return entry
+    },
+    async delete(memoryId) {
+      if (!store?.delete) return false
+      return !!store.delete(BRIDGE_MEMORY_COLLECTION, memoryId)
+    },
+    search(query, { type, scope, limit = 20 } = {}) {
+      const lower = String(query || '').toLowerCase()
+      return getAll()
+        .filter((entry) => {
+          if (type && entry.type !== type) return false
+          if (scope && entry.scope !== scope) return false
+          const haystack = `${entry.content || ''} ${(entry.tags || []).join(' ')}`.toLowerCase()
+          return haystack.includes(lower)
+        })
+        .map((entry) => ({ ...entry, relevance: 0.6 }))
+        .slice(0, limit)
+    },
+    export({ type, scope, limit = 100 } = {}) {
+      return getAll()
+        .filter((entry) => (!type || entry.type === type) && (!scope || entry.scope === scope))
+        .slice(0, limit)
+    },
+    stats({ scope } = {}) {
+      const entries = getAll().filter((entry) => !scope || entry.scope === scope)
+      const byType = {}
+      for (const entry of entries) {
+        byType[entry.type] = (byType[entry.type] || 0) + 1
+      }
+      return {
+        totalEntries: entries.length,
+        byType,
+        oldestEntry: entries[0] || null,
+        newestEntry: entries[entries.length - 1] || null,
+        storageUsed: entries.reduce((sum, entry) => sum + JSON.stringify(entry).length, 0),
+      }
+    },
+  }
+}
+
+export function createIntelligenceSystem({ field, bus, store, communication = null, config = {} }) {
   const capabilityEngine = new CapabilityEngine({
-    field, bus,
+    signalStore: field,
+    domainStore: store,
+    eventBus: bus,
     config: config.capability || {},
   })
 
+  const social = createSocialSystem({ field, bus, store, capabilityEngine })
+  const artifacts = createArtifactSystem({ field, bus, store })
+  const understanding = createUnderstandingSystem({ field, bus })
+
   const crossProvider = new CrossProvider({
-    field,
+    signalStore: field,
+    domainStore: store,
+    eventBus: bus,
     config: config.crossProvider || {},
   })
 
   const lifecycleManager = new LifecycleManager({
-    field, bus, store,
+    signalStore: field,
+    domainStore: store,
+    eventBus: bus,
     config: config.lifecycle || {},
   })
 
@@ -74,84 +148,165 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
     config: config.modelCapability || {},
   })
 
-  const promptBuilder = new PromptBuilder({
-    field, bus,
-    config: config.promptBuilder || {},
-  })
-
   const roleRegistry = new RoleRegistry({
-    field, bus,
+    field,
+    eventBus: bus,
+    domainStore: store,
     config: config.roleRegistry || {},
   })
 
   const sensitivityFilter = new SensitivityFilter({
-    field,
+    signalStore: field,
+    roleRegistry,
     config: config.sensitivity || {},
   })
 
   const soulDesigner = new SoulDesigner({
-    field, store,
+    signalStore: field,
+    domainStore: store,
     config: config.soul || {},
   })
 
-  const _identityModules = [
-    capabilityEngine, crossProvider, lifecycleManager, modelCapability,
-    promptBuilder, roleRegistry, sensitivityFilter, soulDesigner,
-  ]
-
-  // --- Memory modules ---------------------------------------------------------
-
   const contextEngine = new ContextEngine({
-    field, bus,
-    config: config.context || {},
+    ...(config.context || {}),
   })
 
   const embeddingEngine = new EmbeddingEngine({
-    config: config.embedding || {},
-  })
-
-  const episodicMemory = new EpisodicMemory({
-    field, bus, store,
-    config: config.episodic || {},
-  })
-
-  const hybridRetrieval = new HybridRetrieval({
-    field, store,
-    config: config.retrieval || {},
-  })
-
-  const semanticMemory = new SemanticMemory({
-    field, bus, store,
-    config: config.semantic || {},
-  })
-
-  const userProfile = new UserProfile({
-    field, store,
-    config: config.userProfile || {},
+    ...(config.embedding || {}),
   })
 
   const vectorIndex = new VectorIndex({
-    config: config.vector || {},
+    ...(config.vector || {}),
+  })
+
+  const episodicMemory = new EpisodicMemory({
+    domainStore: store,
+    field,
+    eventBus: bus,
+    embeddingEngine,
+    vectorIndex,
+  })
+
+  const semanticMemory = new SemanticMemory({
+    domainStore: store,
+    field,
+    eventBus: bus,
+  })
+
+  const hybridRetrieval = new HybridRetrieval({
+    episodicMemory,
+    semanticMemory,
+    vectorIndex,
+    embeddingEngine,
+    field,
+  })
+
+  const userProfile = new UserProfile({
+    domainStore: store,
+    eventBus: bus,
+    config: config.userProfile || {},
   })
 
   const workingMemory = new WorkingMemory({
-    config: config.workingMemory || {},
+    eventBus: bus,
+    defaultCapacity: config.workingMemory?.defaultCapacity || 15,
   })
 
-  const _memoryModules = [
-    contextEngine, embeddingEngine, episodicMemory, hybridRetrieval,
-    semanticMemory, userProfile, vectorIndex, workingMemory,
+  const promptBuilder = new PromptBuilder({
+    roleRegistry,
+    sensitivityFilter,
+    hybridRetrieval,
+    stigmergicBoard: communication?.stigmergicBoard ?? communication?.board ?? null,
+    contextEngine,
+    soulDesigner,
+    userProfile,
+    field,
+    capabilityEngine,
+  })
+
+  const abcClassifier = new ABCClassifier({
+    bus,
+    store,
+  })
+
+  const _identityModules = [
+    abcClassifier,
+    capabilityEngine,
+    crossProvider,
+    lifecycleManager,
+    modelCapability,
+    promptBuilder,
+    roleRegistry,
+    sensitivityFilter,
+    soulDesigner,
   ]
 
-  // --- Facade -----------------------------------------------------------------
+  const _memoryModules = [
+    contextEngine,
+    embeddingEngine,
+    episodicMemory,
+    hybridRetrieval,
+    semanticMemory,
+    userProfile,
+    vectorIndex,
+    workingMemory,
+  ]
 
-  return {
-    // Sub-systems
+  const bridgeMemory = makeBridgeMemoryFacade(store)
+
+  const getEnrichedAgentInfo = (agentId) => {
+    const normalized = normalizeAgentRecord(lifecycleManager.getState(agentId))
+    if (!normalized) return {}
+
+    const { soul, archetype } = getSoulPayload(soulDesigner, agentId)
+
+    return {
+      ...normalized,
+      capabilities: capabilityEngine.getVector8D(agentId),
+      abc: abcClassifier.getRole(agentId),
+      soul,
+      archetype,
+      emotion: social.emotion.getEmotion?.(agentId) ?? null,
+      reputation: social.reputation.getScore?.(agentId) ?? null,
+      trust: social.trust.getTrust?.(agentId) ?? null,
+    }
+  }
+
+  const getAllAgentRecords = () => {
+    const records = []
+    const rawAgents = lifecycleManager?._agents
+    if (!(rawAgents instanceof Map)) return records
+    for (const agent of rawAgents.values()) {
+      const normalized = normalizeAgentRecord(agent)
+      if (normalized) records.push(normalized)
+    }
+    return records
+  }
+
+  const getRoleSensitivityProfiles = () => roleRegistry.list().map((roleId) => {
+    const role = roleRegistry.get(roleId)
+    const sensitivity = roleRegistry.getSensitivity(roleId) || {}
+    const topDimensions = Object.entries(sensitivity)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([dimension, value]) => ({ dimension, value }))
+
+    return {
+      roleId,
+      name: role?.name || roleId,
+      preferredModel: role?.preferredModel || 'balanced',
+      toolCount: Array.isArray(role?.tools) ? role.tools.length : 0,
+      sensitivity,
+      topDimensions,
+    }
+  })
+
+  const intelligence = {
     social,
     artifacts,
     understanding,
 
-    // Identity modules
+    abcClassifier,
     capabilityEngine,
     crossProvider,
     lifecycleManager,
@@ -161,7 +316,6 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
     sensitivityFilter,
     soulDesigner,
 
-    // Memory modules
     contextEngine,
     embeddingEngine,
     episodicMemory,
@@ -171,7 +325,6 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
     vectorIndex,
     workingMemory,
 
-    // Module collection
     allModules: () => [
       ...social.allModules(),
       ...artifacts.allModules(),
@@ -180,7 +333,6 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
       ..._memoryModules,
     ],
 
-    // Lifecycle
     start: async () => {
       await social.start()
       await artifacts.start()
@@ -194,18 +346,16 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
     },
 
     stop: async () => {
-      for (const mod of _memoryModules) {
+      for (const mod of [..._memoryModules].reverse()) {
         if (typeof mod.stop === 'function') await mod.stop()
       }
-      for (const mod of _identityModules) {
+      for (const mod of [..._identityModules].reverse()) {
         if (typeof mod.stop === 'function') await mod.stop()
       }
       await understanding.stop()
       await artifacts.stop()
       await social.stop()
     },
-
-    // --- Cross-domain accessors (for SwarmCoreV9 wiring) ----------------------
 
     getCapabilityEngine: () => capabilityEngine,
     getHybridRetrieval: () => hybridRetrieval,
@@ -214,46 +364,156 @@ export function createIntelligenceSystem({ field, bus, store, config = {} }) {
     getArtifactRegistry: () => artifacts.artifacts,
     getReputationCRDT: () => social.reputation,
 
-    // --- Dashboard query methods ----------------------------------------------
+    classifyIntent: (userInput, historyContext = {}) =>
+      understanding.intent.classify(userInput, historyContext),
 
-    getActiveAgents: () =>
-      lifecycleManager.getActiveAgents?.() || [],
+    isIntentAmbiguous: (intentResult) =>
+      understanding.clarifier.isAmbiguous(intentResult),
 
-    getReputation: () =>
-      social.reputation.getAll?.() || {},
+    generateClarificationQuestions: (intentResult, codebaseContext = {}) =>
+      understanding.clarifier.generateQuestions(intentResult, codebaseContext),
 
-    getSNA: () =>
-      social.sna.getMetrics?.() || {},
+    refineRequirement: (original, answers) =>
+      understanding.clarifier.refineRequirement(original, answers),
 
-    getEmotionalStates: () =>
-      social.emotion.getAll?.() || {},
+    estimateScope: (input, codebaseInfo = {}) => {
+      const intentResult = typeof input === 'string'
+        ? understanding.intent.classify(input, codebaseInfo.historyContext || {})
+        : input
+      return understanding.scope.estimate(intentResult, codebaseInfo)
+    },
 
-    getTrust: () =>
-      social.trust.getAll?.() || {},
+    buildPrompt: async (roleId, agentContext = {}, taskContext = {}) => {
+      const agentId = agentContext.agentId || taskContext.agentId || `prompt-${roleId}`
+      const goal = taskContext.goal || taskContext.task || agentContext.task || ''
+      const scope = taskContext.scope || agentContext.scope || 'global'
+      return promptBuilder.build(agentId, roleId, {
+        ...taskContext,
+        ...agentContext,
+        goal,
+        scope,
+      })
+    },
 
+    searchMemory: async (query, options = {}) => {
+      const retrievalResults = await hybridRetrieval.search(query, {
+        topK: options.limit || 5,
+        role: options.role,
+        scope: options.scope,
+      })
+      const mapped = retrievalResults.map(mapEpisodeToMemoryEntry)
+      const manual = bridgeMemory.search(query, options)
+      return [...mapped, ...manual].slice(0, options.limit || 20)
+    },
+
+    recordMemory: async (entry) => bridgeMemory.record(entry),
+    forgetMemory: async (memoryId) => bridgeMemory.delete(memoryId),
+    exportMemory: async (options = {}) => bridgeMemory.export(options),
+
+    appendToMemory: (bufferId, entry) => {
+      if (!bufferId) return false
+      workingMemory.create(bufferId)
+      workingMemory.push(bufferId, entry)
+      return true
+    },
+
+    getArtifacts: (dagId, type) => artifacts.artifacts.getArtifacts(dagId, type),
+
+    getAgentInfo: (agentId) => getEnrichedAgentInfo(agentId),
+
+    getAllAgentStates: () => Object.fromEntries(
+      getAllAgentRecords().map((agent) => [agent.id, agent]),
+    ),
+
+    getCapabilities: (agentId = null) => {
+      if (agentId) return capabilityEngine.getVector8D(agentId)
+      return Object.fromEntries(
+        getAllAgentRecords().map((agent) => [agent.id, capabilityEngine.getVector8D(agent.id)]),
+      )
+    },
+
+    getIdentityMap: () => {
+      const roles = roleRegistry.list().map((roleId) => {
+        const role = roleRegistry.get(roleId)
+        return {
+          id: roleId,
+          name: role?.name || roleId,
+          preferredModel: role?.preferredModel || 'balanced',
+          tools: role?.tools || [],
+        }
+      })
+      return {
+        roles,
+        abcRoles: abcClassifier.getAllRoles(),
+        activeAgents: getAllAgentRecords(),
+      }
+    },
+
+    getRoleSensitivityProfiles,
+
+    getSoul: (agentId) => getSoulPayload(soulDesigner, agentId),
+    getABCRoles: () => abcClassifier.getAllRoles(),
+
+    getContextWindowStats: () => ({
+      maxTokens: contextEngine._maxTokens,
+      reservedTokens: contextEngine._reservedTokens,
+      workingMemoryBuffers: workingMemory._buffers?.size || 0,
+      workingMemoryEntries: [...(workingMemory._buffers?.values() || [])]
+        .reduce((sum, buffer) => sum + (buffer?.size?.() || 0), 0),
+    }),
+
+    getCulturalFriction: () => {
+      const providers = ['anthropic', 'openai', 'google']
+      const pairs = []
+      for (let index = 0; index < providers.length; index++) {
+        for (let inner = index + 1; inner < providers.length; inner++) {
+          pairs.push(social.friction.computeFriction(providers[index], providers[inner]))
+        }
+      }
+      return { pairs }
+    },
+
+    getActiveAgents: () => getAllAgentRecords().filter((agent) => agent.state === 'active'),
+    getReputation: () => social.reputation.getAll?.() || {},
+    getSNA: () => social.sna.getMetrics?.() || {},
+    getEmotionalStates: () => social.emotion.getAll?.() || {},
+    getTrust: () => social.trust.getAll?.() || {},
     getMemoryStats: () => ({
-      working: workingMemory.getStats?.(),
-      episodic: episodicMemory.getStats?.(),
-      semantic: semanticMemory.getStats?.(),
+      working: {
+        buffers: workingMemory._buffers?.size || 0,
+      },
+      episodic: episodicMemory.stats?.() || {},
+      semantic: semanticMemory.stats?.() || {},
+      bridge: bridgeMemory.stats(),
     }),
   }
+
+  return intelligence
 }
 
-// --- Re-exports ---------------------------------------------------------------
-
-// Sub-domain factories
 export { createSocialSystem } from './social/index.js'
 export { createArtifactSystem } from './artifacts/index.js'
 export { createUnderstandingSystem } from './understanding/index.js'
 
-// Identity (re-export from local imports)
 export {
-  CapabilityEngine, CrossProvider, LifecycleManager, ModelCapability,
-  PromptBuilder, RoleRegistry, SensitivityFilter, SoulDesigner,
+  ABCClassifier,
+  CapabilityEngine,
+  CrossProvider,
+  LifecycleManager,
+  ModelCapability,
+  PromptBuilder,
+  RoleRegistry,
+  SensitivityFilter,
+  SoulDesigner,
 }
 
-// Memory (re-export from local imports)
 export {
-  ContextEngine, EmbeddingEngine, EpisodicMemory, HybridRetrieval,
-  SemanticMemory, UserProfile, VectorIndex, WorkingMemory,
+  ContextEngine,
+  EmbeddingEngine,
+  EpisodicMemory,
+  HybridRetrieval,
+  SemanticMemory,
+  UserProfile,
+  VectorIndex,
+  WorkingMemory,
 }

@@ -27,6 +27,15 @@ function errorResponse(error) {
 export function createGateTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_gate',
+    description: [
+      'Evidence-based quality gate. Evaluate claims (e.g. "task complete",',
+      '"tests pass") against evidence, or appeal a rejected claim.',
+      '',
+      'Actions:',
+      '  evaluate — Submit a claim with evidence for verification',
+      '  appeal — Contest a rejected evaluation with new evidence',
+      '  history — View past gate evaluations',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -143,15 +152,14 @@ export function createGateTool({ core, quality, sessionBridge, spawnClient }) {
               };
             }
 
-            // Emit field signal
-            core?.field?.emit?.('gate.evaluated', {
+            core?.bus?.publish?.('gate.evaluated', {
               evaluationId,
               passed: result.passed,
               score: result.score,
               claimType: claim.type,
               scope,
               timestamp: Date.now(),
-            });
+            }, 'swarm-gate');
 
             return toolResponse({
               status: 'evaluated',
@@ -207,14 +215,13 @@ export function createGateTool({ core, quality, sessionBridge, spawnClient }) {
               };
             }
 
-            // Emit field signal
-            core?.field?.emit?.('gate.appealed', {
+            core?.bus?.publish?.('gate.appealed', {
               appealId,
               originalEvaluationId: evaluationId,
               passed: result.passed,
               scope,
               timestamp: Date.now(),
-            });
+            }, 'swarm-gate');
 
             return toolResponse({
               status: 'appeal_processed',

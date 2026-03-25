@@ -73,15 +73,16 @@ export class CrossProvider extends ModuleBase {
 
   async start() {
     if (this._eventBus) {
-      this._eventBus.subscribe('agent.lifecycle.spawned', (data) => {
+      this._unsubscribe = this._eventBus.on('agent.lifecycle.spawned', (data) => {
         this._initOnboarding(data.agentId, data.provider || 'default')
       })
     }
   }
 
   async stop() {
-    if (this._eventBus) {
-      this._eventBus.unsubscribe('agent.lifecycle.spawned')
+    if (this._unsubscribe) {
+      this._unsubscribe()
+      this._unsubscribe = null
     }
   }
 

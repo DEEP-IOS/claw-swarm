@@ -7,11 +7,12 @@
  */
 
 import { ModuleBase } from '../../core/module-base.js'
+import { DIM_COORDINATION } from '../../core/field/types.js'
 import { TaskChannel } from './task-channel.js'
 
 export class ChannelManager extends ModuleBase {
-  static produces() { return ['DIM_COORDINATION'] }
-  static consumes() { return ['DIM_COORDINATION'] }
+  static produces() { return [DIM_COORDINATION] }
+  static consumes() { return [DIM_COORDINATION] }
   static publishes() { return [] }
   static subscribes() { return ['agent.lifecycle.ended'] }
 
@@ -31,7 +32,9 @@ export class ChannelManager extends ModuleBase {
     this._channels = new Map()
 
     // 订阅 agent 生命周期结束事件，自动 leave
-    this._onAgentEnded = ({ agentId }) => {
+    this._onAgentEnded = (envelope) => {
+      const data = envelope?.data ?? envelope
+      const agentId = data?.agentId
       if (!agentId) return
       for (const ch of this._channels.values()) {
         if (!ch.isClosed()) {
@@ -136,6 +139,9 @@ export class ChannelManager extends ModuleBase {
   }
 
   async stop() {
+    // 取消订阅 / Unsubscribe from agent ended event
+    this._eventBus.unsubscribe('agent.lifecycle.ended', this._onAgentEnded)
+
     for (const [id, ch] of this._channels) {
       if (!ch.isClosed()) ch.close()
     }

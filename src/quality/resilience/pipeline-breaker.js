@@ -1,9 +1,10 @@
 /**
- * PipelineBreaker - DAG 执行管道超时熔断器
- * DAG execution pipeline timeout breaker
+ * PipelineBreaker - DAG execution pipeline timeout breaker.
  *
- * 为每个 DAG 执行追踪时间预算，在 80% 时发出预警信号，
- * 100% 时强制熔断并通知编排层停止执行，防止无限挂起。
+ * Tracks time budgets for active DAGs, emits a warning signal at 80% budget,
+ * and force-breaks the pipeline at 100%. It also listens to orchestration
+ * deadline events so externally detected overruns can trip the breaker
+ * without relying on local timers alone.
  *
  * @module quality/resilience/pipeline-breaker
  * @version 9.0.0
@@ -12,23 +13,11 @@
 import { ModuleBase } from '../../core/module-base.js'
 import { DIM_ALARM, DIM_TASK, DIM_COORDINATION } from '../../core/field/types.js'
 
-// ============================================================================
-// PipelineBreaker
-// ============================================================================
-
 export class PipelineBreaker extends ModuleBase {
-  // --------------------------------------------------------------------------
-  // Static declarations
-  // --------------------------------------------------------------------------
-
   static produces() { return [DIM_ALARM] }
   static consumes() { return [DIM_TASK, DIM_COORDINATION] }
   static publishes() { return ['quality.pipeline.broken'] }
-  static subscribes() { return ['orchestration.deadline.warning'] }
-
-  // --------------------------------------------------------------------------
-  // Constructor
-  // --------------------------------------------------------------------------
+  static subscribes() { return ['deadline.warning', 'deadline.exceeded'] }
 
   /**
    * @param {Object} opts
@@ -39,8 +28,8 @@ export class PipelineBreaker extends ModuleBase {
   constructor({ field, bus, config = {} }) {
     super()
 
-    /** @private */ this._field = field
-    /** @private */ this._bus = bus
+    this._field = field
+    this._bus = bus
 
     /**
      * @private
@@ -53,45 +42,74 @@ export class PipelineBreaker extends ModuleBase {
 
     /** @private @type {Function|null} */
     this._onDeadlineWarning = null
+    /** @private @type {Function|null} */
+    this._onDeadlineExceeded = null
+    /** @private @type {Function|null} */
+    this._warnUnsub = null
+    /** @private @type {Function|null} */
+    this._exceededUnsub = null
   }
 
-  // --------------------------------------------------------------------------
-  // Lifecycle
-  // --------------------------------------------------------------------------
-
   async start() {
-    this._onDeadlineWarning = (envelope) => {
-      const data = envelope?.data
-      if (data && data.dagId) {
-        // External deadline warning — break immediately if still tracking
-        const entry = this._dagTimers.get(data.dagId)
-        if (entry && !entry.broken) {
-          this.break(data.dagId, 'external_deadline_warning')
-        }
-      }
+    this._onDeadlineWarning = (payload) => {
+      if (!payload?.dagId) return
+      const entry = this._dagTimers.get(payload.dagId)
+      if (!entry || entry.broken) return
+
+      this._field?.emit?.({
+        dimension: DIM_ALARM,
+        scope: payload.dagId,
+        strength: 0.5,
+        emitterId: 'PipelineBreaker',
+        metadata: {
+          event: 'pipeline_warning',
+          reason: 'external_deadline_warning',
+          budget: entry.budgetMs,
+        },
+      })
     }
-    this._bus.subscribe('orchestration.deadline.warning', this._onDeadlineWarning)
+
+    this._onDeadlineExceeded = (payload) => {
+      if (!payload?.dagId) return
+      const entry = this._dagTimers.get(payload.dagId)
+      if (!entry || entry.broken) return
+      this.break(payload.dagId, 'external_deadline_exceeded')
+    }
+
+    if (typeof this._bus?.on === 'function') {
+      this._warnUnsub = this._bus.on('deadline.warning', this._onDeadlineWarning)
+      this._exceededUnsub = this._bus.on('deadline.exceeded', this._onDeadlineExceeded)
+      return
+    }
+
+    this._bus?.subscribe?.('deadline.warning', this._onDeadlineWarning)
+    this._bus?.subscribe?.('deadline.exceeded', this._onDeadlineExceeded)
   }
 
   async stop() {
+    this._warnUnsub?.()
+    this._warnUnsub = null
+    this._exceededUnsub?.()
+    this._exceededUnsub = null
+
     if (this._onDeadlineWarning) {
-      this._bus.unsubscribe('orchestration.deadline.warning', this._onDeadlineWarning)
+      this._bus?.unsubscribe?.('deadline.warning', this._onDeadlineWarning)
       this._onDeadlineWarning = null
     }
+    if (this._onDeadlineExceeded) {
+      this._bus?.unsubscribe?.('deadline.exceeded', this._onDeadlineExceeded)
+      this._onDeadlineExceeded = null
+    }
+
     this._clearAllTimers()
   }
 
-  // --------------------------------------------------------------------------
-  // Tracking
-  // --------------------------------------------------------------------------
-
   /**
-   * Start tracking a DAG execution with a time budget
+   * Start tracking a DAG execution with a time budget.
    * @param {string} dagId
    * @param {number} timeBudgetMs
    */
   startTracking(dagId, timeBudgetMs) {
-    // Clean up if already tracking this dag
     this.stopTracking(dagId)
 
     const entry = {
@@ -102,11 +120,10 @@ export class PipelineBreaker extends ModuleBase {
       broken: false,
     }
 
-    // Warning at 80% of budget
     const warningMs = Math.floor(timeBudgetMs * 0.8)
     entry.warningTimerId = setTimeout(() => {
       if (entry.broken) return
-      this._field.emit({
+      this._field?.emit?.({
         dimension: DIM_ALARM,
         scope: dagId,
         strength: 0.5,
@@ -119,7 +136,6 @@ export class PipelineBreaker extends ModuleBase {
       })
     }, warningMs)
 
-    // Break at 100% of budget
     entry.breakTimerId = setTimeout(() => {
       if (!entry.broken) {
         this.break(dagId, 'timeout')
@@ -131,7 +147,7 @@ export class PipelineBreaker extends ModuleBase {
   }
 
   /**
-   * Force-break a DAG pipeline
+   * Force-break a DAG pipeline.
    * @param {string} dagId
    * @param {string} reason
    * @returns {{ dagId: string, reason: string, elapsed: number }}
@@ -144,7 +160,6 @@ export class PipelineBreaker extends ModuleBase {
 
     entry.broken = true
 
-    // Clear timers
     if (entry.warningTimerId) {
       clearTimeout(entry.warningTimerId)
       entry.warningTimerId = null
@@ -156,7 +171,7 @@ export class PipelineBreaker extends ModuleBase {
 
     const elapsed = Date.now() - entry.startedAt
 
-    this._field.emit({
+    this._field?.emit?.({
       dimension: DIM_ALARM,
       scope: dagId,
       strength: 1.0,
@@ -169,7 +184,7 @@ export class PipelineBreaker extends ModuleBase {
       },
     })
 
-    this._bus.publish('quality.pipeline.broken', {
+    this._bus?.publish?.('quality.pipeline.broken', {
       dagId,
       reason,
       elapsed,
@@ -184,9 +199,9 @@ export class PipelineBreaker extends ModuleBase {
   }
 
   /**
-   * Stop tracking a DAG (normal completion)
+   * Stop tracking a DAG (normal completion).
    * @param {string} dagId
-   * @returns {boolean} true if was tracking, false otherwise
+   * @returns {boolean}
    */
   stopTracking(dagId) {
     const entry = this._dagTimers.get(dagId)
@@ -205,28 +220,16 @@ export class PipelineBreaker extends ModuleBase {
     return true
   }
 
-  // --------------------------------------------------------------------------
-  // Internal Helpers
-  // --------------------------------------------------------------------------
-
-  /**
-   * Clear all active timers (used during stop())
-   * @private
-   */
+  /** @private */
   _clearAllTimers() {
-    for (const [dagId, entry] of this._dagTimers) {
+    for (const [, entry] of this._dagTimers) {
       if (entry.warningTimerId) clearTimeout(entry.warningTimerId)
       if (entry.breakTimerId) clearTimeout(entry.breakTimerId)
     }
     this._dagTimers.clear()
   }
 
-  // --------------------------------------------------------------------------
-  // Accessors
-  // --------------------------------------------------------------------------
-
   /**
-   * List all active DAG trackers
    * @returns {Array<{ dagId: string, startedAt: number, budgetMs: number, broken: boolean, elapsed: number }>}
    */
   getActiveTrackers() {
@@ -245,7 +248,6 @@ export class PipelineBreaker extends ModuleBase {
   }
 
   /**
-   * Return statistics
    * @returns {{ totalTracked: number, totalBroken: number, avgTimeToBreak: number }}
    */
   getStats() {
@@ -260,3 +262,5 @@ export class PipelineBreaker extends ModuleBase {
     }
   }
 }
+
+export default PipelineBreaker

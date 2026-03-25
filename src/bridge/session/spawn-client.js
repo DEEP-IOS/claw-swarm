@@ -10,17 +10,22 @@ export class SpawnClient {
     this._spawnCounter = 0;
     this._ipcTimeoutMs = config.ipcTimeoutMs ?? 30000;
     this._stats = { spawned: 0, completed: 0, failed: 0, cancelled: 0 };
+    // V8.2 Label Map: maps childSessionKey → { dagId, nodeId, agentId } for DAG feedback
+    this._labelMap = new Map();
   }
 
   /**
    * Spawn a new sub-agent.
-   * @param {{ role: string, model?: string, prompt: string, tools?: string[], label?: string }} opts
+   * @param {{ role: string, model?: string, prompt: string, tools?: string[], label?: string, dagId?: string, nodeId?: string, scope?: string }} opts
    * @returns {Promise<string>} agentId
    */
-  async spawn({ role, model, prompt, tools, label }) {
+  async spawn({ role, model, prompt, tools, label, dagId, nodeId, scope }) {
     const agentId = `agent-${Date.now()}-${++this._spawnCounter}`;
-    // Gateway label limit: 64 characters
-    const safeLabel = (label || `${role}-${agentId.slice(-8)}`).slice(0, 64);
+    // V8.2 pattern: encode dagId:nodeId into label for cross-hook tracing
+    const encodedLabel = dagId
+      ? `swarm:${dagId}:${agentId}:${nodeId || ''}`.slice(0, 64)
+      : (label || `${role}-${agentId.slice(-8)}`).slice(0, 64);
+    const safeLabel = encodedLabel;
 
     this._agents.set(agentId, {
       status: 'running',
@@ -32,6 +37,9 @@ export class SpawnClient {
       startedAt: Date.now(),
       callbacks: [],
       result: null,
+      dagId: dagId || null,
+      nodeId: nodeId || null,
+      scope: scope || null,
     });
     this._stats.spawned++;
 
@@ -117,6 +125,9 @@ export class SpawnClient {
       role: agent.role,
       model: agent.model,
       label: agent.label,
+      dagId: agent.dagId || null,
+      nodeId: agent.nodeId || null,
+      scope: agent.scope || null,
       startedAt: agent.startedAt,
       endedAt: agent.endedAt || null,
       durationMs: agent.status === 'running'
@@ -143,6 +154,43 @@ export class SpawnClient {
       }
     }
     return active;
+  }
+
+  /**
+   * V8.2 Label Map: register a child session key → agent metadata mapping.
+   * Called from subagent_spawned hook to enable DAG feedback on completion.
+   */
+  mapLabel(childSessionKey, label) {
+    if (!childSessionKey || !label) return;
+    if (typeof label === 'string' && label.startsWith('swarm:')) {
+      const parts = label.split(':');
+      this._labelMap.set(childSessionKey, {
+        label,
+        dagId: parts[1] || null,
+        agentId: parts[2] || null,
+        nodeId: parts[3] || null,
+        _createdAt: Date.now(),
+      });
+    }
+  }
+
+  /**
+   * Resolve label metadata for a child session key (consumes the mapping).
+   */
+  resolveLabel(childSessionKey) {
+    const info = this._labelMap.get(childSessionKey);
+    if (info) this._labelMap.delete(childSessionKey);
+    return info || null;
+  }
+
+  /**
+   * Find agent by dagId (for DAG status lookups).
+   */
+  findByDagId(dagId) {
+    for (const [agentId, agent] of this._agents) {
+      if (agent.dagId === dagId) return { agentId, ...agent };
+    }
+    return null;
   }
 
   /**

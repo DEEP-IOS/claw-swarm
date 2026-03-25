@@ -53,6 +53,18 @@ function safeLabel(text) {
 export function createSpawnTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_spawn',
+    description: [
+      'Spawn a new agent to work on a specific sub-task.',
+      'The agent runs independently and returns results when done.',
+      '',
+      'Common roles: researcher, implementer, reviewer, tester,',
+      '  analyst, writer, designer, debugger.',
+      'Model tiers: fast (speed), balanced (default), strong (quality),',
+      '  reasoning (complex logic).',
+      '',
+      'Use dagId to link the agent to an existing execution plan.',
+      'Use wait:true to block until the agent completes.',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -158,15 +170,14 @@ export function createSpawnTool({ core, quality, sessionBridge, spawnClient }) {
           return errorResponse('Spawn returned no agent ID');
         }
 
-        // Emit field signal
-        core?.field?.emit?.('agent.spawned', {
+        core?.bus?.publish?.('agent.spawned', {
           agentId,
           role,
           model,
           scope,
           direct: true,
           timestamp: Date.now(),
-        });
+        }, 'swarm-spawn');
 
         return toolResponse({
           status: 'spawned',

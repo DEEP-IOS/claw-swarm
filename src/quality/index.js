@@ -94,8 +94,22 @@ export function createQualitySystem({ field, bus, store, reputationCRDT, config 
 
   return {
     // --- Gate methods ---
-    evaluateEvidence: (claim, evidences) => evidenceGate.evaluate(claim, evidences),
-    appealEvidence: (evalId, newEvidences) => evidenceGate.appeal(evalId, newEvidences),
+    evaluateEvidence: (claimOrObj, evidences) => {
+      // Support both (claim, evidences) and ({ claim, evidences }) signatures (gate-tool passes single object)
+      if (claimOrObj && typeof claimOrObj === 'object' && claimOrObj.claim && !evidences) {
+        return evidenceGate.evaluate(claimOrObj.claim, claimOrObj.evidences || []);
+      }
+      return evidenceGate.evaluate(claimOrObj, evidences);
+    },
+    appealEvidence: (evalIdOrObj, newEvidences) => {
+      // Support both (evalId, evidences) and ({ originalEvaluationId, additionalEvidences }) signatures
+      if (typeof evalIdOrObj === 'object' && evalIdOrObj !== null) {
+        const id = evalIdOrObj.originalEvaluationId || evalIdOrObj.evaluationId || evalIdOrObj.id;
+        const evidences = evalIdOrObj.additionalEvidences || evalIdOrObj.evidences || newEvidences || [];
+        return evidenceGate.appeal(id, evidences);
+      }
+      return evidenceGate.appeal(evalIdOrObj, newEvidences);
+    },
     auditOutput: (output) => qualityController.evaluateOutput(output),
 
     // --- Resilience methods ---
@@ -121,12 +135,35 @@ export function createQualitySystem({ field, bus, store, reputationCRDT, config 
     checkCompliance: (sid, output, ctx) => complianceMonitor.check(sid, output, ctx),
     getCompliancePrompt: (sid) => complianceMonitor.getEscalationPrompt(sid),
 
+    // --- Gate history (used by gate-tool 'history' action) ---
+    getGateHistory: ({ scope, limit } = {}) => {
+      if (!store) return [];
+      const records = store.query?.('quality', (value, key) => {
+        if (!key.startsWith('gate-')) return false;
+        if (scope && value?.claim?.scope && value.claim.scope !== scope) return false;
+        return true;
+      }) || [];
+      records.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      return records.slice(0, limit || 50);
+    },
+
     // --- Dashboard query delegations ---
     getAuditHistory: () => qualityController.getAuditHistory?.() || [],
-    getFailureModeDistribution: () => failureAnalyzer.getDistribution?.() || {},
+    getFailureModeDistribution: () => failureAnalyzer.getClassDistribution?.() || {},
     getComplianceStats: () => complianceMonitor.getStats?.() || {},
     getAllBreakerStates: () => circuitBreaker.getAllStates?.() || {},
     getAntigens: () => failureVaccination.getAntigens?.() || [],
+    getResilienceStats: () => ({
+      toolResilience: toolResilience.getStats?.() || {},
+      circuitBreaker: circuitBreaker.getStats?.() || {},
+      pipelineBreaker: pipelineBreaker.getStats?.() || {},
+      failureVaccination: failureVaccination.getStats?.() || {},
+      failureAnalyzer: failureAnalyzer.getStats?.() || {},
+      anomalyDetector: anomalyDetector.getStats?.() || {},
+      complianceMonitor: complianceMonitor.getStats?.() || {},
+      evidenceGate: evidenceGate.getStats?.() || {},
+      qualityController: qualityController.getStats?.() || {},
+    }),
 
     // --- Module access ---
     _modules,
@@ -145,6 +182,17 @@ export function createQualitySystem({ field, bus, store, reputationCRDT, config 
           await mod.start();
         }
       }
+
+      const subscribe = (topic, handler) => {
+        if (typeof bus.on === 'function') {
+          return bus.on(topic, handler);
+        }
+        if (typeof bus.subscribe === 'function') {
+          bus.subscribe(topic, handler);
+          return () => bus.unsubscribe?.(topic, handler);
+        }
+        return () => {};
+      };
 
       // Wire cross-module bus subscriptions
       const onAgentCompleted = (envelope) => {
@@ -177,15 +225,29 @@ export function createQualitySystem({ field, bus, store, reputationCRDT, config 
         }
       };
 
-      bus.subscribe('agent.completed', onAgentCompleted);
-      bus.subscribe('agent.failed', onAgentFailed);
-      bus.subscribe('quality.failure.classified', onFailureClassified);
+      const onDagCreated = (envelope) => {
+        const data = envelope?.data || envelope;
+        const budgetMs = data?.timeBudgetMs ?? data?.metadata?.timeBudgetMs ?? data?.deadlineMs ?? data?.metadata?.deadlineMs;
+        if (data?.dagId && typeof budgetMs === 'number' && budgetMs > 0) {
+          pipelineBreaker.startTracking(data.dagId, budgetMs);
+        }
+      };
+
+      const onDagCompleted = (envelope) => {
+        const data = envelope?.data || envelope;
+        if (data?.dagId) {
+          pipelineBreaker.stopTracking(data.dagId);
+        }
+      };
 
       _subscriptions = [
-        { topic: 'agent.completed', handler: onAgentCompleted },
-        { topic: 'agent.failed', handler: onAgentFailed },
-        { topic: 'quality.failure.classified', handler: onFailureClassified },
+        subscribe('agent.lifecycle.completed', onAgentCompleted),
+        subscribe('agent.lifecycle.failed', onAgentFailed),
+        subscribe('quality.failure.classified', onFailureClassified),
+        subscribe('dag.created', onDagCreated),
+        subscribe('dag.completed', onDagCompleted),
       ];
+
     },
 
     /**
@@ -193,8 +255,8 @@ export function createQualitySystem({ field, bus, store, reputationCRDT, config 
      */
     stop: async () => {
       // Unsubscribe cross-module wiring
-      for (const sub of _subscriptions) {
-        bus.unsubscribe(sub.topic, sub.handler);
+      for (const unsubscribe of _subscriptions) {
+        unsubscribe?.();
       }
       _subscriptions = [];
 

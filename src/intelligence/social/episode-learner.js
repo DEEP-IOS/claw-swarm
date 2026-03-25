@@ -7,7 +7,10 @@ import { DIM_LEARNING, DIM_TRAIL, DIM_REPUTATION } from '../../core/field/types.
 
 class EpisodeLearner extends ModuleBase {
   constructor({ field, bus, store }) {
-    super({ field, bus, store });
+    super();
+    this.field = field;
+    this.bus = bus;
+    this.store = store;
     this._episodes = new Map(); // "roleId::metricName" -> [{metric, ts}]
   }
 

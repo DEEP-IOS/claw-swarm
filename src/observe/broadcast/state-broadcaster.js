@@ -5,6 +5,46 @@
  */
 
 /**
+ * Verbosity levels for broadcast filtering.
+ * - 'verbose': emit ALL events including debug/trace
+ * - 'normal':  emit lifecycle + progress + errors (default)
+ * - 'quiet':   emit only errors + completion
+ */
+const VERBOSITY_LEVELS = Object.freeze({
+  verbose: 'verbose',
+  normal:  'normal',
+  quiet:   'quiet',
+});
+
+/**
+ * Topics classified by verbosity tier.
+ * quiet:   only critical events (errors, completion, violations)
+ * normal:  lifecycle + progress + quiet events
+ * verbose: everything including field signals and debug
+ */
+const QUIET_TOPICS = new Set([
+  'agent.lifecycle.completed', 'agent.lifecycle.failed', 'agent.lifecycle.ended',
+  'quality.gate.failed', 'quality.breaker.tripped', 'quality.anomaly.detected',
+  'quality.compliance.violation', 'quality.compliance.terminated',
+  'dag.completed', 'dag.dlq.added',
+  'session.ended',
+]);
+
+const NORMAL_TOPICS = new Set([
+  // All quiet topics are included in normal via the filter logic
+  'agent.lifecycle.spawned', 'agent.lifecycle.ready',
+  'task.created', 'task.completed', 'dag.state.changed',
+  'dag.phase.ready', 'dag.phase.started', 'dag.phase.completed', 'dag.phase.failed',
+  'spawn.advised', 'reputation.updated',
+  'quality.gate.passed', 'auto.quality.gate', 'auto.shapley.credit',
+  'channel.created', 'channel.closed',
+  'session.started', 'tool.executed', 'tool.result.recorded', 'user.notification',
+  'observe.health.snapshot', 'workflow.phase.changed',
+  'store.snapshot.completed', 'store.restore.completed',
+  'message.created',
+]);
+
+/**
  * Topics this broadcaster subscribes to.
  * Aligned with EventCatalog (src/core/bus/event-catalog.js) standard names.
  */
@@ -16,7 +56,7 @@ const SSE_TOPICS = [
   'store.snapshot.completed', 'store.restore.completed',
   // Communication
   'channel.created', 'channel.closed', 'channel.message',
-  'pheromone.deposited', 'pheromone.evaporated',
+  'pheromone.deposited', 'pheromone.evaporated', 'stigmergy.updated',
   // Intelligence
   'agent.lifecycle.spawned', 'agent.lifecycle.ready',
   'agent.lifecycle.completed', 'agent.lifecycle.failed', 'agent.lifecycle.ended',
@@ -26,12 +66,13 @@ const SSE_TOPICS = [
   'spawn.advised', 'reputation.updated',
   // Quality
   'quality.gate.passed', 'quality.gate.failed',
-  'quality.breaker.tripped', 'quality.anomaly.detected', 'quality.compliance.violation',
+  'quality.breaker.tripped', 'quality.anomaly.detected', 'quality.compliance.violation', 'quality.compliance.terminated',
+  'auto.quality.gate', 'auto.shapley.credit',
   // Observe
-  'observe.metrics.collected', 'observe.health.snapshot',
+  'observe.metrics.collected', 'observe.health.snapshot', 'workflow.phase.changed',
   // Bridge (non-catalog but useful for SSE)
   'session.started', 'session.ended', 'message.created',
-  'tool.executed', 'tool.result.recorded',
+  'tool.executed', 'tool.result.recorded', 'user.notification',
 ];
 
 /**
@@ -42,17 +83,6 @@ const SSE_TOPICS = [
  * Legacy event aliases: V8 topic names → V9 canonical names.
  * Ensures backward compatibility during transition.
  */
-const EVENT_ALIASES = {
-  'agent.spawned': 'agent.lifecycle.spawned',
-  'agent.completed': 'agent.lifecycle.completed',
-  'agent.failed': 'agent.lifecycle.failed',
-  'agent.state.changed': 'agent.lifecycle.spawned',
-  'agent.end': 'agent.lifecycle.ended',
-  'pheromone.emitted': 'pheromone.deposited',
-  'pheromone.decayed': 'pheromone.evaporated',
-  'circuit_breaker.transition': 'quality.breaker.tripped',
-  'quality.breaker.opened': 'quality.breaker.tripped',
-};
 
 export class StateBroadcaster {
   /**
@@ -70,7 +100,9 @@ export class StateBroadcaster {
     this._maxEventsPerSecond = config.maxEventsPerSecond ?? 10;
     /** @type {Map<string, { count: number, resetAt: number }>} */
     this._throttleWindow = new Map();
-    this._stats = { totalBroadcasts: 0, clientsServed: 0, throttled: 0 };
+    /** @type {'verbose'|'normal'|'quiet'} */
+    this._verbosity = config.verbosity ?? VERBOSITY_LEVELS.normal;
+    this._stats = { totalBroadcasts: 0, clientsServed: 0, throttled: 0, filtered: 0 };
   }
 
   /**
@@ -116,11 +148,54 @@ export class StateBroadcaster {
   }
 
   /**
+   * Set verbosity level for broadcast filtering.
+   * - 'verbose': emit ALL events including debug/trace
+   * - 'normal':  emit lifecycle + progress + errors
+   * - 'quiet':   emit only errors + completion
+   *
+   * @param {'verbose'|'normal'|'quiet'} level
+   * @throws {Error} if level is not a valid verbosity value
+   */
+  setVerbosity(level) {
+    if (!VERBOSITY_LEVELS[level]) {
+      throw new Error(`Invalid verbosity level "${level}". Use: verbose, normal, quiet`);
+    }
+    this._verbosity = level;
+  }
+
+  /**
+   * Get current verbosity level.
+   * @returns {'verbose'|'normal'|'quiet'}
+   */
+  getVerbosity() {
+    return this._verbosity;
+  }
+
+  /**
+   * Check if a topic should be filtered based on current verbosity level.
+   * @param {string} topic
+   * @returns {boolean} true if the event should be dropped
+   * @private
+   */
+  _shouldFilter(topic) {
+    if (this._verbosity === VERBOSITY_LEVELS.verbose) return false;
+    if (this._verbosity === VERBOSITY_LEVELS.quiet) {
+      return !QUIET_TOPICS.has(topic);
+    }
+    // normal: allow quiet + normal topics
+    return !QUIET_TOPICS.has(topic) && !NORMAL_TOPICS.has(topic);
+  }
+
+  /**
    * Broadcast an event to all connected SSE clients
    * @param {string} topic
    * @param {*} data
    */
   broadcast(topic, data) {
+    if (this._shouldFilter(topic)) {
+      this._stats.filtered++;
+      return;
+    }
     if (this._shouldThrottle(topic)) {
       this._stats.throttled++;
       return;
@@ -159,25 +234,16 @@ export class StateBroadcaster {
   }
 
   /**
-   * Subscribe to all SSE_TOPICS (and V8 aliases) on the bus and wire to broadcast
+   * Subscribe to canonical SSE topics on the bus and wire to broadcast.
+   * Historical topic names are bridged by EventBus aliases.
    */
   start() {
-    // Subscribe to each V9 topic
     for (const topic of SSE_TOPICS) {
       const handler = (envelope) => {
         this.broadcast(topic, envelope.data);
       };
       this._bus.subscribe(topic, handler);
       this._subscriptions.push({ topic, handler });
-    }
-
-    // Subscribe to V8 alias topics and re-broadcast under V9 keys
-    for (const [v8Topic, v9Topic] of Object.entries(EVENT_ALIASES)) {
-      const handler = (envelope) => {
-        this.broadcast(v9Topic, envelope.data);
-      };
-      this._bus.subscribe(v8Topic, handler);
-      this._subscriptions.push({ topic: v8Topic, handler });
     }
   }
 

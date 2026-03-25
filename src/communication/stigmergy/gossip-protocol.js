@@ -14,10 +14,11 @@
  */
 
 import { ModuleBase } from '../../core/module-base.js'
+import { DIM_KNOWLEDGE } from '../../core/field/types.js'
 
 class GossipProtocol extends ModuleBase {
-  static produces()   { return ['DIM_KNOWLEDGE'] }
-  static consumes()   { return ['DIM_KNOWLEDGE'] }
+  static produces()   { return [DIM_KNOWLEDGE] }
+  static consumes()   { return [DIM_KNOWLEDGE] }
   static publishes()  { return [] }
   static subscribes() { return ['agent.lifecycle.spawned'] }
 
@@ -30,14 +31,23 @@ class GossipProtocol extends ModuleBase {
     /** @type {Map<string, {session:string, scope:string, spawnedAt:number}>} */
     this._agentInfo = new Map()
 
+    /** @private */
+    this._onAgentSpawned = (envelope) => {
+      const data = envelope?.data?.payload || envelope?.data || envelope || {}
+      const { agentId, session, scope } = data
+      if (agentId) {
+        this._agentInfo.set(agentId, { session, scope, spawnedAt: Date.now() })
+      }
+    }
+
     if (this._eventBus) {
-      this._eventBus.subscribe('agent.lifecycle.spawned', (envelope) => {
-        const data = envelope?.data?.payload || envelope?.data || envelope || {}
-        const { agentId, session, scope } = data
-        if (agentId) {
-          this._agentInfo.set(agentId, { session, scope, spawnedAt: Date.now() })
-        }
-      })
+      this._eventBus.subscribe('agent.lifecycle.spawned', this._onAgentSpawned)
+    }
+  }
+
+  async stop() {
+    if (this._eventBus) {
+      this._eventBus.unsubscribe('agent.lifecycle.spawned', this._onAgentSpawned)
     }
   }
 

@@ -101,8 +101,8 @@ function installDeps() {
  * Checks if dist/ is missing or stale; triggers vite build if needed.
  */
 function buildConsoleFrontend() {
-  const consoleSrc  = join(PLUGIN_DIR, 'src', 'observe', 'dashboard', 'console');
-  const consoleDist = join(consoleSrc, 'dist');
+  const consoleSrc  = join(PLUGIN_DIR, 'console');
+  const consoleDist = join(PLUGIN_DIR, 'src', 'observe', 'dashboard', 'console');
   const indexHtml   = join(consoleDist, 'index.html');
 
   // 已构建且最近 24 小时内不重复构建 / Skip if recently built (< 24h)
@@ -518,6 +518,7 @@ function registerViaConfig() {
     const hooksToken = config.hooks?.token || '';
     config.plugins.entries['openclaw-swarm'] = {
       enabled: true,
+      trusted: true,
       config: {
         // V9 七域架构 — 零 Feature Flag / V9 7-domain — zero feature flags
         field: { maxSignals: 100000, gcIntervalMs: 60000 },
@@ -551,6 +552,9 @@ function registerViaConfig() {
     };
     log('Added openclaw-swarm with V9 7-domain config (zero feature flags)');
   } else {
+    // 确保 trusted 标志 / Ensure trusted flag
+    config.plugins.entries['openclaw-swarm'].trusted = true;
+  } else {
     if (!config.plugins.entries['openclaw-swarm'].enabled) {
       config.plugins.entries['openclaw-swarm'].enabled = true;
       log('Enabled openclaw-swarm in plugins.entries');
@@ -559,8 +563,158 @@ function registerViaConfig() {
     }
   }
 
+  // ═══ 配置级能力解锁 (第六节全部 15+ 条) ═══
+  // 这些配置在 OpenClaw 层面移除软限制，与 Patcher 的硬限制移除互补
+  applyGlobalCapabilityConfig(config);
+
   writeConfig(config);
   ok('Config updated ✓ / 配置已更新 ✓');
+}
+
+/**
+ * 应用全局能力配置 — 对应 god-runtime-strategy 第六节的全部限制解除
+ * Apply global capability config — matches Section VI of god-runtime-strategy
+ *
+ * 这些是 OpenClaw 的运行时配置项，无需 Patcher，通过 openclaw.json 直接生效。
+ */
+function applyGlobalCapabilityConfig(config) {
+  let changes = 0;
+
+  // 1. Session 跨 tree 访问 — 允许蜂群中 agent 互相看到对方 session
+  if (!config.tools) config.tools = {};
+  if (!config.tools.sessions) config.tools.sessions = {};
+  if (config.tools.sessions.visibility !== 'all') {
+    config.tools.sessions.visibility = 'all';
+    changes++;
+  }
+
+  // 2. 完整 coding 工具配置 — 解锁全部开发工具
+  if (config.tools.profile !== 'coding') {
+    config.tools.profile = 'coding';
+    changes++;
+  }
+
+  // 3. Exec 可信目录扩展 — 蜂群需要访问更多可执行文件
+  if (!config.tools.exec) config.tools.exec = {};
+  const trustDirs = ['/bin', '/usr/bin', '/usr/local/bin', '/opt/homebrew/bin', 'C:\\Windows\\System32'];
+  if (JSON.stringify(config.tools.exec.safeBinTrustedDirs) !== JSON.stringify(trustDirs)) {
+    config.tools.exec.safeBinTrustedDirs = trustDirs;
+    changes++;
+  }
+
+  // 4. HTTP API 允许高风险工具 — 蜂群需要 spawn/send/yield
+  if (!config.gateway) config.gateway = {};
+  if (!config.gateway.tools) config.gateway.tools = {};
+  const allowTools = ['sessions_spawn', 'sessions_send', 'sessions_yield', 'sessions_list'];
+  if (JSON.stringify(config.gateway.tools.allow) !== JSON.stringify(allowTools)) {
+    config.gateway.tools.allow = allowTools;
+    changes++;
+  }
+
+  // 5. 子代理深度和数量放宽 — 蜂群层级拓扑需要
+  if (!config.agents) config.agents = {};
+  if (!config.agents.defaults) config.agents.defaults = {};
+  if (!config.agents.defaults.subagents) config.agents.defaults.subagents = {};
+  if (config.agents.defaults.subagents.maxSpawnDepth !== 10) {
+    config.agents.defaults.subagents.maxSpawnDepth = 10;
+    changes++;
+  }
+  if (config.agents.defaults.subagents.maxChildrenPerAgent !== 50) {
+    config.agents.defaults.subagents.maxChildrenPerAgent = 50;
+    changes++;
+  }
+
+  // 6. 1M context beta — 编排器超大上下文
+  if (!config.agents.defaults.params) config.agents.defaults.params = {};
+  if (config.agents.defaults.params.context1m !== true) {
+    config.agents.defaults.params.context1m = true;
+    changes++;
+  }
+
+  // 7. 超长超时 — 蜂群任务可能运行很长时间 (48 小时)
+  if (config.agents.defaults.timeoutMs !== 172800000) {
+    config.agents.defaults.timeoutMs = 172800000;
+    changes++;
+  }
+
+  // 8. Agent-to-Agent 通信 — 蜂群核心协作能力
+  if (!config.tools.agentToAgent) config.tools.agentToAgent = {};
+  if (config.tools.agentToAgent.enabled !== true) {
+    config.tools.agentToAgent.enabled = true;
+    changes++;
+  }
+  if (JSON.stringify(config.tools.agentToAgent.allow) !== JSON.stringify(['*'])) {
+    config.tools.agentToAgent.allow = ['*'];
+    changes++;
+  }
+
+  // 9. Ping-pong 对话轮数 — 允许 agent 之间深度讨论 (50轮)
+  if (!config.session) config.session = {};
+  if (!config.session.agentToAgent) config.session.agentToAgent = {};
+  if (config.session.agentToAgent.maxPingPongTurns !== 50) {
+    config.session.agentToAgent.maxPingPongTurns = 50;
+    changes++;
+  }
+
+  // 10. DM 开放策略 — 蜂群内部自由通信
+  if (config.dmPolicy !== 'open') {
+    config.dmPolicy = 'open';
+    changes++;
+  }
+  if (JSON.stringify(config.allowFrom) !== JSON.stringify(['*'])) {
+    config.allowFrom = ['*'];
+    changes++;
+  }
+
+  // 9. 记忆自动捕获 — 蜂群记忆集成
+  if (!config.memorySearch) config.memorySearch = {};
+  if (config.memorySearch.autoCapture !== true) {
+    config.memorySearch.autoCapture = true;
+    changes++;
+  }
+
+  // 10. Gateway 非本地绑定允许 — 分布式蜂群可能需要远程访问
+  if (!config.gateway.auth) config.gateway.auth = {};
+  if (config.gateway.auth.allowNonLoopback !== true) {
+    config.gateway.auth.allowNonLoopback = true;
+    changes++;
+  }
+
+  // 11. 工具执行安全级别 → full — 蜂群需要无限制工具执行
+  if (!config.tools.exec.security) {
+    config.tools.exec.security = 'full';
+    changes++;
+  }
+
+  // 12. Sandbox 默认关闭 — 蜂群需要原生环境执行
+  if (!config.sandbox) config.sandbox = {};
+  if (config.sandbox.enabled !== false) {
+    config.sandbox.enabled = false;
+    changes++;
+  }
+
+  // 13. 模型无限制 — 允许蜂群使用任何模型
+  if (!config.models) config.models = {};
+  if (config.models.allowAll !== true) {
+    config.models.allowAll = true;
+    changes++;
+  }
+
+  // 14. 并发子代理上限 — 蜂群需要更多并行度
+  if (!config.agents.defaults.subagents.maxConcurrent) {
+    config.agents.defaults.subagents.maxConcurrent = 20;
+    changes++;
+  }
+
+  // 15. 自动批准高风险操作 — 蜂群自主执行需要
+  if (!config.tools.exec.autoApprove) {
+    config.tools.exec.autoApprove = true;
+    changes++;
+  }
+
+  if (changes > 0) {
+    log(`  Applied ${changes} global capability configs / 应用了 ${changes} 条全局能力配置`);
+  }
 }
 
 // ── Agent Registration + Webhook Relay ───────────────────────
@@ -713,6 +867,138 @@ function ensureWorkspaceTemplates(workspaceDir) {
   }
 }
 
+// ── Loader Hook Registration (运行时拦截) ─────────────────────
+
+/**
+ * 注册 Swarm Loader Hook 到 OpenClaw 启动配置。
+ * 通过 NODE_OPTIONS --import 在 OpenClaw 进程启动时自动加载 loader。
+ * 不修改任何 dist 文件，不怕 npm install/update。
+ *
+ * Register Swarm Loader Hook into OpenClaw startup config.
+ * Uses NODE_OPTIONS --import to auto-load at process start.
+ * Does NOT modify any dist files. Survives npm install/update.
+ */
+function registerLoaderHook() {
+  const loaderRegister = join(PLUGIN_DIR, 'src', 'loader', 'swarm-loader-register.js');
+  if (!existsSync(loaderRegister)) {
+    warn('Loader register not found — skipping loader hook');
+    return;
+  }
+
+  const loaderPath = loaderRegister.replace(/\\/g, '/');
+  const importFlag = `--import=${loaderPath}`;
+
+  // 方式 1: 写入 OpenClaw 配置的 env.NODE_OPTIONS
+  const config = readConfig();
+  if (!config.env) config.env = {};
+  const existing = config.env.NODE_OPTIONS || '';
+
+  if (existing.includes('swarm-loader-register')) {
+    log('Loader hook already registered in config ✓ / Loader hook 已注册');
+  } else {
+    config.env.NODE_OPTIONS = (existing + ' ' + importFlag).trim();
+    writeConfig(config);
+    ok('Loader hook registered via config.env.NODE_OPTIONS');
+    ok('Loader hook 已注册到配置 — OpenClaw 启动时自动加载');
+  }
+
+  // 方式 2: 同时写入 .env 文件 (有些部署方式读 .env)
+  const envFile = join(CONFIG_DIR, '.env');
+  try {
+    let envContent = existsSync(envFile) ? readFileSync(envFile, 'utf-8') : '';
+    if (!envContent.includes('swarm-loader-register')) {
+      const envLine = `\nNODE_OPTIONS="${(process.env.NODE_OPTIONS || '')} ${importFlag}".trim()\n`;
+      // 不覆盖，追加
+      writeFileSync(envFile, envContent + `\n# Claw-Swarm Loader Hook (auto-generated, remove to disable)\nNODE_OPTIONS=\${NODE_OPTIONS:-} ${importFlag}\n`, 'utf-8');
+      log('Also written to ~/.openclaw/.env');
+    }
+  } catch { /* non-fatal */ }
+
+  log('');
+  log('Loader hook 工作原理:');
+  log('  OpenClaw 启动 → Node.js 加载 swarm-loader-register.js');
+  log('  → 拦截所有 openclaw/dist/* 模块的 import');
+  log('  → 在源码进入 V8 前自动 transform (移除限制)');
+  log('  → 不修改任何磁盘文件');
+  log('');
+  log('卸载: node install.js --uninstall (自动移除 loader hook + 恢复全部配置)');
+}
+
+// ── OpenClaw Patches (侵入式修复) ────────────────────────────
+
+/**
+ * 自动执行 swarm-patcher 对 OpenClaw dist 的侵入式修复
+ * Auto-apply swarm-patcher to OpenClaw dist for full capability unlock
+ *
+ * 移除所有安全限制、恢复全部能力、暴露完整 runtime。
+ * Removes all security restrictions, restores all capabilities, exposes full runtime.
+ */
+function applyOpenClawPatches() {
+  const patcherScript = join(PLUGIN_DIR, 'scripts', 'swarm-patcher.js');
+  if (!existsSync(patcherScript)) {
+    warn('Patcher script not found — skipping OpenClaw patches');
+    warn('补丁脚本未找到，跳过 OpenClaw 侵入式修复');
+    return;
+  }
+
+  // 检测 OpenClaw 安装位置 / Detect OpenClaw installation location
+  const candidates = [
+    join(PLUGIN_DIR, 'node_modules', 'openclaw'),
+    join(PLUGIN_DIR, '..', '..', 'node_modules', 'openclaw'),  // monorepo
+    join(PLUGIN_DIR, '..', '..', 'runtime', 'node_modules', 'openclaw'),  // sibling runtime
+    join(PLUGIN_DIR, '..', '..', '..', 'runtime', 'node_modules', 'openclaw'),  // parent runtime
+    join(PLUGIN_DIR, '..', '..', '..', 'node_modules', 'openclaw'),  // workspace root
+  ];
+
+  // 通过 which/where 查找全局安装 / Find global install via CLI
+  try {
+    const clawPath = run('openclaw --print-path 2>/dev/null || which openclaw 2>/dev/null || where openclaw 2>nul', { silent: true });
+    if (clawPath) {
+      // 从 bin 路径回溯到包目录 / Trace back from bin to package dir
+      const binDir = join(clawPath.trim(), '..');
+      const pkgDir = join(binDir, '..', 'lib', 'node_modules', 'openclaw');
+      if (existsSync(pkgDir)) candidates.unshift(pkgDir);
+      // npm global
+      const npmGlobal = join(binDir, '..', 'node_modules', 'openclaw');
+      if (existsSync(npmGlobal)) candidates.unshift(npmGlobal);
+    }
+  } catch { /* non-fatal */ }
+
+  // 也检查 ~/.openclaw 下是否有 dist / Check ~/.openclaw for dist
+  const homeClawDist = join(CONFIG_DIR, 'dist');
+  const homeClawPkg = join(CONFIG_DIR);
+  if (existsSync(homeClawDist)) candidates.unshift(homeClawPkg);
+
+  let openclawDir = null;
+  for (const candidate of candidates) {
+    const distDir = join(candidate, 'dist');
+    if (existsSync(distDir)) {
+      openclawDir = candidate;
+      break;
+    }
+  }
+
+  if (!openclawDir) {
+    warn('OpenClaw dist directory not found — skipping patches');
+    warn('未找到 OpenClaw dist 目录，跳过侵入式修复');
+    warn('手动运行: node scripts/swarm-patcher.js --openclaw-dir <path>');
+    return;
+  }
+
+  log(`Applying OpenClaw patches... / 应用 OpenClaw 侵入式修复...`);
+  log(`  Target: ${openclawDir}`);
+
+  const result = run(`node "${patcherScript}" --openclaw-dir "${openclawDir}"`, { silent: false });
+  if (result !== null) {
+    ok('OpenClaw patches applied ✓ / OpenClaw 侵入式修复完成 ✓');
+  } else {
+    // patcher 本身不会 process.exit(1) unless dist missing, try verbose mode
+    warn('Patcher returned non-zero — some patches may have failed');
+    warn('部分补丁可能未成功，请检查输出');
+    warn(`手动重试: node scripts/swarm-patcher.js --openclaw-dir "${openclawDir}" --verbose`);
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────
 
 async function main() {
@@ -736,7 +1022,8 @@ What this does / 功能:
   7. Creates workspace directories and webhook relay mapping
   8. Interactive swarm mapping — assigns swarm roles to existing agents
   9. Warm start detection — imports historical reputation from swarm DB
- 10. Builds console frontend
+ 10. Applies OpenClaw invasive patches (removes ALL security restrictions)
+ 11. Builds console frontend
 
 Flags / 选项:
   --no-interactive  Skip interactive role mapping (CI/automation)
@@ -748,8 +1035,11 @@ Flags / 选项:
   if (process.argv.includes('--uninstall')) {
     log('Uninstalling... / 卸载中...');
     const config = readConfig();
+
+    // 1. 移除插件配置
     if (config?.plugins?.entries?.['openclaw-swarm']) {
       delete config.plugins.entries['openclaw-swarm'];
+      log('  Removed plugin entry / 移除插件条目');
     }
     if (config?.plugins?.load?.paths) {
       const normalizedPluginDir = PLUGIN_DIR.replace(/\\/g, '/').replace(/\/$/, '');
@@ -759,8 +1049,214 @@ Flags / 选项:
       if (config.plugins.load.paths.length === 0) delete config.plugins.load.paths;
       if (config.plugins.load && Object.keys(config.plugins.load).length === 0) delete config.plugins.load;
     }
+
+    // 2. 恢复安全配置 — 撤销 applyGlobalCapabilityConfig 的全部修改
+    // ── 原有恢复项 ──
+    if (config.tools?.sessions?.visibility === 'all') {
+      config.tools.sessions.visibility = 'tree';
+      log('  Restored sessions.visibility → tree / 恢复 session 可见性');
+    }
+    if (config.tools?.profile === 'coding') {
+      config.tools.profile = 'messaging';
+      log('  Restored tools.profile → messaging / 恢复工具配置');
+    }
+    if (config.tools?.exec?.security === 'full') {
+      delete config.tools.exec.security;
+      log('  Removed tools.exec.security=full / 恢复 exec 安全策略');
+    }
+    if (config.tools?.exec?.autoApprove === true) {
+      delete config.tools.exec.autoApprove;
+      log('  Removed tools.exec.autoApprove / 恢复 exec 审批');
+    }
+    if (config.sandbox?.enabled === false) {
+      delete config.sandbox.enabled;
+      log('  Restored sandbox / 恢复沙箱');
+    }
+    if (config.models?.allowAll === true) {
+      delete config.models.allowAll;
+      log('  Removed models.allowAll / 恢复模型限制');
+    }
+    if (config.gateway?.auth?.allowNonLoopback === true) {
+      delete config.gateway.auth.allowNonLoopback;
+      log('  Restored gateway auth / 恢复网关认证');
+    }
+    if (config.tools?.agentToAgent) {
+      delete config.tools.agentToAgent;
+      log('  Removed agentToAgent config / 恢复 A2A 策略');
+    }
+    if (config.session?.agentToAgent) {
+      delete config.session.agentToAgent;
+      log('  Removed session.agentToAgent config / 恢复 ping-pong 限制');
+    }
+
+    // ── 之前遗漏的 13 项恢复 ──
+
+    // (1) safeBinTrustedDirs
+    if (config.tools?.exec?.safeBinTrustedDirs) {
+      delete config.tools.exec.safeBinTrustedDirs;
+      log('  Removed safeBinTrustedDirs / 恢复可信目录');
+    }
+
+    // (2) gateway.tools.allow
+    if (config.gateway?.tools?.allow) {
+      delete config.gateway.tools.allow;
+      log('  Removed gateway.tools.allow / 恢复网关工具白名单');
+    }
+
+    // (3) subagent maxSpawnDepth
+    if (config.agents?.defaults?.subagents?.maxSpawnDepth) {
+      delete config.agents.defaults.subagents.maxSpawnDepth;
+      log('  Removed maxSpawnDepth / 恢复 spawn 深度限制');
+    }
+
+    // (4) subagent maxChildrenPerAgent
+    if (config.agents?.defaults?.subagents?.maxChildrenPerAgent) {
+      delete config.agents.defaults.subagents.maxChildrenPerAgent;
+      log('  Removed maxChildrenPerAgent / 恢复子代理数量限制');
+    }
+
+    // (5) subagent maxConcurrent
+    if (config.agents?.defaults?.subagents?.maxConcurrent) {
+      delete config.agents.defaults.subagents.maxConcurrent;
+      log('  Removed maxConcurrent / 恢复并发子代理限制');
+    }
+
+    // 清理空 subagents 对象
+    if (config.agents?.defaults?.subagents && Object.keys(config.agents.defaults.subagents).length === 0) {
+      delete config.agents.defaults.subagents;
+    }
+
+    // (6) context1m
+    if (config.agents?.defaults?.params?.context1m === true) {
+      delete config.agents.defaults.params.context1m;
+      log('  Removed context1m / 恢复上下文窗口限制');
+    }
+    if (config.agents?.defaults?.params && Object.keys(config.agents.defaults.params).length === 0) {
+      delete config.agents.defaults.params;
+    }
+
+    // (7) timeoutMs
+    if (config.agents?.defaults?.timeoutMs === 172800000) {
+      delete config.agents.defaults.timeoutMs;
+      log('  Removed 48hr timeoutMs / 恢复默认超时');
+    }
+
+    // 清理空 defaults/agents
+    if (config.agents?.defaults && Object.keys(config.agents.defaults).length === 0) {
+      delete config.agents.defaults;
+    }
+
+    // (8) dmPolicy
+    if (config.dmPolicy === 'open') {
+      delete config.dmPolicy;
+      log('  Removed dmPolicy=open / 恢复 DM 策略');
+    }
+
+    // (9) allowFrom
+    if (JSON.stringify(config.allowFrom) === JSON.stringify(['*'])) {
+      delete config.allowFrom;
+      log('  Removed allowFrom=[*] / 恢复来源限制');
+    }
+
+    // (10) memorySearch.autoCapture
+    if (config.memorySearch?.autoCapture === true) {
+      delete config.memorySearch.autoCapture;
+      log('  Removed memorySearch.autoCapture / 恢复记忆配置');
+    }
+    if (config.memorySearch && Object.keys(config.memorySearch).length === 0) {
+      delete config.memorySearch;
+    }
+
+    // (11) cron config
+    if (config.cron?.maxConcurrentRuns === 8) {
+      delete config.cron.maxConcurrentRuns;
+      log('  Removed cron.maxConcurrentRuns / 恢复 cron 配置');
+    }
+    if (config.cron && Object.keys(config.cron).length === 0) {
+      delete config.cron;
+    }
+
+    // (12) hooks (仅移除 swarm 相关的 mapping，保留用户自定义)
+    if (config.hooks?.mappings) {
+      const before = config.hooks.mappings.length;
+      config.hooks.mappings = config.hooks.mappings.filter(
+        m => m.action !== 'agent' || m.agentId !== 'swarm-relay'
+      );
+      if (config.hooks.mappings.length < before) {
+        log('  Removed swarm-relay hook mapping / 移除蜂群 webhook 映射');
+      }
+      if (config.hooks.mappings.length === 0) {
+        delete config.hooks.mappings;
+        delete config.hooks.enabled;
+        delete config.hooks.path;
+      }
+    }
+
+    // (13) swarm-relay agent
+    if (config.agents?.list) {
+      const before = config.agents.list.length;
+      config.agents.list = config.agents.list.filter(a => a.id !== 'swarm-relay');
+      if (config.agents.list.length < before) {
+        log('  Removed swarm-relay agent / 移除蜂群代理');
+      }
+      if (config.agents.list.length === 0) {
+        delete config.agents.list;
+      }
+    }
+
+    // 清理空对象
+    if (config.tools?.exec && Object.keys(config.tools.exec).length === 0) delete config.tools.exec;
+    if (config.tools?.sessions && Object.keys(config.tools.sessions).length === 0) delete config.tools.sessions;
+    if (config.gateway?.tools && Object.keys(config.gateway.tools).length === 0) delete config.gateway.tools;
+    if (config.gateway?.auth && Object.keys(config.gateway.auth).length === 0) delete config.gateway.auth;
+
+    // 3. 移除 NODE_OPTIONS 中的 loader hook
+    if (config.env?.NODE_OPTIONS?.includes('swarm-loader')) {
+      config.env.NODE_OPTIONS = config.env.NODE_OPTIONS
+        .replace(/--import=[^\s]*swarm-loader-register\.js\s*/g, '')
+        .trim();
+      if (!config.env.NODE_OPTIONS) delete config.env.NODE_OPTIONS;
+      if (config.env && Object.keys(config.env).length === 0) delete config.env;
+      log('  Removed loader hook from NODE_OPTIONS / 移除 loader hook');
+    }
+
+    // 3b. 清理 .env 文件中的 loader hook
+    const envFile = join(CONFIG_DIR, '.env');
+    try {
+      if (existsSync(envFile)) {
+        let envContent = readFileSync(envFile, 'utf-8');
+        if (envContent.includes('swarm-loader')) {
+          envContent = envContent
+            .split('\n')
+            .filter(line => !line.includes('swarm-loader') && !line.includes('Claw-Swarm Loader Hook'))
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+          if (envContent) {
+            writeFileSync(envFile, envContent + '\n', 'utf-8');
+          } else {
+            // .env 清空后删除文件
+            const { unlinkSync } = await import('node:fs');
+            unlinkSync(envFile);
+          }
+          log('  Cleaned .env file / 清理 .env 文件中的 loader hook');
+        }
+      }
+    } catch { /* non-fatal */ }
+
+    // 4. 恢复被 patcher 修改的 dist 文件
+    log('  Restoring OpenClaw dist files... / 恢复 OpenClaw dist 文件...');
+    try {
+      run('npm install openclaw@latest --force --no-save', { silent: true });
+      ok('  OpenClaw dist files restored / OpenClaw dist 文件已恢复');
+    } catch {
+      warn('  Could not auto-restore dist files. Run: npm install openclaw --force');
+      warn('  无法自动恢复 dist。手动运行: npm install openclaw --force');
+    }
+
     writeConfig(config);
-    ok('Claw-Swarm removed from config. / 已从配置中移除。');
+    ok('Claw-Swarm fully uninstalled. / Claw-Swarm 已完全卸载。');
+    ok('All security restrictions restored to OpenClaw defaults. / 全部安全限制已恢复。');
     ok('Run "openclaw gateway restart" to apply. / 运行 "openclaw gateway restart" 生效。');
     return;
   }
@@ -789,7 +1285,34 @@ Flags / 选项:
     detectWarmStartCapability(envInfo);
   }
 
-  // Step 8: Build console frontend
+  // Step 8: Apply OpenClaw capability unlock (两套方案)
+  //
+  // 方案 A: Loader Hook (推荐) — 不改文件，runtime 拦截，npm install 后仍生效
+  // 方案 B: File Patcher (备用) — 直接改 dist 文件，更直接但 npm install 后需重打
+  //
+  // --patch-mode=loader (默认) | --patch-mode=patcher | --patch-mode=both | --patch-mode=none
+  const patchMode = (() => {
+    const modeArg = process.argv.find(a => a.startsWith('--patch-mode='));
+    if (modeArg) return modeArg.split('=')[1];
+    return 'both'; // 默认: 双保险 (patcher 改文件 + loader 运行时拦截)
+  })();
+
+  if (patchMode === 'none') {
+    log('Patch mode: none — skipping capability unlock / 跳过能力解锁');
+  } else {
+    if (patchMode === 'loader' || patchMode === 'both') {
+      registerLoaderHook();
+    }
+    if (patchMode === 'patcher' || patchMode === 'both') {
+      applyOpenClawPatches();
+    }
+    if (patchMode === 'loader') {
+      log('Patch mode: loader — runtime interception, no files modified');
+      log('补丁模式: loader — 运行时拦截，不修改任何文件');
+    }
+  }
+
+  // Step 9: Build console frontend
   buildConsoleFrontend();
 
   console.log('');

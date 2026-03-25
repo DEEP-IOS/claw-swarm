@@ -40,6 +40,7 @@ const SUBSCRIPTIONS = [
   'quality.failure.classified',
   'quality.anomaly.detected',
   'quality.compliance.violation',
+  'quality.compliance.terminated',
   'quality.pipeline.broken',
   'quality.audit.completed',
 ];
@@ -53,7 +54,7 @@ function createEmptyMetrics() {
     quality: {
       gateEvaluations: 0, gatePassRate: 0, gatePassed: 0,
       toolFailures: 0, breakerTrips: 0, anomalies: 0,
-      violations: 0, pipelineBreaks: 0, audits: 0,
+      violations: 0, terminatedSessions: 0, pipelineBreaks: 0, audits: 0,
     },
     budget: { totalTokens: 0, totalCost: 0, byRole: {} },
     channels: { created: 0, messages: 0, active: 0 },
@@ -85,15 +86,20 @@ export class MetricsCollector {
     for (const topic of SUBSCRIPTIONS) {
       const handler = this._handlers[topic];
       if (!handler) continue;
-      const wrapped = (payload) => {
-        handler(payload);
+      const wrapped = (data) => {
+        handler(data);
         this._metrics.lastUpdatedAt = Date.now();
       };
-      const subFn = this._bus.subscribe || this._bus.on;
+      // Use bus.on() which unwraps envelope.data, NOT bus.subscribe() which
+      // delivers raw envelopes.  Handlers expect plain data payloads (e.g.
+      // p.durationMs, p.passed) — subscribe() would wrap them in
+      // { topic, ts, source, data } and every payload-dependent branch
+      // would silently see undefined.
+      const subFn = this._bus.on || this._bus.subscribe;
       if (typeof subFn === 'function') {
         const unsub = subFn.call(this._bus, topic, wrapped);
         this._subscriptions.push(typeof unsub === 'function' ? unsub : () => {
-          const unsubFn = this._bus.unsubscribe || this._bus.off;
+          const unsubFn = this._bus.off || this._bus.unsubscribe;
           if (typeof unsubFn === 'function') unsubFn.call(this._bus, topic, wrapped);
         });
       }
@@ -198,6 +204,7 @@ export class MetricsCollector {
       },
       'quality.anomaly.detected': () => { m.quality.anomalies++; },
       'quality.compliance.violation': () => { m.quality.violations++; },
+      'quality.compliance.terminated': () => { m.quality.terminatedSessions++; },
       'quality.pipeline.broken': () => { m.quality.pipelineBreaks++; },
       'quality.audit.completed': () => { m.quality.audits++; },
 

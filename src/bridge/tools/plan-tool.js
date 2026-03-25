@@ -29,6 +29,15 @@ function errorResponse(error) {
 export function createPlanTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_plan',
+    description: [
+      'View or modify an execution plan (DAG).',
+      '',
+      'Actions:',
+      '  view — Show the current DAG structure and node states',
+      '  modify — Add/remove/reorder nodes in the DAG',
+      '  validate — Check DAG for cycles, missing deps, etc.',
+      '  cancel — Cancel an active DAG and all its agents',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -160,13 +169,12 @@ export function createPlanTool({ core, quality, sessionBridge, spawnClient }) {
               changes.push(`Would update priority to ${modifications.updatePriority}`);
             }
 
-            // Emit field signal
-            core?.field?.emit?.('plan.modified', {
+            core?.bus?.publish?.('plan.modified', {
               dagId,
               changes,
               scope,
               timestamp: Date.now(),
-            });
+            }, 'swarm-plan');
 
             return toolResponse({
               status: 'modified',
@@ -293,13 +301,12 @@ export function createPlanTool({ core, quality, sessionBridge, spawnClient }) {
             // Stop pipeline tracking
             quality?.stopPipelineTracking?.(dagId);
 
-            // Emit field signal
-            core?.field?.emit?.('plan.cancelled', {
+            core?.bus?.publish?.('plan.cancelled', {
               dagId,
               cancelledAgents,
               scope,
               timestamp: Date.now(),
-            });
+            }, 'swarm-plan');
 
             return toolResponse({
               status: 'cancelled',

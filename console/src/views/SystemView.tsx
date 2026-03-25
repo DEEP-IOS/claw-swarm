@@ -1,455 +1,257 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { StatCard } from '../components/cards/StatCard';
-import { GaugeRing } from '../components/charts/GaugeRing';
-import { useSSE } from '../hooks/useSSE';
-import { useRestApi } from '../hooks/useRestApi';
-import { systemApi } from '../api/client';
-import { colors, spacing, radii, transitions } from '../theme/tokens';
+/**
+ * SystemView - runtime architecture and health telemetry
+ *
+ * Uses real health dimensions and workflow stages from the live snapshot.
+ */
 
-/* ── Type definitions ────────────────────────────────────────── */
+import { useRef } from 'react';
+import { Html } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useWorldStore } from '../stores/world-store';
 
-interface HealthData {
-  score: number;           // 0-1
-  status: string;          // 'healthy' | 'degraded' | 'unhealthy'
-  dimensions?: Record<string, DimensionHealth>;
-  uptime?: number;
-  timestamp?: string;
+interface SystemViewProps {
+  active: boolean;
 }
 
-interface DimensionHealth {
-  value: number;
-  threshold?: number;
-  status: string;          // 'ok' | 'warn' | 'critical'
-  unit?: string;
-}
+const HEALTH_DIMS = [
+  { key: 'cpu', label: 'CPU', color: '#F97316' },
+  { key: 'memory', label: 'Memory', color: '#3B82F6' },
+  { key: 'eventLoopLag', label: 'Loop Lag', color: '#10B981' },
+  { key: 'signalCount', label: 'Signals', color: '#8B5CF6' },
+  { key: 'agentCount', label: 'Agents', color: '#F5A623' },
+  { key: 'errorRate', label: 'Errors', color: '#EF4444' },
+] as const;
 
-interface MetricsData {
-  cpu?: { usage: number; threshold?: number };
-  memory?: { usage: number; total?: number; threshold?: number };
-  eventLoop?: { delay: number; threshold?: number };
-  signals?: { currentCount: number };
-  agents?: { active: number; spawned?: number };
-  errors?: { rate: number; threshold?: number; total?: number };
-  [key: string]: unknown;
-}
-
-interface ModuleInfo {
-  name: string;
-  domain: string;
-  status: string;
-  version?: string;
-  [key: string]: unknown;
-}
-
-interface ModulesData {
-  modules?: ModuleInfo[];
-  total?: number;
-  active?: number;
-  version?: string;
-  port?: number;
-  startTime?: string;
-  [key: string]: unknown;
-}
-
-/* ── Health dimension card config ────────────────────────────── */
-
-interface DimCardDef {
-  key: string;
+function GaugeRing3D({
+  index,
+  label,
+  color,
+  value,
+}: {
+  index: number;
   label: string;
-  icon: string;
-  unit: string;
-  extract: (m: MetricsData, h: HealthData) => { value: number | string; threshold?: number; status: string };
   color: string;
-}
+  value: number;
+}) {
+  const ref = useRef<THREE.Mesh>(null!);
+  const angle = (index / HEALTH_DIMS.length) * Math.PI * 2;
+  const radius = 7;
+  const x = Math.cos(angle) * radius;
+  const z = Math.sin(angle) * radius;
+  const arc = Math.max(0.02, value) * Math.PI * 2;
 
-const DIM_CARDS: DimCardDef[] = [
-  {
-    key: 'cpu', label: 'CPU Usage', icon: '⚙', unit: '%', color: colors.dimension.task_load,
-    extract: (m, h) => ({
-      value: m.cpu?.usage != null ? `${(m.cpu.usage * 100).toFixed(1)}` : (h.dimensions?.cpu?.value ?? '—'),
-      threshold: m.cpu?.threshold ?? h.dimensions?.cpu?.threshold,
-      status: h.dimensions?.cpu?.status ?? 'ok',
-    }),
-  },
-  {
-    key: 'memory', label: 'Memory', icon: '◧', unit: '%', color: colors.dimension.resource_pressure,
-    extract: (m, h) => ({
-      value: m.memory?.usage != null ? `${(m.memory.usage * 100).toFixed(1)}` : (h.dimensions?.memory?.value ?? '—'),
-      threshold: m.memory?.threshold ?? h.dimensions?.memory?.threshold,
-      status: h.dimensions?.memory?.status ?? 'ok',
-    }),
-  },
-  {
-    key: 'eventLoop', label: 'Event Loop', icon: '↻', unit: 'ms', color: colors.dimension.latency,
-    extract: (m, h) => ({
-      value: m.eventLoop?.delay != null ? m.eventLoop.delay.toFixed(1) : (h.dimensions?.eventLoop?.value ?? '—'),
-      threshold: m.eventLoop?.threshold ?? h.dimensions?.eventLoop?.threshold,
-      status: h.dimensions?.eventLoop?.status ?? 'ok',
-    }),
-  },
-  {
-    key: 'signals', label: 'Signal Count', icon: '◈', unit: '', color: colors.glow.secondary,
-    extract: (m, h) => ({
-      value: m.signals?.currentCount ?? h.dimensions?.signals?.value ?? 0,
-      threshold: h.dimensions?.signals?.threshold,
-      status: h.dimensions?.signals?.status ?? 'ok',
-    }),
-  },
-  {
-    key: 'agents', label: 'Agent Count', icon: '⬡', unit: '', color: colors.glow.info,
-    extract: (m, h) => ({
-      value: m.agents?.active ?? h.dimensions?.agents?.value ?? 0,
-      threshold: h.dimensions?.agents?.threshold,
-      status: h.dimensions?.agents?.status ?? 'ok',
-    }),
-  },
-  {
-    key: 'errors', label: 'Error Rate', icon: '✕', unit: '/min', color: colors.glow.danger,
-    extract: (m, h) => ({
-      value: m.errors?.rate != null ? m.errors.rate.toFixed(2) : (h.dimensions?.errors?.value ?? 0),
-      threshold: m.errors?.threshold ?? h.dimensions?.errors?.threshold,
-      status: h.dimensions?.errors?.status ?? (m.errors?.rate != null && m.errors.rate > 5 ? 'critical' : 'ok'),
-    }),
-  },
-];
-
-/* ── Status helpers ──────────────────────────────────────────── */
-
-const STATUS_COLORS: Record<string, string> = {
-  ok: colors.glow.success,
-  healthy: colors.glow.success,
-  warn: colors.glow.warning,
-  degraded: colors.glow.warning,
-  critical: colors.glow.danger,
-  unhealthy: colors.glow.danger,
-};
-
-function statusColor(status: string): string {
-  return STATUS_COLORS[status] ?? colors.text.muted;
-}
-
-function healthScoreColor(score: number): string {
-  if (score >= 0.8) return colors.glow.success;
-  if (score >= 0.5) return colors.glow.warning;
-  return colors.glow.danger;
-}
-
-function formatUptime(ms?: number): string {
-  if (ms == null) return '—';
-  const seconds = Math.floor(ms / 1000);
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const parts: string[] = [];
-  if (d > 0) parts.push(`${d}d`);
-  if (h > 0) parts.push(`${h}h`);
-  if (m > 0) parts.push(`${m}m`);
-  parts.push(`${s}s`);
-  return parts.join(' ');
-}
-
-/* ── Shared styles ───────────────────────────────────────────── */
-
-const panelStyle: React.CSSProperties = {
-  background: colors.bg.card,
-  border: `1px solid ${colors.bg.border}`,
-  borderRadius: radii.md,
-  padding: spacing.lg,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: spacing.md,
-};
-
-const panelTitle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: colors.text.secondary,
-  letterSpacing: '0.04em',
-  textTransform: 'uppercase' as const,
-};
-
-/* ── Main component ──────────────────────────────────────────── */
-
-export function SystemView() {
-  // ── REST data ──
-  const { data: health, refresh: refreshHealth } = useRestApi<HealthData>(
-    systemApi.health as () => Promise<HealthData>, [], 10000,
-  );
-  const { data: metrics, refresh: refreshMetrics } = useRestApi<MetricsData>(
-    systemApi.metrics as () => Promise<MetricsData>, [], 10000,
-  );
-  const { data: modulesData } = useRestApi<ModulesData>(
-    systemApi.modules as () => Promise<ModulesData>, [], 30000,
-  );
-
-  // ── SSE real-time updates ──
-  const handleHealthSSE = useCallback((data: unknown) => {
-    // On health snapshots, refresh both health and metrics
-    if (data && typeof data === 'object') {
-      refreshHealth();
-      refreshMetrics();
-    }
-  }, [refreshHealth, refreshMetrics]);
-
-  useSSE('observe.health.snapshot', handleHealthSSE);
-  useSSE('observe.metrics.collected', useCallback(() => {
-    refreshMetrics();
-  }, [refreshMetrics]));
-
-  // ── Gauge container sizing ──
-  const gaugeRef = useRef<HTMLDivElement>(null);
-  const [gaugeSize, setGaugeSize] = useState(200);
-
-  useEffect(() => {
-    const el = gaugeRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      setGaugeSize(Math.min(width, height, 260));
-    });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  // ── Derived values ──
-  const score = health?.score ?? 0;
-  const scoreColor = healthScoreColor(score);
-  const safeHealth: HealthData = health ?? { score: 0, status: 'unknown' };
-  const safeMetrics: MetricsData = metrics ?? {};
-
-  // System info table
-  const modulesList = modulesData?.modules ?? [];
-  const sysInfo: Array<{ label: string; value: string }> = [
-    { label: 'Status', value: health?.status ?? 'loading...' },
-    { label: 'Version', value: modulesData?.version ?? '—' },
-    { label: 'Port', value: modulesData?.port != null ? String(modulesData.port) : '19100' },
-    { label: 'Uptime', value: formatUptime(health?.uptime) },
-    { label: 'Modules', value: `${modulesData?.active ?? modulesList.length} / ${modulesData?.total ?? modulesList.length}` },
-    { label: 'Start Time', value: modulesData?.startTime ? new Date(modulesData.startTime).toLocaleString() : (health?.timestamp ? new Date(health.timestamp).toLocaleString() : '—') },
-  ];
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+      0.12 + Math.sin(clock.getElapsedTime() * 0.6 + index) * 0.05;
+  });
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4 }}
-      style={{ display: 'flex', flexDirection: 'column', gap: spacing.lg, height: '100%', overflow: 'auto' }}
-    >
-      {/* ── Top: Health Score Gauge ── */}
-      <div style={{
-        ...panelStyle,
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: 200,
-        position: 'relative',
-      }}>
-        <span style={{ ...panelTitle, position: 'absolute', top: spacing.md, left: spacing.lg }}>
-          System Health
-        </span>
-        <div
-          ref={gaugeRef}
-          style={{
-            width: '100%',
-            maxWidth: 280,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            aspectRatio: '1',
-          }}
-        >
-          <GaugeRing
-            value={score}
-            label={health?.status ?? 'loading'}
-            width={gaugeSize}
-            height={gaugeSize}
-            color={scoreColor}
-          />
-        </div>
-        {/* Health status badge */}
-        <motion.div
-          key={health?.status}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            padding: '3px 12px',
-            borderRadius: radii.lg,
-            background: `${scoreColor}18`,
-            color: scoreColor,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}
-        >
-          {health?.status ?? 'loading'}
-        </motion.div>
-      </div>
+    <group position={[x, 2, z]}>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.25, 1.5, 40]} />
+        <meshBasicMaterial color="#162033" transparent opacity={0.28} side={THREE.DoubleSide} />
+      </mesh>
 
-      {/* ── Middle: 6 Health Dimension Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: spacing.md }}>
-        <AnimatePresence mode="popLayout">
-          {DIM_CARDS.map((def, i) => {
-            const extracted = def.extract(safeMetrics, safeHealth);
-            const dimColor = statusColor(extracted.status);
-            return (
-              <motion.div
-                key={def.key}
-                layout
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...transitions.spring, delay: i * 0.05 }}
-                style={{
-                  background: colors.bg.card,
-                  border: `1px solid ${dimColor}33`,
-                  borderRadius: radii.md,
-                  padding: spacing.md,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: spacing.sm,
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Glow accent line */}
-                <div style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 2,
-                  background: `linear-gradient(90deg, transparent, ${dimColor}, transparent)`,
-                  opacity: 0.6,
-                }} />
+      <mesh ref={ref} rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[1.32, 1.45, 48, 1, 0, arc]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.16}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
 
-                {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing.sm }}>
-                  <span style={{ fontSize: 16 }}>{def.icon}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: colors.text.secondary }}>{def.label}</span>
-                </div>
-
-                {/* Value */}
-                <motion.div
-                  key={String(extracted.value)}
-                  initial={{ opacity: 0.5 }}
-                  animate={{ opacity: 1 }}
-                  style={{ fontSize: 26, fontWeight: 700, color: dimColor, letterSpacing: '-0.02em' }}
-                >
-                  {extracted.value}
-                  {def.unit && <span style={{ fontSize: 13, fontWeight: 400, marginLeft: 3, color: colors.text.muted }}>{def.unit}</span>}
-                </motion.div>
-
-                {/* Threshold + Status */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 10, color: colors.text.muted }}>
-                    {extracted.threshold != null ? `Threshold: ${extracted.threshold}${def.unit}` : ''}
-                  </span>
-                  <span style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    padding: '1px 6px',
-                    borderRadius: radii.sm,
-                    background: `${dimColor}22`,
-                    color: dimColor,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                  }}>
-                    {extracted.status}
-                  </span>
-                </div>
-
-                {/* Progress bar (for % based metrics) */}
-                {(def.key === 'cpu' || def.key === 'memory') && typeof extracted.value === 'string' && !isNaN(parseFloat(extracted.value)) && (
-                  <div style={{ height: 3, background: colors.bg.hover, borderRadius: 2, overflow: 'hidden' }}>
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(parseFloat(extracted.value), 100)}%` }}
-                      transition={{ duration: 0.6, ease: 'easeOut' }}
-                      style={{
-                        height: '100%',
-                        background: dimColor,
-                        borderRadius: 2,
-                        boxShadow: `0 0 4px ${dimColor}66`,
-                      }}
-                    />
-                  </div>
-                )}
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
-
-      {/* ── Bottom: System Info Table ── */}
-      <div style={panelStyle}>
-        <span style={panelTitle}>System Information</span>
+      <Html position={[0, -0.48, 0]} center style={{ pointerEvents: 'none' }}>
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-          gap: `${spacing.xs}px ${spacing.lg}px`,
+          color,
+          fontSize: 9,
+          fontWeight: 700,
+          fontFamily: '"Segoe UI", system-ui, sans-serif',
+          textAlign: 'center',
         }}>
-          {sysInfo.map(({ label, value }) => (
-            <div key={label} style={{
+          <div>{label}</div>
+          <div style={{ fontSize: 13 }}>{Math.round(value * 100)}%</div>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+function HealthSphere({
+  score,
+  status,
+}: {
+  score: number;
+  status: string;
+}) {
+  const ref = useRef<THREE.Mesh>(null!);
+  const color = status === 'healthy' ? '#10B981' : status === 'degraded' ? '#F5A623' : '#EF4444';
+
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const scale = 1 + Math.sin(clock.getElapsedTime() * 0.45) * 0.03;
+    ref.current.scale.setScalar((1 + score * 0.45) * scale);
+    (ref.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
+      0.22 + Math.sin(clock.getElapsedTime() * 0.75) * 0.08;
+  });
+
+  return (
+    <group position={[0, 3, 0]}>
+      <mesh ref={ref}>
+        <sphereGeometry args={[1, 26, 18]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.24}
+          transparent
+          opacity={0.62}
+          roughness={0.32}
+          metalness={0.18}
+        />
+      </mesh>
+
+      <Html center style={{ pointerEvents: 'none' }}>
+        <div style={{
+          padding: '10px 12px',
+          borderRadius: 14,
+          background: 'rgba(10, 14, 28, 0.72)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          color: '#F8FAFC',
+          fontSize: 11,
+          fontWeight: 600,
+          textAlign: 'center',
+          fontFamily: '"Segoe UI", system-ui, sans-serif',
+        }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{Math.round(score * 100)}</div>
+          <div>{status.toUpperCase()}</div>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+function WorkflowBoard() {
+  const system = useWorldStore((state) => state.snapshot?.system);
+
+  if (!system) {
+    return null;
+  }
+
+  const activeStage = system.workflow.stages.find((stage) => stage.status === 'active') ?? system.workflow.stages[0];
+  const visibleStages = system.workflow.stages;
+  const evidence = system.workflow.evidence;
+
+  return (
+    <Html position={[0, 6.1, -5.2]} center style={{ pointerEvents: 'none' }}>
+      <div style={{
+        width: 360,
+        padding: 14,
+        borderRadius: 18,
+        background: 'rgba(7, 10, 20, 0.82)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 18px 48px rgba(0,0,0,0.28)',
+        color: '#E2E8F0',
+        fontFamily: '"Segoe UI", system-ui, sans-serif',
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#F8FAFC' }}>Workflow Evidence</div>
+        <div style={{ marginTop: 6, fontSize: 12, color: '#94A3B8' }}>{system.workflow.summary}</div>
+        {system.workflow.phaseSource === 'inferred' ? (
+          <div style={{ marginTop: 6, fontSize: 11, color: '#F5A623', lineHeight: 1.4 }}>
+            {system.workflow.inferenceNotice}
+          </div>
+        ) : null}
+        <div style={{ marginTop: 6, fontSize: 11, color: '#CBD5E1' }}>
+          Active focus: <strong style={{ color: '#F8FAFC' }}>{activeStage?.label ?? 'Waiting'}</strong>
+          <span style={{ color: '#94A3B8' }}> | {activeStage?.detail ?? 'No active workflow evidence yet.'}</span>
+        </div>
+
+        {evidence ? (
+          <div style={{
+            marginTop: 10,
+            display: 'grid',
+            gap: 8,
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          }}>
+            <div style={{ padding: '7px 9px', borderRadius: 12, background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase' }}>Role Evidence</div>
+              <div style={{ marginTop: 4, fontSize: 12 }}>
+                R {evidence.roleCounts?.research ?? 0} | I {evidence.roleCounts?.implement ?? 0} | V {evidence.roleCounts?.review ?? 0}
+              </div>
+            </div>
+            <div style={{ padding: '7px 9px', borderRadius: 12, background: 'rgba(255,255,255,0.03)' }}>
+              <div style={{ fontSize: 10, color: '#94A3B8', textTransform: 'uppercase' }}>Signal Evidence</div>
+              <div style={{ marginTop: 4, fontSize: 12 }}>
+                {evidence.sensing?.pheromoneTrails ?? 0} trails | {evidence.sensing?.channelCount ?? 0} channels
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{
+          marginTop: 10,
+          display: 'grid',
+          gap: 8,
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        }}>
+          {visibleStages.map((stage) => (
+            <div key={stage.id} style={{
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: `${spacing.xs}px 0`,
-              borderBottom: `1px solid ${colors.bg.border}44`,
+              gap: 10,
+              padding: '7px 9px',
+              borderRadius: 12,
+              background: stage.id === activeStage?.id ? 'rgba(92,184,255,0.12)' : 'rgba(255,255,255,0.03)',
             }}>
-              <span style={{ fontSize: 12, color: colors.text.muted }}>{label}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: colors.text.primary }}>{value}</span>
+              <span style={{ fontWeight: 600 }}>{stage.label}</span>
+              <span style={{ color: '#5CB8FF', textTransform: 'uppercase', fontSize: 11 }}>{stage.status}</span>
             </div>
           ))}
         </div>
-
-        {/* Modules list */}
-        {modulesList.length > 0 && (
-          <>
-            <span style={{ ...panelTitle, marginTop: spacing.sm }}>Modules</span>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: spacing.xs,
-              maxHeight: 240,
-              overflow: 'auto',
-            }}>
-              {modulesList.map((mod) => (
-                <div key={mod.name} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: spacing.sm,
-                  padding: `${spacing.xs}px ${spacing.sm}px`,
-                  background: colors.bg.hover,
-                  borderRadius: radii.sm,
-                  fontSize: 11,
-                }}>
-                  <div style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: mod.status === 'active' || mod.status === 'ready'
-                      ? colors.glow.success
-                      : mod.status === 'error'
-                        ? colors.glow.danger
-                        : colors.text.muted,
-                    boxShadow: mod.status === 'active' || mod.status === 'ready'
-                      ? `0 0 4px ${colors.glow.success}88`
-                      : 'none',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ color: colors.text.primary, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                    {mod.name}
-                  </span>
-                  <span style={{ color: colors.text.muted, fontSize: 10, flexShrink: 0 }}>
-                    {mod.domain}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </div>
-    </motion.div>
+    </Html>
+  );
+}
+
+export function SystemView({ active }: SystemViewProps) {
+  const snapshot = useWorldStore((state) => state.snapshot);
+
+  if (!active) return null;
+
+  const health = snapshot?.health ?? { score: 0.5, status: 'unknown', ts: 0, dimensions: {} };
+  const dimensions = health.dimensions ?? {};
+
+  return (
+    <group>
+      <HealthSphere score={health.score ?? 0.5} status={health.status ?? 'unknown'} />
+
+      {HEALTH_DIMS.map((dim, index) => (
+        <GaugeRing3D
+          key={dim.key}
+          index={index}
+          label={dim.label}
+          color={dim.color}
+          value={dimensions[dim.key]?.score ?? 0}
+        />
+      ))}
+
+      <WorkflowBoard />
+
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[10, 10.15, 64]} />
+        <meshBasicMaterial
+          color="#F97316"
+          transparent
+          opacity={0.08}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      <pointLight position={[0, 6, 0]} color="#F97316" intensity={0.4} distance={20} decay={2} />
+    </group>
   );
 }

@@ -37,9 +37,9 @@ If you discover a security vulnerability, please report it responsibly.
 
 ### Data Storage / 数据存储
 
-V9.0 uses an in-memory DomainStore with JSON snapshot persistence. Snapshot files are stored at `~/.openclaw/claw-swarm/snapshots/`. Protect snapshot directories with appropriate filesystem permissions.
+V9.2 uses an in-memory DomainStore with JSON snapshot persistence. Snapshot files are stored at `~/.openclaw/claw-swarm/snapshots/`. Protect snapshot directories with appropriate filesystem permissions.
 
-V9.0 使用内存域存储（DomainStore）配合 JSON 快照持久化。快照文件存储在 `~/.openclaw/claw-swarm/snapshots/`。请用适当的文件系统权限保护快照目录。
+V9.2 使用内存域存储（DomainStore）配合 JSON 快照持久化。快照文件存储在 `~/.openclaw/claw-swarm/snapshots/`。请用适当的文件系统权限保护快照目录。
 
 ### Dashboard / 监控面板
 
@@ -61,6 +61,33 @@ Sub-agents spawned via `swarm_run` or `swarm_spawn` run as separate OpenClaw ses
 
 ### Compliance Monitoring / 合规监控
 
-V9.0 includes a built-in compliance monitor (`src/quality/analysis/compliance-monitor.js`) that enforces four security boundaries: unsafe operations, unauthorized file access, sensitive data leakage, and scope deviation. Violations trigger a three-level escalation: prompt reminder → forced output modification → agent termination.
+V9.2 includes a built-in compliance monitor (`src/quality/analysis/compliance-monitor.js`) that enforces four security boundaries: unsafe operations, unauthorized file access, sensitive data leakage, and scope deviation. Violations trigger a three-level escalation: prompt reminder → forced output modification → agent termination.
 
-V9.0 内置合规监控器，执行四条安全边界：不安全操作、越权文件访问、敏感数据泄露和范围偏离。违规触发三级升级：提示提醒→强制修改输出→终止代理。
+V9.2 内置合规监控器，执行四条安全边界：不安全操作、越权文件访问、敏感数据泄露和范围偏离。违规触发三级升级：提示提醒→强制修改输出→终止代理。
+
+## OpenClaw Capability Unlock / OpenClaw 能力解锁
+
+Claw-Swarm includes a patcher (`scripts/swarm-patcher.js`) that modifies OpenClaw's dist files to remove security restrictions. This is **intentional and necessary** for multi-agent coordination — spawned agents require full tool access, cross-context messaging, and extended runtime limits.
+
+Claw-Swarm 包含一个补丁程序（`scripts/swarm-patcher.js`），会修改 OpenClaw 的 dist 文件以移除安全限制。这是**有意为之且必要的**——多代理协作要求派生代理拥有完整的工具访问权限、跨上下文通信能力和延长的运行时限。
+
+**What is modified / 修改内容：**
+
+- Execution approval gates → agents can run tools without manual approval
+  执行审批门控 → 代理可以在无需人工批准的情况下运行工具
+- Spawn depth/count limits → removed for deep agent hierarchies
+  孵化深度/数量限制 → 为深层代理层级移除
+- Session isolation → cross-agent communication enabled
+  会话隔离 → 启用跨代理通信
+- Runtime limits → MAX_RUN_RETRY=500, JOB_TTL=24h, READ_PAGE=256KB
+  运行时限制 → MAX_RUN_RETRY=500、JOB_TTL=24h、READ_PAGE=256KB
+
+**Safety replacement / 安全替代方案：** The ComplianceMonitor module enforces 4 red-line rule categories with 3 escalation levels, providing behavior-based safety boundaries instead of static restrictions.
+
+ComplianceMonitor 模块执行 4 类红线规则，配合 3 级升级机制，以行为安全边界替代静态限制。
+
+**Deployment guidance / 部署指南：**
+
+- Run only on trusted infrastructure you control / 仅在你控制的可信基础设施上运行
+- Do not expose the dashboard port (19100) to untrusted networks / 不要将仪表盘端口（19100）暴露给不受信任的网络
+- Review ComplianceMonitor rules before production deployment / 生产部署前审查 ComplianceMonitor 规则

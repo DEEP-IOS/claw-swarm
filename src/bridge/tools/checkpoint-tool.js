@@ -9,6 +9,33 @@ function errorResponse(error) {
   return toolResponse({ status: 'error', error: String(error) });
 }
 
+function createCollectionStore(rootStore, collection) {
+  if (!rootStore || !collection) return null;
+  return {
+    async set(key, value) {
+      rootStore.put(collection, key, value);
+      return value;
+    },
+    async get(key) {
+      return rootStore.get(collection, key);
+    },
+    async getAll() {
+      return rootStore.queryAll(collection);
+    },
+    async delete(key) {
+      return rootStore.delete(collection, key);
+    },
+    async has(key) {
+      return rootStore.has(collection, key);
+    },
+  };
+}
+
+function resolveCheckpointStore(core) {
+  return core?.orchestration?.getDomainStore?.('checkpoints')
+    || createCollectionStore(core?.store, 'checkpoints');
+}
+
 /**
  * createCheckpointTool - Factory for the swarm_checkpoint tool
  *
@@ -28,6 +55,15 @@ function errorResponse(error) {
 export function createCheckpointTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_checkpoint',
+    description: [
+      'Create or resolve checkpoints — pause points that require',
+      'user decision before the swarm continues.',
+      '',
+      'Actions:',
+      '  create — Pause execution and ask the user for a decision',
+      '  resolve — Resume execution with the user\'s answer',
+      '  list — Show all pending checkpoints',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -66,7 +102,11 @@ export function createCheckpointTool({ core, quality, sessionBridge, spawnClient
       try {
         const { action } = params;
         const scope = sessionBridge?.getCurrentScope?.() ?? 'default';
-        const store = core?.orchestration?.getDomainStore?.('checkpoints');
+        const store = resolveCheckpointStore(core);
+
+        if (!store) {
+          return errorResponse('Checkpoint storage is unavailable');
+        }
 
         switch (action) {
           case 'create': {
@@ -92,13 +132,12 @@ export function createCheckpointTool({ core, quality, sessionBridge, spawnClient
               await store.set(checkpointId, checkpoint);
             }
 
-            // Emit field signal for checkpoint creation
-            core?.field?.emit?.('checkpoint.created', {
+            core?.bus?.publish?.('checkpoint.created', {
               checkpointId,
               agentId,
               scope,
               timestamp: checkpoint.createdAt,
-            });
+            }, 'swarm-checkpoint');
 
             // Track in quality system
             quality?.recordCheckpoint?.(checkpointId, agentId, reason);
@@ -147,14 +186,13 @@ export function createCheckpointTool({ core, quality, sessionBridge, spawnClient
               await store.set(checkpointId, checkpoint);
             }
 
-            // Emit field signal for resolution
-            core?.field?.emit?.('checkpoint.resolved', {
+            core?.bus?.publish?.('checkpoint.resolved', {
               checkpointId,
               agentId: checkpoint.agentId,
               resolution,
               scope,
               timestamp: checkpoint.resolvedAt,
-            });
+            }, 'swarm-checkpoint');
 
             // Resume the paused agent with the resolution
             let resumed = false;

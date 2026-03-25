@@ -81,13 +81,16 @@ export class WorkingMemory extends ModuleBase {
     this._defaultCapacity = defaultCapacity;
     this._eventBus = eventBus;
 
+    this._unsubscribers = [];
     if (this._eventBus) {
-      this._eventBus.subscribe('agent.lifecycle.spawned', (data) => {
-        if (data?.agentId) this.create(data.agentId);
-      });
-      this._eventBus.subscribe('agent.lifecycle.ended', (data) => {
-        if (data?.agentId) this.destroy(data.agentId);
-      });
+      this._unsubscribers.push(
+        this._eventBus.on('agent.lifecycle.spawned', (data) => {
+          if (data?.agentId) this.create(data.agentId);
+        }),
+        this._eventBus.on('agent.lifecycle.ended', (data) => {
+          if (data?.agentId) this.destroy(data.agentId);
+        }),
+      );
     }
   }
 

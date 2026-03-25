@@ -20,7 +20,7 @@ Brief description of changes. / 简要描述改动。
 ## Testing / 测试
 
 - [ ] Unit tests added/updated
-- [ ] `npx vitest run` passes (1,365+ tests)
+- [ ] `npx vitest run` passes (1,697+ tests)
 - [ ] ModuleBase produces/consumes declared correctly
 
 ## Checklist

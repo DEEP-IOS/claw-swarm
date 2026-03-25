@@ -32,7 +32,7 @@ export class RoleManager extends ModuleBase {
   /** @returns {string[]} */
   static publishes() { return ['role.assigned', 'role.released', 'role.dynamic.registered'] }
   /** @returns {string[]} */
-  static subscribes() { return ['agent.completed', 'agent.failed'] }
+  static subscribes() { return ['agent.lifecycle.completed', 'agent.lifecycle.failed'] }
 
   /**
    * @param {Object} opts
@@ -50,6 +50,28 @@ export class RoleManager extends ModuleBase {
     this._assignments = new Map()
     /** @private @type {Map<string, string[]>} agentId -> ordered history of roleIds */
     this._roleHistory = new Map()
+    /** @private @type {Function[]} */
+    this._unsubscribers = []
+  }
+
+  async start() {
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('agent.lifecycle.completed', (payload) => {
+        if (payload?.agentId) this.releaseRole(payload.agentId)
+      }),
+      listen('agent.lifecycle.failed', (payload) => {
+        if (payload?.agentId) this.releaseRole(payload.agentId)
+      }),
+    )
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -185,6 +207,24 @@ export class RoleManager extends ModuleBase {
       shouldRotate: false,
       consecutive: assignment.consecutive,
       suggestion: `OK (${assignment.consecutive}/${ROTATION_THRESHOLD})`,
+    }
+  }
+
+  getStats() {
+    return {
+      activeAssignments: [...this._assignments.entries()]
+        .filter(([, assignment]) => assignment.status === 'active')
+        .map(([agentId, assignment]) => ({
+          agentId,
+          roleId: assignment.roleId,
+          assignedAt: assignment.assignedAt,
+          consecutive: assignment.consecutive,
+        })),
+      activeCount: [...this._assignments.values()].filter((assignment) => assignment.status === 'active').length,
+      totalAgentsSeen: this._roleHistory.size,
+      roleHistoryDepth: Object.fromEntries(
+        [...this._roleHistory.entries()].map(([agentId, history]) => [agentId, history.length]),
+      ),
     }
   }
 }

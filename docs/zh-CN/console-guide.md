@@ -1,177 +1,141 @@
 # 控制台指南
 
-> Claw-Swarm V9.0.0 — 实时蜂群可视化仪表盘
+> Claw-Swarm V9.2.0 实时蜂群控制台
 
-[← 返回 README](../../README.zh-CN.md) | [English](../en/console-guide.md)
+[<- 返回 README](../../README.zh-CN.md) | [English](../en/console-guide.md)
 
 ---
 
 ## 概览
 
-Claw-Swarm 控制台是一个 React 18 单页应用（SPA），提供蜂群活动的实时可视化。它由 Gateway 进程内的 DashboardService 在端口 19100 上直接提供服务，无需单独启动开发服务器。
+V9 控制台是一个 React 18 单页应用，由 `DashboardService` 在 `19100` 端口提供页面，由 `ConsoleDataBridge` 通过 WebSocket 在 `19101` 端口推送实时数据。
 
-| 属性 | 值 |
-|------|-----|
-| 框架 | React 18 + Hooks |
-| 状态管理 | Zustand（无 Redux） |
-| 源文件 | 99 个 JSX/JS/CSS 文件 |
-| 构建体积 | ~118 KB gzip（300 KB 预算内） |
-| 构建工具 | Vite |
-| 渲染方式 | Canvas（HiveRenderer）+ DOM（叠加层） |
-| 国际化 | 2 种语言（英文、中文），通过 locale 文件切换 |
-| 无障碍 | ARIA 语义结构，实时区域标注 |
+当前代码里其实有两条实时链路：
+
+- `DashboardService` 仍然保留了旧的 SSE 流：`GET /api/v9/events`
+- 现在这套 3D V9 控制台实际使用的是 `console/src/api/ws-bridge.ts`，连接 `ws://127.0.0.1:19101`
+
+所以如果你在排查当前控制台问题，优先检查 WebSocket bridge，而不是先盯着 SSE。
 
 ---
 
 ## 访问方式
 
-1. 启动 OpenClaw Gateway：
+1. 启动网关。
    ```bash
    openclaw gateway start
    ```
+2. 打开 `http://127.0.0.1:19100/v9/console`
+3. 确认浏览器已经连上 `ws://127.0.0.1:19101`
 
-2. 在浏览器中打开 `http://127.0.0.1:19100/v9/console`。
-
-3. 控制台自动通过 SSE 连接 `/events` 端点获取实时更新。首次连接时，`loadInitialData()` 从 REST 端点获取基线状态。
-
-无需运行 `npm run dev` 或 Vite 开发服务器。控制台由 DashboardService（`src/observe/dashboard/dashboard-service.js`）在 Gateway 进程内提供服务。
+这个 SPA 由 dashboard 进程直接提供，正常运行时不需要额外启动单独的前端开发服务器。
 
 ---
 
-## 六大视图
+## 实时数据契约
 
-控制台提供 6 个专业视图，每个视图作为叠加层渲染。通过侧边导航栏或命令面板（Ctrl+K）切换视图。
+控制台当前以 5 Hz 请求这些快照字段：
 
-### Hive 视图（HiveOverlay）
+- `agents`
+- `pheromones`
+- `field`
+- `tasks`
+- `system`
+- `mode`
+- `health`
+- `budget`
+- `breakers`
 
-基于 Canvas 的蜂群活动可视化。在六角网格布局中展示代理位置、信息素轨迹和任务分配。实时粒子效果表现信息素浓度。代理节点按状态着色（活跃、空闲、失败）。点击任意代理节点可打开 Inspector 面板。
-
-组件：`HiveOverlay` + `HiveRenderer`（Canvas 绘制引擎）。
-
-### Pipeline 视图（PipelineOverlay）
-
-展示 DAG 执行管线。显示完整的合同生命周期：CFP（征集提案）→ Bid（投标）→ Award（授标）→ Execution（执行）。阶段进度条指示完成状态，DAG 节点间的依赖链以有向边渲染。包含投标统计和合同完成率。
-
-### Cognition 视图（CognitionOverlay）
-
-双过程路由可视化。展示 System 1（快速直觉）与 System 2（慢速审慎）决策的分布情况。信号校准器的权重条显示各信号维度当前的影响力。质量门通过/失败率与路由置信度评分一并展示。
-
-### Ecology 视图（EcologyOverlay）
-
-Shapley 信用在代理间的分配情况。展示种群进化时间线、种群动态和信用归因公平性指标。当 Lotka-Volterra 动态启用时，捕食者-猎物种群曲线会被渲染。物种适应度评分和世代历史随时间推移持续追踪。
-
-### Network 视图（NetworkOverlay）
-
-社会网络分析（SNA）图谱。节点代表代理；边代表协作历史，按交互频率加权。展示三种中心性指标：
-
-- **度中心性** — 直接协作者数量
-- **介数中心性** — 协作路径中的桥梁角色
-- **PageRank** — 在蜂群网络中的整体影响力
-
-聚集系数和社区检测结果叠加在图谱上。
-
-### Control 视图（ControlOverlay）
-
-运维仪表盘，展示 RED 指标（速率、错误率、时延）。显示 token 预算追踪、每个工具的熔断器状态和全局调制器模式。ABC（人工蜂群）角色分布以雇佣蜂/旁观蜂/侦察蜂百分比展示。预算预测器的投射和告警阈值也在此可见。
+这部分请求逻辑在 [App.tsx](../../console/src/App.tsx)，桥接客户端在 [ws-bridge.ts](../../console/src/api/ws-bridge.ts)。
 
 ---
 
-## ModelComparisonPanel
+## 视图
 
-ModelComparisonPanel 提供 8 维雷达图，用于并排比较模型能力。雷达图的每个轴代表内置模型配置文件中的 8 个能力维度之一。从下拉菜单中选择两个或多个模型以叠加雷达图形。此面板可从 Control 视图或命令面板进入。
+当前控制台是 10 个视图，不是旧文档里的 6 个：
 
-8 个维度与 MoE 路由中内部使用的任务-模型匹配向量完全一致，让用户直观了解双过程路由器如何为不同任务类型选择模型。
+1. `Hive`
+2. `Pipeline`
+3. `Cognition`
+4. `Ecology`
+5. `Network`
+6. `Control`
+7. `Field`
+8. `System`
+9. `Adaptation`
+10. `Communication`
+
+可以通过底部 dock 或键盘 `1-0` 切换。
+
+---
+
+## 交互模型
+
+前端现在使用 3 级 `uiDepth` 交互状态：
+
+- `uiDepth = 1`：总览
+- `uiDepth = 2`：细节面板 / Inspector
+- `uiDepth = 3`：Deep Data 深层面板
+
+这只是前端交互概念，不是 V9 后端的架构域概念。
+
+状态定义在 [interaction-store.ts](../../console/src/stores/interaction-store.ts)。
+
+---
+
+## 主要面板
+
+### 左侧栏
+
+- 系统总览
+- 实时 agent 列表
+- 信息素摘要
+
+### 右侧栏
+
+- 选中 agent 时显示 Inspector
+- 未选中 agent 时显示当前视图指南和实时事件流
+
+### Deep Data Panel
+
+可从 Inspector 打开，也可在 compare 模式下进入。当前标签页包括：
+
+- `Radar`
+- `Formula`
+- `Trace`
+- `Compare`
+- `Raw`
 
 ---
 
 ## 快捷键
 
-### 命令面板（Ctrl+K）
-
-按 **Ctrl+K**（macOS 为 **Cmd+K**）打开命令面板。输入关键字过滤可用命令：
-
-- 在 6 个视图间快速切换
-- 打开设置抽屉
-- 导航到特定代理或任务
-- 触发常用操作
-
-面板支持命令名称的模糊匹配。
+- `Ctrl+K` / `Cmd+K`：命令面板
+- `1-0`：切换视图
+- `Esc`：关闭已打开的细节面板
+- `Shift+Click` 第二个 agent：进入对比
+- 在 Deep Data 面板里按 `Tab`：轮换标签页
 
 ---
 
-## 事件时间线（EventTimeline）
+## 首先应该验证什么
 
-位于控制台底部。按时间顺序显示蜂群事件流，包括代理状态变更、任务完成、合同生命周期转换、信息素沉积、物种进化事件等。系统处理 27 种不同的事件类型。
+如果控制台看起来不对，建议按这个顺序排查：
 
-- **可展开条目：** 点击任意事件查看完整 payload。
-- **回放模式：** 点击回放按钮，逐条重放历史事件。适用于调试事件序列和理解代理行为间的因果链。
-- **过滤：** 通过过滤栏按类型、代理或严重级别过滤事件。
-
----
-
-## Inspector 面板
-
-在 Hive 或 Network 视图中点击任意代理节点，打开 Inspector 面板。显示内容：
-
-- **代理概况：** ID、名称、角色、层级和当前状态。
-- **当前任务：** 活跃分配的详情，包括目标、阶段和进度。
-- **子代理：** 由该代理生成的子代理列表，附带状态和任务描述。
-- **声誉：** 5 维评分 — 能力、可靠性、协作、创新、信任。
-- **能力雷达图：** 8D 雷达图展示代理能力画像（编码、架构、测试、文档、安全、性能、沟通、领域专长）。
+1. `DashboardService` 是否真的在提供 `/v9/console`
+2. `19101` 上的 WebSocket bridge 是否可达
+3. 快照里的 `system.bridgeReady` 是否为 `true`
+4. `system.architecture.domains.active` 是否符合预期运行状态
+5. 实时 `tasks` 是否已经带有 `name`、`status`、`assigneeId` 这些规范字段
 
 ---
 
-## Toast 通知
+## 当前现实情况
 
-Toast 通知出现在控制台右上角，通过 SSE 实时推送。使用 5 个严重级别：
+这套控制台已经比旧文档更接近真实实现，但还没有完全收口：
 
-| 级别 | 颜色 | 示例 |
-|------|------|------|
-| INFO | 蓝色 | 代理注册、任务分配 |
-| WARN | 黄色 | 预算警告、熔断器 HALF_OPEN |
-| ERR | 红色 | 任务失败、生成失败、IPC 超时 |
-| OK | 绿色 | 任务完成、质量门通过 |
-| EVO | 紫色 | 物种进化、角色晋升、GEP 周期 |
+- 主包体积仍偏大，Vite 还会提示 chunk 警告
+- 仓库里还有一些历史文档仍在描述旧的 SSE-only 6 视图控制台
+- 一些更早设计文档里的后端行为预期，仍然是“目标”而不是“已被源码和运行链路证明的事实”
 
-通知自动去重，避免在短时间内用相同消息淹没界面。
-
----
-
-## SSE 连接
-
-控制台在加载时连接 `/events` SSE 端点。连接行为：
-
-- **自动重连：** 连接断开后，客户端以指数退避策略重试。页头的可视指示器显示连接状态（已连接、重连中、已断开）。
-- **初始数据加载：** 首次连接时，`loadInitialData()` 从 REST 端点获取基线状态，在实时事件开始推流前填充所有视图。
-- **批量处理：** 事件以 100ms 窗口批量到达（来自 `StateBroadcaster`），降低重渲染频率。
-- **事件映射：** `sse-client.js` 将传入事件类型映射到对应的 Zustand store 切片，处理 27 种事件类型，并提供向后兼容的别名规范化。
-
----
-
-## 设置抽屉（SettingsDrawer）
-
-通过页头齿轮图标或命令面板中的 `SET` 命令访问。可配置：
-
-- **主题：** 亮色或暗色模式。
-- **通知偏好：** 切换各严重级别的开关，设置自动消失时间。
-- **SSE 重连：** 调整重试间隔和最大重试次数。
-- **视图专属显示选项：** 切换标签、调整粒子密度（Hive）、边厚度（Network）等各视图渲染参数。
-
----
-
-## 状态管理
-
-Zustand store 管理所有前端状态。关键切片：
-
-| 切片 | 职责 |
-|------|------|
-| `agent-slice.js` | 代理列表、状态、子代理树 |
-| `metrics-slice.js` | RED 指标、投标统计、ABC 角色分布 |
-| `notification-slice.js` | Toast 队列（含去重） |
-| `bid-slice.js` | 合同与投标生命周期 |
-
-SSE 事件通过 `sse-client.js` 分发到对应切片，事件类型到 store 更新动作的映射包含跨版本兼容的别名规范化。
-
----
-
-[← 返回 README](../../README.zh-CN.md) | [English](../en/console-guide.md)
+[<- 返回 README](../../README.zh-CN.md) | [English](../en/console-guide.md)

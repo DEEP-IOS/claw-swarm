@@ -8,7 +8,7 @@
  * Produces:  DIM_TASK       (budget overrun signals)
  * Consumes:  DIM_LEARNING   (learning efficiency for cost adjustment)
  * Publishes: budget.warning, budget.exceeded, budget.report.generated
- * Subscribes: agent.completed, dag.created
+ * Subscribes: dag.created, dag.phase.completed, dag.completed
  *
  * @module orchestration/adaptation/budget-tracker
  * @version 9.0.0
@@ -56,7 +56,7 @@ export class BudgetTracker extends ModuleBase {
   static produces()    { return [DIM_TASK] }
   static consumes()    { return [DIM_LEARNING] }
   static publishes()   { return ['budget.warning', 'budget.exceeded', 'budget.report.generated'] }
-  static subscribes()  { return ['agent.completed', 'dag.created'] }
+  static subscribes()  { return ['dag.created', 'dag.phase.completed', 'dag.completed'] }
 
   /**
    * @param {Object} deps
@@ -85,6 +85,8 @@ export class BudgetTracker extends ModuleBase {
       totalSession: this._config.globalSessionBudget,
       spent:        0,
     }
+
+    this._unsubscribers = []
   }
 
   // --------------------------------------------------------------------------
@@ -133,7 +135,7 @@ export class BudgetTracker extends ModuleBase {
    * @param {number} [totalBudget] - defaults to config.defaultBudgetPerDAG
    * @param {Object} [phases] - optional phase allocation map { phaseName: fraction }
    */
-  allocateBudget(dagId, totalBudget, phases) {
+  allocateBudget(dagId, totalBudget, phases, metadata = {}) {
     const budget = totalBudget || this._config.defaultBudgetPerDAG
 
     const phaseAlloc = {}
@@ -148,7 +150,12 @@ export class BudgetTracker extends ModuleBase {
       phaseAlloc.review  = { allocated: Math.round(budget * 0.2), spent: 0 }
     }
 
-    this._budgets.set(dagId, { totalBudget: budget, spent: 0, phases: phaseAlloc })
+    this._budgets.set(dagId, {
+      totalBudget: budget,
+      spent: 0,
+      phases: phaseAlloc,
+      metadata: { ...metadata },
+    })
   }
 
   /**
@@ -223,20 +230,8 @@ export class BudgetTracker extends ModuleBase {
    * @returns {Object | null}
    */
   generateCostReport(dagId) {
-    const record = this._budgets.get(dagId)
-    if (!record) return null
-
-    const utilization = record.spent / record.totalBudget
-    const report = {
-      dagId,
-      totalBudget:  record.totalBudget,
-      spent:        record.spent,
-      remaining:    Math.max(0, record.totalBudget - record.spent),
-      utilization:  Math.round(utilization * 10000) / 10000,
-      phases:       { ...record.phases },
-      overrun:      utilization > 1.0,
-      timestamp:    Date.now(),
-    }
+    const report = this.getCostReport(dagId)
+    if (!report) return null
 
     this._bus?.publish?.('budget.report.generated', {
       dagId,
@@ -245,6 +240,30 @@ export class BudgetTracker extends ModuleBase {
     })
 
     return report
+  }
+
+  /**
+   * Get the current cost report for a DAG without emitting an event.
+   *
+   * @param {string} dagId
+   * @returns {Object | null}
+   */
+  getCostReport(dagId) {
+    const record = this._budgets.get(dagId)
+    if (!record) return null
+
+    const utilization = record.spent / record.totalBudget
+    return {
+      dagId,
+      totalBudget:  record.totalBudget,
+      spent:        record.spent,
+      remaining:    Math.max(0, record.totalBudget - record.spent),
+      utilization:  Math.round(utilization * 10000) / 10000,
+      phases:       { ...record.phases },
+      metadata:     { ...(record.metadata ?? {}) },
+      overrun:      utilization > 1.0,
+      timestamp:    Date.now(),
+    }
   }
 
   /**
@@ -288,12 +307,40 @@ export class BudgetTracker extends ModuleBase {
     }
   }
 
+  /**
+   * Get aggregate budget tracker stats for dashboards/facades.
+   * @returns {{ dagCount: number, dags: Array<Object>, global: Object }}
+   */
+  getStats() {
+    const dags = [...this._budgets.entries()].map(([dagId]) => this.getCostReport(dagId))
+      .filter(Boolean)
+    return {
+      dagCount: dags.length,
+      dags,
+      global: this.getGlobalBudget(),
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Lifecycle
   // --------------------------------------------------------------------------
 
-  async start() {}
-  async stop()  {}
+  async start() {
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('dag.created', (payload) => this._onDagCreated(payload)),
+      listen('dag.phase.completed', (payload) => this._onDagPhaseCompleted(payload)),
+      listen('dag.completed', (payload) => this._onDagCompleted(payload)),
+    )
+  }
+
+  async stop()  {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
+  }
 
   // --------------------------------------------------------------------------
   // Internal
@@ -328,5 +375,101 @@ export class BudgetTracker extends ModuleBase {
     tokens += Math.round(asciiWords.length * 1.3)
 
     return tokens
+  }
+
+  _onDagCreated(payload) {
+    const dagId = payload?.dagId
+    if (!dagId || this._budgets.has(dagId)) return
+
+    const explicitBudget = payload?.tokenBudget
+      ?? payload?.metadata?.tokenBudget
+
+    const estimated = this.estimateCost({
+      nodes: Array.isArray(payload?.nodes)
+        ? payload.nodes.map((node) => ({
+          id: node.id,
+          role: node.role,
+          model: node.model,
+          prompt: node.taskId,
+        }))
+        : [],
+    })
+
+    const tokenBudget = explicitBudget
+      ?? (estimated.totalEstimate > 0 ? Math.round(estimated.totalEstimate * 1.15) : this._config.defaultBudgetPerDAG)
+
+    this.allocateBudget(
+      dagId,
+      tokenBudget,
+      payload?.phaseBudgets ?? payload?.metadata?.phaseBudgets,
+      {
+        route: payload?.route ?? payload?.metadata?.route ?? null,
+        intent: payload?.intent ?? payload?.metadata?.intent ?? null,
+        timeBudgetMs: payload?.timeBudgetMs ?? payload?.metadata?.timeBudgetMs ?? null,
+        estimatedTokens: estimated.totalEstimate || null,
+      },
+    )
+  }
+
+  _onDagPhaseCompleted(payload) {
+    const dagId = payload?.dagId
+    const nodeId = payload?.nodeId
+    if (!dagId || !nodeId || !this._budgets.has(dagId)) return
+
+    const actualTokens = this._extractActualTokens(payload?.result)
+    if (typeof actualTokens === 'number' && actualTokens > 0) {
+      this.recordSpend(dagId, nodeId, actualTokens)
+    } else {
+      // Fallback: estimate tokens from role + model when result lacks usage data.
+      // Without this, budgets show spent=0 after real task execution.
+      const role = payload?.role || 'default'
+      const model = payload?.result?.model || 'balanced'
+      const baseCost = MODEL_COSTS[model] || MODEL_COSTS.balanced
+      const roleFactor = ROLE_COST_FACTOR[role] || 1.0
+      this.recordSpend(dagId, nodeId, Math.round(baseCost * roleFactor))
+    }
+  }
+
+  _onDagCompleted(payload) {
+    const dagId = payload?.dagId
+    if (!dagId || !this._budgets.has(dagId)) return
+    this.generateCostReport(dagId)
+  }
+
+  _extractActualTokens(result) {
+    if (!result || typeof result !== 'object') return null
+
+    const direct = [
+      result.tokensUsed,
+      result.totalTokens,
+      result.tokenCount,
+      result.usage?.total,
+      result.usage?.totalTokens,
+      result.usage?.total_tokens,
+      result.tokenUsage?.total,
+      result.tokenUsage?.totalTokens,
+      result.tokenUsage?.total_tokens,
+    ]
+
+    for (const value of direct) {
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        return value
+      }
+    }
+
+    const prompt = result.usage?.promptTokens
+      ?? result.usage?.prompt_tokens
+      ?? result.tokenUsage?.promptTokens
+      ?? result.tokenUsage?.prompt_tokens
+    const completion = result.usage?.completionTokens
+      ?? result.usage?.completion_tokens
+      ?? result.tokenUsage?.completionTokens
+      ?? result.tokenUsage?.completion_tokens
+
+    if (typeof prompt === 'number' && typeof completion === 'number') {
+      return prompt + completion
+    }
+
+    return null
   }
 }

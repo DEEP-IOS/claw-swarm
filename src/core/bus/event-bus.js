@@ -1,79 +1,143 @@
 /**
- * V9 事件总线 — 支持通配符的发布/订阅，基于 Map/Set 实现
- * Event bus with wildcard publish/subscribe support, built on plain Map/Set
+ * EventBus with wildcard subscriptions and compatibility aliases.
+ *
+ * The V9 codebase still contains a mix of canonical topics and historical
+ * topic names. This bus keeps runtime delivery compatible while preserving
+ * the original published topic inside the envelope.
+ *
  * @module core/bus/event-bus
  */
 
 const BUS_ERROR_TOPIC = 'bus.error';
 
+const EVENT_ALIAS_GROUPS = Object.freeze([
+  ['agent.lifecycle.spawned', 'agent.spawned'],
+  ['agent.lifecycle.ready', 'agent.ready'],
+  ['agent.lifecycle.active', 'agent.active'],
+  ['agent.lifecycle.completed', 'agent.completed'],
+  ['agent.lifecycle.failed', 'agent.failed'],
+  ['agent.lifecycle.ended', 'agent.end'],
+  ['memory.episode.recorded', 'memory.episodic.recorded'],
+  ['quality.audit.completed', 'auto.quality.gate'],
+  ['shapley.computed', 'auto.shapley.credit'],
+  ['pheromone.deposited', 'pheromone.emitted'],
+  ['pheromone.evaporated', 'pheromone.decayed'],
+  ['channel.message', 'channel.message.posted'],
+  ['dag.created', 'task.created', 'orchestration.dag.created'],
+  ['dag.completed', 'orchestration.dag.completed'],
+  ['dag.phase.started', 'orchestration.task.started'],
+  ['dag.phase.completed', 'task.completed', 'orchestration.task.completed'],
+  ['dag.phase.failed', 'orchestration.task.failed'],
+  ['spawn.advised', 'orchestration.spawn.advised'],
+  ['replan.triggered', 'orchestration.replan.triggered'],
+  ['deadline.warning', 'orchestration.deadline.warning'],
+  ['deadline.exceeded', 'orchestration.deadline.exceeded'],
+  ['quality.breaker.tripped', 'quality.breaker.opened'],
+]);
+
+function buildAliasMap(groups) {
+  const map = new Map();
+
+  for (const group of groups) {
+    for (const topic of group) {
+      if (!map.has(topic)) {
+        map.set(topic, new Set());
+      }
+      const aliases = map.get(topic);
+      for (const alias of group) {
+        if (alias !== topic) aliases.add(alias);
+      }
+    }
+  }
+
+  return map;
+}
+
+const EVENT_ALIAS_MAP = buildAliasMap(EVENT_ALIAS_GROUPS);
+
+function getAliasedTopics(topic) {
+  return [topic, ...(EVENT_ALIAS_MAP.get(topic) ?? [])];
+}
+
 export class EventBus {
   constructor() {
-    /** @type {Map<string, Set<Function>>} 精确匹配处理器 / Exact topic handlers */
+    /** @type {Map<string, Set<Function>>} */
     this._exactHandlers = new Map();
 
-    /** @type {Array<{ pattern: string, regex: RegExp, handlers: Set<Function> }>} 通配符处理器 / Wildcard handlers */
+    /** @type {Array<{ pattern: string, regex: RegExp, handlers: Set<Function> }>} */
     this._wildcardHandlers = [];
 
-    /** 每个主题/模式的最大监听器数 / Max listeners per topic/pattern */
+    /** @type {number} */
     this._maxListeners = 100;
   }
 
   /**
-   * 发布事件到总线 / Publish an event to the bus
-   * @param {string} topic - 事件主题 / Event topic
-   * @param {*} data - 事件数据 / Event payload
-   * @param {string} [source='unknown'] - 来源标识 / Source identifier
+   * Publish an event.
+   * Exact subscribers receive both the original topic and compatibility aliases.
+   * Wildcard subscribers only evaluate the original topic so they do not
+   * receive duplicate deliveries.
+   *
+   * @param {string} topic
+   * @param {*} data
+   * @param {string} [source='unknown']
    */
   publish(topic, data, source = 'unknown') {
     const envelope = { topic, ts: Date.now(), source, data };
 
-    // 1. 精确匹配 / Exact match handlers
-    const exactSet = this._exactHandlers.get(topic);
-    if (exactSet) {
-      for (const handler of exactSet) {
+    const deliveredExact = new Set();
+    for (const exactTopic of getAliasedTopics(topic)) {
+      const exactHandlers = this._exactHandlers.get(exactTopic);
+      if (!exactHandlers) continue;
+
+      for (const handler of exactHandlers) {
+        if (deliveredExact.has(handler)) continue;
+        deliveredExact.add(handler);
         this._safeCall(handler, envelope, topic);
       }
     }
 
-    // 2. 通配符匹配 / Wildcard match handlers
     for (const entry of this._wildcardHandlers) {
-      if (entry.regex.test(topic)) {
-        for (const handler of entry.handlers) {
-          this._safeCall(handler, envelope, topic);
-        }
+      if (!entry.regex.test(topic)) continue;
+      for (const handler of entry.handlers) {
+        this._safeCall(handler, envelope, topic);
       }
     }
   }
 
+  emit(topic, data, source = 'unknown') {
+    this.publish(topic, data, source);
+  }
+
   /**
-   * 安全调用处理器，错误不阻塞其他处理器
-   * Safely invoke handler — errors don't block other handlers
    * @private
+   * @param {Function} handler
+   * @param {{ topic: string, ts: number, source: string, data: * }} envelope
+   * @param {string} originTopic
    */
   _safeCall(handler, envelope, originTopic) {
     try {
       handler(envelope);
     } catch (err) {
-      // 避免 bus.error 自身无限递归 / Avoid infinite recursion on bus.error
-      if (originTopic !== BUS_ERROR_TOPIC) {
-        try {
-          this.publish(BUS_ERROR_TOPIC, {
-            originalTopic: originTopic,
-            error: err.message || String(err),
-            stack: err.stack,
-          }, 'event-bus');
-        } catch (_) {
-          // bus.error 处理器本身出错，静默丢弃防止无限递归
-          // bus.error handler itself failed — silently swallow to prevent infinite loop
-        }
+      if (originTopic === BUS_ERROR_TOPIC) return;
+
+      try {
+        this.publish(BUS_ERROR_TOPIC, {
+          originalTopic: originTopic,
+          error: err?.message || String(err),
+          stack: err?.stack,
+        }, 'event-bus');
+      } catch {
+        // Avoid infinite recursion if the error channel itself is broken.
       }
     }
   }
 
   /**
-   * 订阅事件主题（支持通配符 *） / Subscribe to a topic (wildcard * supported)
-   * @param {string} topic - 主题或通配符模式 / Topic or wildcard pattern
-   * @param {Function} handler - 处理函数 / Handler function
+   * Subscribe to a topic or wildcard pattern.
+   *
+   * @param {string} topic
+   * @param {Function} handler
+   * @returns {Function} unsubscribe function
    */
   subscribe(topic, handler) {
     if (typeof handler !== 'function') {
@@ -81,95 +145,156 @@ export class EventBus {
     }
 
     if (topic.includes('*')) {
-      // 通配符订阅 / Wildcard subscription
-      let entry = this._wildcardHandlers.find(e => e.pattern === topic);
+      let entry = this._wildcardHandlers.find((candidate) => candidate.pattern === topic);
       if (!entry) {
-        // 转换通配符为正则：'agent.*' → /^agent\..+$/
-        // Convert wildcard to regex: 'agent.*' → /^agent\..+$/
-        const escaped = topic.replace(/[.+?^${}()|[\]\\*]/g, '\\$&').replace(/\\\*/g, '.+');
-        entry = { pattern: topic, regex: new RegExp(`^${escaped}$`), handlers: new Set() };
+        const escaped = topic
+          .replace(/[.+?^${}()|[\]\\*]/g, '\\$&')
+          .replace(/\\\*/g, '.+');
+        entry = {
+          pattern: topic,
+          regex: new RegExp(`^${escaped}$`),
+          handlers: new Set(),
+        };
         this._wildcardHandlers.push(entry);
       }
       entry.handlers.add(handler);
       this._warnIfExceeded(topic, entry.handlers.size);
-    } else {
-      // 精确订阅 / Exact subscription
-      if (!this._exactHandlers.has(topic)) {
-        this._exactHandlers.set(topic, new Set());
-      }
-      const set = this._exactHandlers.get(topic);
-      set.add(handler);
-      this._warnIfExceeded(topic, set.size);
+      return () => this.unsubscribe(topic, handler);
     }
+
+    if (!this._exactHandlers.has(topic)) {
+      this._exactHandlers.set(topic, new Set());
+    }
+    const handlers = this._exactHandlers.get(topic);
+    handlers.add(handler);
+    this._warnIfExceeded(topic, handlers.size);
+    return () => this.unsubscribe(topic, handler);
   }
 
   /**
-   * 取消订阅 / Unsubscribe a handler from a topic
-   * @param {string} topic - 主题或通配符模式 / Topic or wildcard pattern
-   * @param {Function} handler - 处理函数 / Handler function
+   * Unsubscribe a handler from a topic or wildcard.
+   *
+   * @param {string} topic
+   * @param {Function} handler
    */
   unsubscribe(topic, handler) {
     if (topic.includes('*')) {
-      const entry = this._wildcardHandlers.find(e => e.pattern === topic);
-      if (entry) {
-        entry.handlers.delete(handler);
-        // 清理空条目 / Clean up empty entries
-        if (entry.handlers.size === 0) {
-          const idx = this._wildcardHandlers.indexOf(entry);
-          if (idx !== -1) this._wildcardHandlers.splice(idx, 1);
+      const entry = this._wildcardHandlers.find((candidate) => candidate.pattern === topic);
+      if (!entry) return;
+
+      for (const existing of [...entry.handlers]) {
+        if (existing === handler || existing?._originalHandler === handler) {
+          entry.handlers.delete(existing);
         }
       }
-    } else {
-      const set = this._exactHandlers.get(topic);
-      if (set) {
-        set.delete(handler);
-        // 清理空 Set / Clean up empty Set
-        if (set.size === 0) this._exactHandlers.delete(topic);
+
+      if (entry.handlers.size === 0) {
+        const index = this._wildcardHandlers.indexOf(entry);
+        if (index !== -1) this._wildcardHandlers.splice(index, 1);
       }
+      return;
+    }
+
+    const handlers = this._exactHandlers.get(topic);
+    if (!handlers) return;
+
+    for (const existing of [...handlers]) {
+      if (existing === handler || existing?._originalHandler === handler) {
+        handlers.delete(existing);
+      }
+    }
+
+    if (handlers.size === 0) {
+      this._exactHandlers.delete(topic);
     }
   }
 
   /**
-   * 一次性订阅 — 触发后自动取消 / Subscribe once — auto-unsubscribe after first invocation
-   * @param {string} topic - 主题或通配符模式 / Topic or wildcard pattern
-   * @param {Function} handler - 处理函数 / Handler function
+   * Node/EventEmitter-style convenience helper.
+   * The callback receives payload data instead of the full envelope.
+   *
+   * @param {string} topic
+   * @param {Function} handler
+   * @returns {Function}
+   */
+  on(topic, handler) {
+    const wrapped = (envelope) => handler(envelope?.data ?? envelope);
+    wrapped._originalHandler = handler;
+    return this.subscribe(topic, wrapped);
+  }
+
+  /**
+   * Node/EventEmitter-style convenience helper.
+   *
+   * @param {string} topic
+   * @param {Function} handler
+   */
+  off(topic, handler) {
+    this.unsubscribe(topic, handler);
+  }
+
+  /**
+   * Subscribe once.
+   *
+   * @param {string} topic
+   * @param {Function} handler
    */
   once(topic, handler) {
     const wrapper = (envelope) => {
       this.unsubscribe(topic, wrapper);
       handler(envelope);
     };
-    // 保留原始引用以便外部也可手动 unsubscribe
-    // Preserve original ref so caller can manually unsubscribe the wrapper too
     wrapper._originalHandler = handler;
     this.subscribe(topic, wrapper);
   }
 
   /**
-   * 列出所有订阅（调试用） / List all subscriptions (for debugging)
-   * @returns {Object<string, number>} { topicOrPattern: handlerCount }
+   * List active subscriptions.
+   *
+   * @returns {Object<string, number>}
    */
   listSubscriptions() {
     const result = {};
-    for (const [topic, set] of this._exactHandlers) {
-      result[topic] = set.size;
+
+    for (const [topic, handlers] of this._exactHandlers) {
+      result[topic] = handlers.size;
     }
     for (const entry of this._wildcardHandlers) {
       result[entry.pattern] = entry.handlers.size;
     }
+
     return result;
   }
 
+  stats() {
+    let totalHandlers = 0;
+    for (const handlers of this._exactHandlers.values()) {
+      totalHandlers += handlers.size;
+    }
+    for (const entry of this._wildcardHandlers) {
+      totalHandlers += entry.handlers.size;
+    }
+
+    return {
+      exactTopics: this._exactHandlers.size,
+      wildcardTopics: this._wildcardHandlers.length,
+      totalHandlers,
+      maxListeners: this._maxListeners,
+    };
+  }
+
   /**
-   * 超出最大监听器数时发出警告 / Warn when handler count exceeds _maxListeners
    * @private
+   * @param {string} topic
+   * @param {number} count
    */
   _warnIfExceeded(topic, count) {
-    if (count > this._maxListeners) {
-      console.warn(
-        `[EventBus] 主题 "${topic}" 的监听器数量 (${count}) 超过上限 (${this._maxListeners})。` +
-        ` / Listener count (${count}) for "${topic}" exceeds limit (${this._maxListeners}).`
-      );
-    }
+    if (count <= this._maxListeners) return;
+
+    console.warn(
+      `[EventBus] Listener count (${count}) for "${topic}" exceeds limit (${this._maxListeners}).`,
+    );
   }
 }
+
+export default EventBus;

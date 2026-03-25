@@ -78,7 +78,7 @@ export class CircuitBreaker extends ModuleBase {
           // Cooldown expired — transition to HALF_OPEN
           breaker.state = 'HALF_OPEN'
           breaker.successCount = 0
-          this._bus.publish('quality.breaker.half_opened', {
+          this._bus?.publish?.('quality.breaker.half_opened', {
             toolName,
             cooldownElapsed: elapsed,
             timestamp: Date.now(),
@@ -116,7 +116,7 @@ export class CircuitBreaker extends ModuleBase {
           breaker.state = 'CLOSED'
           breaker.failureCount = 0
           breaker.successCount = 0
-          this._bus.publish('quality.breaker.closed', {
+          this._bus?.publish?.('quality.breaker.closed', {
             toolName,
             timestamp: Date.now(),
           }, 'CircuitBreaker')
@@ -242,7 +242,7 @@ export class CircuitBreaker extends ModuleBase {
     breaker.successCount = 0
     this._stats.totalTrips++
 
-    this._field.emit({
+    this._field?.emit?.({
       dimension: DIM_ALARM,
       scope: toolName,
       strength: 0.8,
@@ -250,7 +250,7 @@ export class CircuitBreaker extends ModuleBase {
       metadata: { event: 'breaker_opened', failureCount: breaker.failureCount },
     })
 
-    this._bus.publish('quality.breaker.opened', {
+    this._bus?.publish?.('quality.breaker.opened', {
       toolName,
       failureCount: breaker.failureCount,
       timestamp: Date.now(),

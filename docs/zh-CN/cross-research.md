@@ -1,6 +1,6 @@
 # 14 学科交叉研究计划
 
-> Claw-Swarm V9.0.0 — 从 14 个源学科到可执行代码的完整映射
+> Claw-Swarm V9.2.0 — 从 14 个源学科到可执行代码的完整映射
 
 [← 返回 README](../../README.zh-CN.md) | [English](../en/cross-research.md)
 

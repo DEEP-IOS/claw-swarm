@@ -14,6 +14,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FIELD_DIMENSION_DESCRIPTORS } from '../../core/field/types.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -29,22 +30,12 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.map': 'application/json',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream',
 };
 
-const FIELD_DIMENSIONS = [
-  { id: 'task_load', label: 'Task Load', description: 'Current task queue pressure across the swarm' },
-  { id: 'error_rate', label: 'Error Rate', description: 'Rolling error frequency across agents' },
-  { id: 'latency', label: 'Latency', description: 'Response time distribution for agent operations' },
-  { id: 'throughput', label: 'Throughput', description: 'Messages processed per unit time' },
-  { id: 'cost', label: 'Cost', description: 'Token and API cost accumulation rate' },
-  { id: 'quality', label: 'Quality', description: 'Output quality scores from audit feedback' },
-  { id: 'coherence', label: 'Coherence', description: 'Inter-agent goal alignment measurement' },
-  { id: 'trust', label: 'Trust', description: 'Peer trust and reputation signals' },
-  { id: 'novelty', label: 'Novelty', description: 'Divergence from established solution patterns' },
-  { id: 'urgency', label: 'Urgency', description: 'Time-sensitivity pressure on pending work' },
-  { id: 'complexity', label: 'Complexity', description: 'Estimated cognitive load of current tasks' },
-  { id: 'resource_pressure', label: 'Resource Pressure', description: 'Memory, context window, and budget saturation' },
-];
+const FIELD_DIMENSIONS = FIELD_DIMENSION_DESCRIPTORS;
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -531,11 +522,29 @@ export class DashboardService {
       this._domains.orchestration?.getModuleInfo?.(params.moduleId) ?? {},
     );
 
-    // Total V9 endpoints: 57
-    //   In registry (55):
+    // =======================================================================
+    // Console 3D endpoints (3 endpoints)
+    // =======================================================================
+    this._route('GET', '/api/v9/soul/:agentId', (params) =>
+      this._domains.intelligence?.soulDesigner?.loadSoulInstance?.(params.agentId)
+        ? { soul: this._domains.intelligence.soulDesigner.loadSoulInstance(params.agentId), archetype: this._domains.intelligence.soulDesigner.getAgentArchetype?.(params.agentId) ?? 'pragmatic' }
+        : {},
+    );
+
+    this._route('GET', '/api/v9/abc-roles', () =>
+      this._domains.intelligence?.abcClassifier?.getAllRoles?.() ?? {},
+    );
+
+    this._route('GET', '/api/v9/capabilities/:agentId', (params) =>
+      this._domains.intelligence?.capabilityEngine?.getVector8D?.(params.agentId) ?? {},
+    );
+
+    // Total V9 endpoints: 60
+    //   In registry (58):
     //     Field(4) + Agents(4) + Orchestration(4) + Social(5) + Adaptation(9)
     //     + Quality(5) + Communication(3) + Governance(2) + Traces(2)
     //     + System(5) + UserFacing(3) + Memory/Identity(3) + Bridge(2) + Topology(4)
+    //     + Console3D(3)
     //   Outside registry (2): SSE(/api/v9/events) + Console static(/v9/console/*)
 
     // =======================================================================

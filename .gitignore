@@ -63,3 +63,14 @@ internal/
 
 # ── Internal research / 内部研究文档 ──────────────────────────
 docs/zh-CN/research-application-*.md
+
+# ── Dev-only (not open-sourced) / 仅开发用 ────────────────────
+tests/
+tmp/
+.claude/
+tsconfig.tsbuildinfo
+console/tsconfig.tsbuildinfo
+vitest.config.js
+HANDOFF-*.md
+AGENTS.md
+scripts/verify-pipeline.js

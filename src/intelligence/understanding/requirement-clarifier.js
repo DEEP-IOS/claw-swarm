@@ -84,7 +84,7 @@ class RequirementClarifier extends ModuleBase {
     // Sort by impact: high > medium > low
     questions.sort((a, b) => (IMPACT_ORDER[a.impact] ?? 2) - (IMPACT_ORDER[b.impact] ?? 2))
 
-    this._bus.publish('clarification.generated', { intent: primary, questions })
+    this._bus?.publish('clarification.generated', { intent: primary, questions })
     return questions
   }
 

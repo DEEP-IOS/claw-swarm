@@ -1,6 +1,6 @@
 # 情绪智能
 
-> Claw-Swarm V9.0.0 — 6 维情绪感知层
+> Claw-Swarm V9.2.0 — 6 维情绪感知层
 
 [← 返回 README](../../README.zh-CN.md) | [English](../en/emotional-intelligence.md)
 

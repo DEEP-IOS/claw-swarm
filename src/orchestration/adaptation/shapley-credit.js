@@ -234,12 +234,60 @@ export class ShapleyCredit extends ModuleBase {
   }
 
   /**
+   * Get a dashboard-friendly summary of all stored Shapley credits.
+   * @returns {{ dagCount: number, leaderboard: Array<{agentId: string, totalValue: number}>, dags: Object<string, Object<string, number>> }}
+   */
+  getAllCredits() {
+    const dags = {}
+    for (const [dagId, values] of this._dagCredits.entries()) {
+      dags[dagId] = Object.fromEntries(values)
+    }
+    return {
+      dagCount: this._dagCredits.size,
+      leaderboard: this.getLeaderboard(50),
+      dags,
+    }
+  }
+
+  /**
    * Get Shapley credit allocation for a specific DAG.
    * @param {string} dagId
    * @returns {Map<string, number>|undefined}
    */
   getDAGCredits(dagId) {
     return this._dagCredits.get(dagId)
+  }
+
+  /**
+   * Record a single agent contribution for a DAG node.
+   * Convenience method called by cross-wiring in index-v9.js.
+   * Accumulates contributions per DAG; actual Shapley computation
+   * happens on dag.completed via the bus listener.
+   *
+   * @param {{ dagId: string, nodeId: string, agentId: string, success: boolean }} contribution
+   */
+  recordContribution({ dagId, nodeId, agentId, success }) {
+    if (!dagId || !agentId) return
+
+    if (!this._pendingContributions) {
+      /** @private @type {Map<string, Map<string, {quality: number, role?: string}>>} */
+      this._pendingContributions = new Map()
+    }
+
+    if (!this._pendingContributions.has(dagId)) {
+      this._pendingContributions.set(dagId, new Map())
+    }
+
+    const dagContribs = this._pendingContributions.get(dagId)
+    const existing = dagContribs.get(agentId)
+    const quality = success ? 1.0 : 0.0
+
+    if (existing) {
+      // Average the quality across multiple contributions from the same agent
+      existing.quality = (existing.quality + quality) / 2
+    } else {
+      dagContribs.set(agentId, { quality })
+    }
   }
 }
 

@@ -55,6 +55,13 @@ export class ContractNet extends ModuleBase {
     /** @private */ this._field = field
     /** @private */ this._bus = bus
     /** @private */ this._capabilityEngine = capabilityEngine ?? null
+    /** @private */
+    this._stats = {
+      cfpIssued: 0,
+      bidsEvaluated: 0,
+      awards: 0,
+      lastWinner: null,
+    }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -74,6 +81,7 @@ export class ContractNet extends ModuleBase {
     if (typeof this._bus?.publish === 'function') {
       this._bus.publish('contract.cfp.issued', { task, candidateRoles, ts: Date.now() })
     }
+    this._stats.cfpIssued++
 
     return candidateRoles.map((roleId) => ({
       roleId,
@@ -147,8 +155,21 @@ export class ContractNet extends ModuleBase {
       this._bus.publish('contract.bid.evaluated', { bids, winner: bestBid, score: bestScore })
       this._bus.publish('contract.awarded', { winner: bestBid, score: bestScore, reason: bestReason })
     }
+    this._stats.bidsEvaluated += bids.length
+    this._stats.awards++
+    this._stats.lastWinner = bestBid ? {
+      roleId: bestBid.roleId,
+      score: bestScore,
+      reason: bestReason,
+    } : null
 
     return { winner: bestBid, score: bestScore, reason: bestReason }
+  }
+
+  getStats() {
+    return {
+      ...this._stats,
+    }
   }
 
   // ════════════════════════════════════════════════════════════════

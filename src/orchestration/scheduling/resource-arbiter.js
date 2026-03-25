@@ -334,6 +334,33 @@ export class ResourceArbiter extends ModuleBase {
       this._bus.publish(topic, { agentId, filePath, mode, ts: Date.now() })
     }
   }
+
+  getStats() {
+    return {
+      activeLocks: this._locks.size,
+      waitingRequests: [...this._locks.values()].reduce((sum, entry) => sum + entry.waitQueue.length, 0),
+      locks: [...this._locks.entries()].map(([lockKey, entry]) => ({
+        lockKey,
+        mode: entry.mode,
+        holders: [...entry.holders],
+        waiters: entry.waitQueue.length,
+        heldMs: Date.now() - entry.acquiredAt,
+      })),
+      rateLimits: Object.fromEntries(
+        [...this._rateLimits.entries()].map(([provider, entry]) => [provider, {
+          tokens: entry.tokens,
+          maxTokens: entry.maxTokens,
+          refillRate: entry.refillRate,
+        }]),
+      ),
+      toolConcurrency: Object.fromEntries(
+        [...this._toolGates.entries()].map(([toolName, gate]) => [toolName, {
+          current: gate.current,
+          maxConcurrent: gate.maxConcurrent,
+        }]),
+      ),
+    }
+  }
 }
 
 export default ResourceArbiter

@@ -38,7 +38,7 @@ export class UserProfile extends ModuleBase {
     this._eventBus = eventBus;
 
     if (this._eventBus) {
-      this._eventBus.subscribe('agent.lifecycle.completed', (data) => {
+      this._unsubscribe = this._eventBus.on('agent.lifecycle.completed', (data) => {
         this._onAgentCompleted(data);
       });
     }

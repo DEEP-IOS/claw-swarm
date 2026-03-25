@@ -49,6 +49,7 @@ export class BudgetForecaster extends ModuleBase {
 
     /** @type {Array<{ taskType: string, complexity: number, actualCost: number, timestamp: number }>} */
     this._history = []
+    this._unsubscribers = []
   }
 
   // --------------------------------------------------------------------------
@@ -215,9 +216,18 @@ export class BudgetForecaster extends ModuleBase {
 
   async start() {
     await this.restore()
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('budget.report.generated', (payload) => this._onBudgetReportGenerated(payload)),
+    )
   }
 
   async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
     await this.persist()
   }
 
@@ -266,5 +276,21 @@ export class BudgetForecaster extends ModuleBase {
     const b = (sumY - a * sumX) / n
 
     return { a, b }
+  }
+
+  _onBudgetReportGenerated(payload) {
+    const report = payload?.report ?? payload
+    if (!report) return
+
+    const taskType = report?.metadata?.intent?.primary
+      ?? report?.metadata?.route?.route?.name
+      ?? 'workflow'
+    const complexity = report?.metadata?.route?.complexity
+      ?? report?.metadata?.complexity
+      ?? 0.5
+    const actualCost = report?.spent
+
+    if (typeof actualCost !== 'number' || !Number.isFinite(actualCost)) return
+    this.recordActual(taskType, Math.max(0, Math.min(1, complexity)), actualCost)
   }
 }

@@ -225,6 +225,46 @@ export class CapabilityEngine extends ModuleBase {
       .map(([domain, score]) => ({ domain, score }))
       .sort((a, b) => a.score - b.score)
   }
+  /**
+   * Record a task execution for a role, boosting the role's skill score.
+   * Called by cross-wiring in index-v9.js on spawn.native.started events.
+   * @param {string} roleId - The role that executed the task
+   * @param {string} taskId - The task identifier
+   * @returns {boolean}
+   */
+  recordTask(roleId, taskId) {
+    return this.updateSkill(roleId, taskId, 0.7)
+  }
+
+  /**
+   * Get a standardized 8D capability vector for 3D Console visualization
+   * @param {string} agentId
+   * @returns {Object} { coding, architecture, testing, documentation, security, performance, communication, domain }
+   */
+  getVector8D(agentId) {
+    const profile = this._profiles.get(agentId)
+    if (!profile) {
+      return { coding: 0.5, architecture: 0.5, testing: 0.5, documentation: 0.5, security: 0.5, performance: 0.5, communication: 0.5, domain: 0.5 }
+    }
+
+    const get = (keys) => {
+      for (const k of keys) {
+        if (profile.has(k)) return profile.get(k)
+      }
+      return 0.5
+    }
+
+    return {
+      coding: get(['javascript', 'typescript', 'python', 'coding']),
+      architecture: get(['architecture', 'design-patterns', 'system-design']),
+      testing: get(['testing', 'quality-assurance', 'ci-cd']),
+      documentation: get(['documentation', 'writing', 'markdown']),
+      security: get(['security', 'authentication', 'encryption']),
+      performance: get(['performance', 'optimization', 'profiling']),
+      communication: get(['communication', 'writing', 'documentation']),
+      domain: get(['domain', 'backend', 'frontend']),
+    }
+  }
 }
 
 export default CapabilityEngine

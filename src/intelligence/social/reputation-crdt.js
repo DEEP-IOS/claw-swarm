@@ -7,7 +7,10 @@ import { DIM_REPUTATION } from '../../core/field/types.js';
 
 class ReputationCRDT extends ModuleBase {
   constructor({ field, bus, store }) {
-    super({ field, bus, store });
+    super();
+    this.field = field;
+    this.bus = bus;
+    this.store = store;
     this._counters = new Map(); // agentId -> {positive, negative}
   }
 
@@ -74,6 +77,14 @@ class ReputationCRDT extends ModuleBase {
       ratio: total === 0 ? 0.5 : positive / total,
       lastUpdated: Date.now()
     };
+  }
+
+  getAll() {
+    const scores = {};
+    for (const agentId of this._counters.keys()) {
+      scores[agentId] = this.getScore(agentId);
+    }
+    return scores;
   }
 
   getTop(n, minTotal = 3) {

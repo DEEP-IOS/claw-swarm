@@ -55,17 +55,27 @@ export class FailureVaccination extends ModuleBase {
 
   async start() {
     this._onFailureClassified = (envelope) => {
-      const ctx = envelope?.data
-      if (ctx && ctx.error) {
-        this.learn(ctx).catch(() => { /* swallow async errors */ })
+      const data = envelope?.data
+      if (!data) return
+      // The quality.failure.classified event wraps the error inside failureContext
+      const ctx = {
+        error: data.failureContext?.error || data.error || '',
+        taskDescription: data.failureContext?.taskDescription || data.taskDescription || '',
+        severity: data.severity,
+        preventionPrompt: data.suggestedStrategy
+          ? `Recovery strategy: ${data.suggestedStrategy}. Avoid repeating: ${data.class}`
+          : undefined,
+      }
+      if (ctx.error) {
+        try { this.learn(ctx) } catch { /* swallow errors */ }
       }
     }
-    this._bus.subscribe('quality.failure.classified', this._onFailureClassified)
+    this._bus?.subscribe?.('quality.failure.classified', this._onFailureClassified)
   }
 
   async stop() {
     if (this._onFailureClassified) {
-      this._bus.unsubscribe('quality.failure.classified', this._onFailureClassified)
+      this._bus?.unsubscribe?.('quality.failure.classified', this._onFailureClassified)
       this._onFailureClassified = null
     }
   }
@@ -96,7 +106,7 @@ export class FailureVaccination extends ModuleBase {
     matched.sort((a, b) => this._severityOrder(b.severity) - this._severityOrder(a.severity))
 
     if (matched.length > 0) {
-      this._field.emit({
+      this._field?.emit?.({
         dimension: DIM_KNOWLEDGE,
         scope: 'vaccination',
         strength: 0.7,
@@ -108,7 +118,7 @@ export class FailureVaccination extends ModuleBase {
         },
       })
 
-      this._bus.publish('quality.vaccination.matched', {
+      this._bus?.publish?.('quality.vaccination.matched', {
         taskDescription,
         matchedCount: matched.length,
         antigens: matched.map(a => ({ id: a.id, pattern: a.pattern, severity: a.severity })),

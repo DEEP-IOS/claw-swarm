@@ -120,6 +120,8 @@ export class DAGEngine extends ModuleBase {
     this._deadLetterQueue = [];
     /** @type {Map<string, number>} nodeId -> 上次窃取时间 / Last steal timestamp */
     this._cooldowns = new Map();
+    /** @type {Function[]} */
+    this._unsubscribers = [];
   }
 
   // --------------------------------------------------------------------------
@@ -136,7 +138,10 @@ export class DAGEngine extends ModuleBase {
   static publishes() {
     return [
       'dag.created',
+      'dag.state.changed',
+      'dag.node.status',
       'dag.phase.ready',
+      'dag.phase.started',
       'dag.phase.completed',
       'dag.phase.failed',
       'dag.completed',
@@ -146,7 +151,23 @@ export class DAGEngine extends ModuleBase {
 
   /** @returns {string[]} 订阅的事件主题 / Event topics subscribed */
   static subscribes() {
-    return ['agent.completed', 'agent.failed'];
+    return ['agent.lifecycle.completed', 'agent.lifecycle.failed'];
+  }
+
+  async start() {
+    const listen = this._bus?.on?.bind(this._bus);
+    if (!listen) return;
+
+    this._unsubscribers.push(
+      listen('agent.lifecycle.completed', (payload) => this._onAgentCompleted(payload)),
+      listen('agent.lifecycle.failed', (payload) => this._onAgentFailed(payload)),
+    );
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.();
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -164,7 +185,7 @@ export class DAGEngine extends ModuleBase {
    * @throws {Error} 如果检测到循环依赖 / If cyclic dependency is detected
    * @throws {Error} 如果 dagId 已存在 / If dagId already exists
    */
-  createDAG(dagId, nodes) {
+  createDAG(dagId, nodes, metadata = {}) {
     if (this._dags.has(dagId)) {
       throw new Error(`DAG "${dagId}" already exists`);
     }
@@ -199,6 +220,7 @@ export class DAGEngine extends ModuleBase {
       nodes: nodeMap,
       createdAt: Date.now(),
       status: 'active',
+      metadata: { ...metadata },
     };
     this._dags.set(dagId, dag);
 
@@ -211,7 +233,25 @@ export class DAGEngine extends ModuleBase {
     });
 
     // 发布 dag.created 事件 / Publish dag.created event
-    this._bus?.emit?.('dag.created', { dagId, nodeCount: nodes.length });
+    this._bus?.emit?.('dag.created', {
+      dagId,
+      createdAt: dag.createdAt,
+      nodeCount: nodes.length,
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        taskId: node.taskId,
+        role: node.role,
+        dependsOn: node.dependsOn ?? [],
+        agentId: node.assignedTo ?? null,
+      })),
+      metadata: { ...dag.metadata },
+      timeBudgetMs: dag.metadata.timeBudgetMs ?? null,
+      tokenBudget: dag.metadata.tokenBudget ?? null,
+      phaseBudgets: dag.metadata.phaseBudgets ?? null,
+      route: dag.metadata.route ?? null,
+      intent: dag.metadata.intent ?? null,
+    });
+    this._bus?.emit?.('dag.state.changed', { dagId, state: dag.status });
 
     // 检查并发布初始就绪节点 / Check and publish initially ready nodes
     const readyNodes = this.getReady(dagId);
@@ -252,19 +292,46 @@ export class DAGEngine extends ModuleBase {
   }
 
   /**
-   * 分配节点给 agent -- PENDING -> ASSIGNED
-   * Assign a node to an agent: PENDING -> ASSIGNED
+   * 标记节点为正在创建 agent -- PENDING -> SPAWNING
+   * Mark a node as spawning: PENDING -> SPAWNING.
+   * Call this before assignNode() when a spawn process is initiated
+   * but the agent has not yet been fully created.
+   *
+   * @param {string} dagId  - DAG 标识 / DAG identifier
+   * @param {string} nodeId - 节点标识 / Node identifier
+   * @throws {Error} 如果节点状态不是 PENDING / If node is not PENDING
+   */
+  spawnNode(dagId, nodeId) {
+    const node = this._getNode(dagId, nodeId);
+    if (node.state !== NODE_STATE.PENDING) {
+      throw new Error(
+        `Cannot spawn node "${nodeId}": expected PENDING, got ${node.state}`
+      );
+    }
+    node.state = NODE_STATE.SPAWNING;
+
+    this._bus?.emit?.('dag.node.status', {
+      dagId,
+      nodeId,
+      status: 'spawning',
+      role: node.role,
+    });
+  }
+
+  /**
+   * 分配节点给 agent -- PENDING|SPAWNING -> ASSIGNED
+   * Assign a node to an agent: PENDING|SPAWNING -> ASSIGNED
    *
    * @param {string} dagId   - DAG 标识 / DAG identifier
    * @param {string} nodeId  - 节点标识 / Node identifier
    * @param {string} agentId - Agent 标识 / Agent identifier
-   * @throws {Error} 如果节点状态不是 PENDING / If node is not PENDING
+   * @throws {Error} 如果节点状态不是 PENDING 或 SPAWNING / If node is not PENDING or SPAWNING
    */
   assignNode(dagId, nodeId, agentId) {
     const node = this._getNode(dagId, nodeId);
-    if (node.state !== NODE_STATE.PENDING) {
+    if (node.state !== NODE_STATE.PENDING && node.state !== NODE_STATE.SPAWNING) {
       throw new Error(
-        `Cannot assign node "${nodeId}": expected PENDING, got ${node.state}`
+        `Cannot assign node "${nodeId}": expected PENDING or SPAWNING, got ${node.state}`
       );
     }
     node.state = NODE_STATE.ASSIGNED;
@@ -288,6 +355,23 @@ export class DAGEngine extends ModuleBase {
       );
     }
     node.state = NODE_STATE.EXECUTING;
+    node.startedAt = Date.now();
+
+    this._bus?.emit?.('dag.phase.started', {
+      dagId,
+      nodeId,
+      role: node.role,
+      agentId: node.assignedTo,
+    });
+
+    // Publish dag.node.status so cross-wiring progress tracker fires
+    this._bus?.emit?.('dag.node.status', {
+      dagId,
+      nodeId,
+      status: 'executing',
+      agentId: node.assignedTo,
+      role: node.role,
+    });
   }
 
   /**
@@ -301,6 +385,11 @@ export class DAGEngine extends ModuleBase {
    */
   completeNode(dagId, nodeId, result) {
     const node = this._getNode(dagId, nodeId);
+    // Idempotent: if already completed/dead, silently return false to prevent
+    // race conditions from multiple callers (SpawnManager + ContextEngine)
+    if (node.state === NODE_STATE.COMPLETED || node.state === NODE_STATE.DEAD_LETTER) {
+      return false;
+    }
     if (node.state !== NODE_STATE.EXECUTING) {
       throw new Error(
         `Cannot complete node "${nodeId}": expected EXECUTING, got ${node.state}`
@@ -309,9 +398,28 @@ export class DAGEngine extends ModuleBase {
     node.state = NODE_STATE.COMPLETED;
     node.result = result;
     node.completedAt = Date.now();
+    const durationMs = node.startedAt ? Math.max(0, node.completedAt - node.startedAt) : 0;
 
     // 发布节点完成事件 / Publish node completion event
-    this._bus?.emit?.('dag.phase.completed', { dagId, nodeId, result });
+    this._bus?.emit?.('dag.phase.completed', {
+      dagId,
+      nodeId,
+      role: node.role,
+      agentId: node.assignedTo,
+      result,
+      durationMs,
+    });
+
+    // Publish dag.node.status so cross-wiring progress percentage push fires.
+    // Previously only HookAdapter published this topic (hooks=0 in production).
+    this._bus?.emit?.('dag.node.status', {
+      dagId,
+      nodeId,
+      status: 'completed',
+      agentId: node.assignedTo,
+      role: node.role,
+      durationMs,
+    });
 
     // 发射 DIM_COORDINATION 信号 / Emit coordination signal
     this._field?.emit?.({
@@ -337,7 +445,30 @@ export class DAGEngine extends ModuleBase {
     );
     if (allCompleted) {
       dag.status = 'completed';
-      this._bus?.emit?.('dag.completed', { dagId });
+      const status = this.getDAGStatus(dagId);
+      this._bus?.emit?.('dag.completed', {
+        dagId,
+        success: status.deadLetter === 0,
+        status,
+        createdAt: dag.createdAt,
+        completedAt: Date.now(),
+        metadata: { ...(dag.metadata ?? {}) },
+        nodes: [...dag.nodes.values()].map((entry) => ({
+          id: entry.id,
+          taskId: entry.taskId,
+          role: entry.role,
+          state: entry.state,
+          agentId: entry.assignedTo ?? null,
+          dependsOn: entry.dependsOn ?? [],
+          startedAt: entry.startedAt ?? null,
+          completedAt: entry.completedAt ?? null,
+          result: entry.result ?? null,
+        })),
+        sessionHistory: [...dag.nodes.values()].flatMap((entry) =>
+          Array.isArray(entry.result?.sessionHistory) ? entry.result.sessionHistory : []
+        ),
+      });
+      this._bus?.emit?.('dag.state.changed', { dagId, state: dag.status });
       this._field?.emit?.({
         dimension: DIM_TASK,
         scope:     dagId,
@@ -357,6 +488,10 @@ export class DAGEngine extends ModuleBase {
    */
   failNode(dagId, nodeId, error) {
     const node = this._getNode(dagId, nodeId);
+    // Idempotent: if already in a terminal state, silently return false
+    if (node.state === NODE_STATE.COMPLETED || node.state === NODE_STATE.DEAD_LETTER) {
+      return false;
+    }
     const errorMsg = error instanceof Error ? error.message : String(error);
 
     node.retries += 1;
@@ -365,6 +500,19 @@ export class DAGEngine extends ModuleBase {
     this._bus?.emit?.('dag.phase.failed', {
       dagId,
       nodeId,
+      role: node.role,
+      agentId: node.assignedTo,
+      error: errorMsg,
+      retries: node.retries,
+    });
+
+    // Publish dag.node.status so cross-wiring progress tracker fires
+    this._bus?.emit?.('dag.node.status', {
+      dagId,
+      nodeId,
+      status: 'failed',
+      agentId: node.assignedTo,
+      role: node.role,
       error: errorMsg,
       retries: node.retries,
     });
@@ -393,6 +541,11 @@ export class DAGEngine extends ModuleBase {
    * 工作窃取 -- 空闲 agent 窃取等待最久的 PENDING 节点
    * Work stealing: an idle agent steals the longest-waiting PENDING node
    * that has passed its cooldown period.
+   *
+   * TODO(v9.3): Wire into NativeSpawnManager — when an idle agent has no
+   * assigned work, call stealWork() to reassign pending nodes from busy
+   * agents. Trigger: listen for 'agent.lifecycle.idle' or poll during
+   * spawnReadyNodes() when no ready nodes exist but PENDING nodes remain.
    *
    * @param {string} dagId       - DAG 标识 / DAG identifier
    * @param {string} idleAgentId - 空闲 agent 的标识 / Idle agent identifier
@@ -430,6 +583,11 @@ export class DAGEngine extends ModuleBase {
    * 竞标分配 -- 接收多个 bid, 选最优者分配节点
    * Auction a node: receive bids, select the best, and assign.
    *
+   * TODO(v9.3): Wire into ContractNet protocol — after ContractNet.evaluateBids()
+   * selects a winner, call auctionNode() to formalize the assignment in the DAG.
+   * Integration point: ContractNet.evaluateBids() result feeds into
+   * dagEngine.auctionNode(dagId, nodeId, bids) for state transition.
+   *
    * @param {string} dagId  - DAG 标识 / DAG identifier
    * @param {string} nodeId - 节点标识 / Node identifier
    * @param {Array<{agentId: string, score: number, reason?: string}>} bids - 竞标列表 / List of bids
@@ -451,7 +609,7 @@ export class DAGEngine extends ModuleBase {
       bid.score > best.score ? bid : best
     );
 
-    this.assignNode(dagId, winner.agentId, winner.agentId);
+    this.assignNode(dagId, nodeId, winner.agentId);
     return { agentId: winner.agentId, score: winner.score };
   }
 
@@ -489,6 +647,62 @@ export class DAGEngine extends ModuleBase {
     }
 
     return counts;
+  }
+
+  /**
+   * 获取 DAG 执行进度百分比和可视化摘要
+   * Get DAG progress percentage and visual summary
+   *
+   * @param {string} dagId - DAG 标识
+   * @returns {{ percent: number, bar: string, summary: string, counts: Object, nodes: Array }}
+   */
+  getProgress(dagId) {
+    const dag = this._getDAG(dagId);
+    const counts = this.getDAGStatus(dagId);
+    const total = counts.total || 1;
+    const doneCount = counts.completed + counts.failed + counts.deadLetter;
+    const percent = Math.round((doneCount / total) * 100);
+
+    // 进度条可视化
+    const barLen = 20;
+    const filled = Math.round((percent / 100) * barLen);
+    const bar = '█'.repeat(filled) + '░'.repeat(barLen - filled) + ` ${percent}%`;
+
+    // 节点状态列表
+    const nodeList = [];
+    for (const node of dag.nodes.values()) {
+      const stateIcon = {
+        PENDING: '⬜', SPAWNING: '🔄', ASSIGNED: '📋',
+        EXECUTING: '⚙️', COMPLETED: '✅', FAILED: '❌', DEAD_LETTER: '💀',
+      };
+      nodeList.push({
+        id: node.id,
+        task: node.taskId,
+        role: node.role,
+        state: node.state,
+        icon: stateIcon[node.state] || '?',
+        assignedTo: node.assignedTo || null,
+        durationMs: node.completedAt && node.startedAt ? node.completedAt - node.startedAt : null,
+      });
+    }
+
+    // 文本摘要
+    const lines = [
+      `进度: ${bar}`,
+      `总计: ${total} | 完成: ${counts.completed} | 执行中: ${counts.executing} | 等待: ${counts.pending} | 失败: ${counts.failed}`,
+    ];
+    for (const n of nodeList) {
+      const dur = n.durationMs ? ` (${Math.round(n.durationMs / 1000)}s)` : '';
+      lines.push(`  ${n.icon} ${n.id}: ${n.task || n.role}${dur}`);
+    }
+
+    return {
+      percent,
+      bar,
+      summary: lines.join('\n'),
+      counts,
+      nodes: nodeList,
+    };
   }
 
   /**
@@ -537,6 +751,46 @@ export class DAGEngine extends ModuleBase {
     }
 
     dag.status = 'cancelled';
+    this._bus?.emit?.('dag.state.changed', { dagId, state: dag.status });
+  }
+
+  _onAgentCompleted(payload) {
+    const assignment = this._findNodeByAgent(payload?.agentId);
+    if (!assignment) return;
+
+    const { dagId, node } = assignment;
+    if (node.state !== NODE_STATE.EXECUTING && node.state !== NODE_STATE.ASSIGNED) {
+      return;
+    }
+    if (node.state === NODE_STATE.ASSIGNED) {
+      this.startNode(dagId, node.id);
+    }
+    this.completeNode(dagId, node.id, payload?.result ?? payload);
+  }
+
+  _onAgentFailed(payload) {
+    const assignment = this._findNodeByAgent(payload?.agentId);
+    if (!assignment) return;
+
+    const { dagId, node } = assignment;
+    if (node.state !== NODE_STATE.EXECUTING && node.state !== NODE_STATE.ASSIGNED) {
+      return;
+    }
+    this.failNode(dagId, node.id, payload?.error ?? 'agent_failed');
+  }
+
+  _findNodeByAgent(agentId) {
+    if (!agentId) return null;
+
+    for (const [dagId, dag] of this._dags.entries()) {
+      for (const node of dag.nodes.values()) {
+        if (node.assignedTo === agentId) {
+          return { dagId, dag, node };
+        }
+      }
+    }
+
+    return null;
   }
 
   // --------------------------------------------------------------------------

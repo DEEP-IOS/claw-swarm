@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-9.0.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1365_passing-green" alt="Tests">
+  <img src="https://img.shields.io/badge/version-9.2.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1697_passing-green" alt="Tests">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License">
   <img src="https://img.shields.io/badge/Node.js-≥22-green" alt="Node">
   <img src="https://img.shields.io/badge/domains-7-orange" alt="Domains">
@@ -41,9 +41,9 @@ This led to a 14-discipline cross-research program spanning entomology, immunolo
 
 这催生了一个横跨 14 个学科的交叉研究计划——昆虫学、免疫学、认知科学、图论、进化生物学、网络社会学、信息论、控制论、博弈论、形态发生学、组织心理学、文化人类学、情感计算和计算生态学——每个学科贡献了一个具体的算法，而非隐喻。
 
-The result: **V9.0 introduces a Field-Mediated Coupling Architecture** — seven autonomous domains connected not by point-to-point wiring, but by a shared 12-dimensional signal field. Agents leave traces in this field like ants depositing pheromones; decisions emerge from the superposition of all signals, not from any central controller. No idle modules. No feature flags. Every line of code runs in production.
+The result: **V9.2 introduces a Field-Mediated Coupling Architecture** — seven autonomous domains connected not by point-to-point wiring, but by a shared 12-dimensional signal field. Agents leave traces in this field like ants depositing pheromones; decisions emerge from the superposition of all signals, not from any central controller. No idle modules. No feature flags. Every line of code runs in production.
 
-成果：**V9.0 引入了场中介耦合架构**——七个自治域并非通过点对点连线相连，而是通过共享的 12 维信号场沟通。代理在场中留下痕迹，如同蚂蚁沉积信息素；决策从所有信号的叠加中涌现，而非来自某个中心控制器。没有空转模块。没有功能开关。每一行代码都在生产环境运行。
+成果：**V9.2 引入了场中介耦合架构**——七个自治域并非通过点对点连线相连，而是通过共享的 12 维信号场沟通。代理在场中留下痕迹，如同蚂蚁沉积信息素；决策从所有信号的叠加中涌现，而非来自某个中心控制器。没有空转模块。没有功能开关。每一行代码都在生产环境运行。
 
 ---
 
@@ -59,16 +59,16 @@ Coordinating multiple LLM agents in production hits **six walls**:
 | **Memory loss** · 记忆断裂 | Context resets erase all knowledge · 上下文重置后知识全部丢失 | 3-tier hybrid memory with Ebbinghaus decay · 三层混合记忆 + 遗忘曲线 |
 | **Cascading failures** · 级联故障 | One tool timeout kills the pipeline · 单个工具超时拖垮整条流水线 | 6-layer resilience: retry → breaker → vaccine → model fallback → replan → pipeline break · 六层容错 |
 | **Manual routing** · 手动路由 | Every task must be hand-assigned · 每项任务都要人工分配 | DAG decomposition + field-aware spawn advisor · DAG 分解 + 场感知孵化建议 |
-| **Zero observability** · 零可观测性 | No runtime insight into agent behavior · 运行时完全看不到代理行为 | Dashboard (57+ REST) + SSE streaming + health checks · 仪表盘 + SSE 实时流 + 健康检查 |
+| **Zero observability** · 零可观测性 | No runtime insight into agent behavior · 运行时完全看不到代理行为 | Dashboard (58 REST) + ConsoleDataBridge WS + legacy SSE + health checks · 仪表盘 + WS bridge + SSE 实时流 + 健康检查 |
 | **Idle code** · 空转代码 | Feature-flagged modules never activate · 功能开关后的模块从不激活 | Zero flags: all modules unconditionally active, field-mediated coupling verification · 零开关：所有模块无条件激活，场耦合验证 |
 
 ---
 
 ## Architecture Overview · 架构一览
 
-V9.0 replaces the 7-layer linear hierarchy (L0–L6) with **7 autonomous domains** connected through a **dual foundation** (SignalField + DomainStore + EventBus). Modules interact through the signal field, not through direct imports.
+V9.2 replaces the 7-layer linear hierarchy (L0–L6) with **7 autonomous domains** connected through a **dual foundation** (SignalField + DomainStore + EventBus). Modules interact through the signal field, not through direct imports.
 
-V9.0 将 7 层线性层级（L0–L6）替换为**7 个自治域**，通过**双基座**（信号场 + 域存储 + 事件总线）连接。模块通过信号场交互，而非直接导入。
+V9.2 将 7 层线性层级（L0–L6）替换为**7 个自治域**，通过**双基座**（信号场 + 域存储 + 事件总线）连接。模块通过信号场交互，而非直接导入。
 
 ```
 Domain · 域          Files · 文件   Lines · 行数   Responsibility · 职责
@@ -83,8 +83,8 @@ Domain · 域          Files · 文件   Lines · 行数   Responsibility · 职
  编排                                             DAG 规划、孵化建议、自适应、调度
  quality                10          2,738        Evidence gate, circuit breaker, failure vaccination
  质量                                             证据门控、熔断器、失败疫苗
- observe                13          1,651        Dashboard (57+ REST), metrics, health, SSE broadcast
- 观测                                             仪表盘、指标、健康检查、SSE 广播
+ observe                13          1,651        Dashboard (58 REST), metrics, health, WS bridge, legacy SSE
+ 观测                                             仪表盘、指标、健康检查、WS bridge、SSE 兼容广播
  bridge                 24          4,526        10 tools, 16 hooks, session, model fallback
  桥接                                             10 工具、16 钩子、会话、模型降级
 ─────────────────   ────────────   ──────────
@@ -116,6 +116,13 @@ V9 完全在 OpenClaw Gateway 进程内运行。不再有 `child_process.fork()`
 
 **Source · 源码:** [`src/swarm-core-v9.js`](src/swarm-core-v9.js) (475 lines), [`src/index.js`](src/index.js) (205 lines)
 
+### V9.2 Key Capabilities · V9.2 核心能力
+
+- **T0 Architecture · T0 架构** — Swarm operates as an OS-level program injected into OpenClaw's run loop via `Symbol` hooks, not as a typical plugin. It intercepts the host lifecycle at the lowest level. · 蜂群作为 OS 级程序通过 `Symbol` 钩子注入 OpenClaw 运行循环，而非普通插件。它在最底层拦截宿主生命周期。
+- **Parallel DAG Branches · 并行 DAG 分支** — Fork+merge patterns for concurrent execution (e.g. `new_feature: research → plan → [backend, frontend] → review`). · 支持 fork+merge 模式实现并发执行（如 `new_feature: research → plan → [backend, frontend] → review`）。
+- **8 Intent Types · 8 种意图类型** — `bug_fix`, `new_feature`, `refactor`, `optimize`, `explore`, `analyze`, `content`, `question` — each with tailored DAG templates and model routing. · 每种意图类型对应定制的 DAG 模板和模型路由策略。
+- **Verbosity Control · 广播详度控制** — `setVerbosity('verbose' | 'normal' | 'quiet')` filters broadcast granularity per session. · 按会话过滤广播粒度。
+
 > [Architecture (EN)](docs/en/architecture.md) · [架构设计 (中文)](docs/zh-CN/architecture.md)
 
 ---
@@ -128,18 +135,18 @@ The signal field is the **shared medium** through which all domains communicate.
 
 | # | Dimension · 维度 | Biological Analog · 生物学类比 | Decay Rate λ | Meaning · 含义 |
 |---|---|---|---|---|
-| 1 | `task_load` | Worker ant trail density · 工蚁踪迹密度 | 0.02 | Task queue pressure across the swarm · 蜂群任务队列压力 |
-| 2 | `error_rate` | Alarm pheromone · 警报信息素 | 0.10 | Rolling error frequency · 滚动错误频率 |
-| 3 | `latency` | Neural conduction delay · 神经传导延迟 | 0.05 | Response time distribution · 响应时间分布 |
-| 4 | `throughput` | Colony metabolic rate · 群落代谢率 | 0.03 | Messages processed per unit time · 单位时间处理消息数 |
-| 5 | `cost` | Foraging energy cost · 觅食能量成本 | 0.02 | Token and API cost accumulation · Token 与 API 成本累积 |
-| 6 | `quality` | Nectar quality gradient · 花蜜质量梯度 | 0.03 | Output quality scores · 输出质量评分 |
-| 7 | `coherence` | Queen pheromone · 蜂后信息素 | 0.04 | Inter-agent goal alignment · 代理间目标对齐度 |
-| 8 | `trust` | Mutualistic grooming · 互惠梳理 | 0.01 | Peer trust and reputation · 同伴信任与声誉 |
-| 9 | `novelty` | Waggle dance intensity · 摇摆舞强度 | 0.06 | Divergence from known patterns · 偏离已知模式程度 |
-| 10 | `urgency` | Alarm response cascade · 警报响应级联 | 0.08 | Time-sensitivity pressure · 时间敏感压力 |
-| 11 | `complexity` | Cognitive load indicator · 认知负载指示 | 0.04 | Estimated task difficulty · 估算任务难度 |
-| 12 | `resource_pressure` | Nest capacity signal · 巢穴容量信号 | 0.03 | Memory, context, budget saturation · 内存、上下文、预算饱和度 |
+| 1 | `trail` | Path footprint · 路径足迹 | 0.008 | Recent execution traces and path-following cues · 最近执行痕迹与路径跟随线索 |
+| 2 | `alarm` | Alarm plume · 警报羽流 | 0.15 | Risk, anomaly, and breaker pressure · 风险、异常与熔断压力 |
+| 3 | `reputation` | Colony memory · 群体记忆 | 0.005 | Historical reliability and contribution quality · 历史可靠性与贡献质量 |
+| 4 | `task` | Work pressure · 任务压力 | 0.01 | Pending work pressure and task completion momentum · 待处理工作压力与任务推进动量 |
+| 5 | `knowledge` | Shared scent map · 共享知识气味图 | 0.003 | Knowledge density and memory availability in scope · 当前作用域中的知识密度与记忆可得性 |
+| 6 | `coordination` | Routing vibration · 协调振动 | 0.02 | Multi-agent synchronization and delegation pressure · 多代理同步与委派压力 |
+| 7 | `emotion` | Stress heat · 情绪热量 | 0.10 | Frustration, urgency, and affective residue · 挫败、紧迫感和情绪残留 |
+| 8 | `trust` | Mutual grooming · 互信梳理 | 0.006 | Pairwise collaboration confidence · 成对协作信心 |
+| 9 | `sna` | Social topology · 社交拓扑 | 0.004 | Collaboration centrality and network structure · 协作中心性与网络结构 |
+| 10 | `learning` | Adaptation trace · 学习轨迹 | 0.002 | Improvement signal from recent outcomes · 近期结果带来的改进信号 |
+| 11 | `calibration` | Tuning feedback · 校准反馈 | 0.01 | Threshold and signal-weight tuning pressure · 阈值与信号权重调校压力 |
+| 12 | `species` | Evolution drift · 物种漂移 | 0.001 | Role/species evolution and specialization pressure · 角色/物种演化与分化压力 |
 
 All signals decay via **forward-decay encoding**: `score = base × e^(λ × emitTime)`. Query-time evaluation ensures O(1) emission and O(n) query. Emergency GC triggers when signal count exceeds 100,000.
 
@@ -345,7 +352,7 @@ Claw-Swarm 将**协调视为涌现属性**，而非中心化指令。
 
 3. **Domain isolation over layered hierarchy · 域隔离优于分层层级** — 7 autonomous domains connected through field/bus/store, not strict upward/downward dependency. · 7 个自治域通过场/总线/存储连接，而非严格的上下依赖。
 
-4. **Measured outcomes over assumed behavior · 实测结果优于假设行为** — Every claim backed by `npx vitest run`. 1,365 tests across 107 files. · 每个主张都有测试支撑。
+4. **Measured outcomes over assumed behavior · 实测结果优于假设行为** — Every claim backed by `npx vitest run`. 1,697 tests across 107 files. · 每个主张都有测试支撑。
 
 5. **Source-anchored documentation over handwave · 源码锚定文档优于笼统描述** — Every algorithm, constant, formula maps to a file and line number. · 每个算法、常量、公式都映射到文件和行号。
 
@@ -361,13 +368,13 @@ Claw-Swarm 将**协调视为涌现属性**，而非中心化指令。
 
 | Metric · 指标 | Value · 值 | How to verify · 验证方式 |
 |---|---|---|
-| Automated tests · 自动测试 | **1,365** passing (107 files) | `npx vitest run` |
+| Automated tests · 自动测试 | **1,697** passing (107 files) | `npx vitest run` |
 | Source files · 源文件 | **121** JS (7 domains) | `find src -name "*.js" -not -path "*/console/*" \| wc -l` |
 | Source lines · 源码行数 | **25,447** | `find src -name "*.js" -not -path "*/console/*" -exec cat {} + \| wc -l` |
 | Signal dimensions · 信号维度 | **12** (continuous field) | `src/core/bus/event-catalog.js` |
 | Event topics · 事件主题 | **27** | `src/core/bus/event-catalog.js` |
 | Hooks · 钩子 | **16** | `src/bridge/hooks/hook-adapter.js` |
-| REST endpoints · REST 端点 | **57+** (+ 14 legacy aliases) | `src/observe/dashboard/dashboard-service.js` |
+| REST endpoints · REST 端点 | **58** (+ 14 legacy aliases) | `src/observe/dashboard/dashboard-service.js` |
 | Built-in models · 内置模型 | **35+** (8D profiles) | `src/intelligence/identity/model-capability.js` |
 | Tools · 工具 | **10** (all registered) | `src/bridge/tools/` |
 | Feature flags · 功能开关 | **0** | Zero. All modules always active. |
@@ -385,7 +392,7 @@ All metrics from source code. No marketing.
 | Tool · 工具 | Purpose · 用途 | Source · 源码 |
 |---|---|---|
 | `swarm_run` | Plan + MoE model selection + spawn + execute · 一键规划 + 模型选择 + 生成 + 执行 | `run-tool.js` (248) |
-| `swarm_query` | Read-only swarm state (10 scopes) · 蜂群状态只读查询 | `query-tool.js` (320) |
+| `swarm_query` | Read-only swarm state (16 scopes) · 蜂群状态只读查询 | `query-tool.js` (320) |
 | `swarm_dispatch` | Forward message to running agent · 向运行中代理分派消息 | `dispatch-tool.js` |
 | `swarm_checkpoint` | Pause for human approval · 暂停等待人工批准 | `checkpoint-tool.js` (232) |
 | `swarm_spawn` | Direct agent spawn (bypass advisor) · 直接孵化代理 | `spawn-tool.js` (186) |
@@ -482,14 +489,14 @@ openclaw gateway restart
 
 # 3. Verify · 验证
 openclaw gateway status
-# → claw-swarm 9.0.0 enabled
+# → claw-swarm 9.2.0 enabled
 
 # 4. Dashboard · 仪表盘
 # http://127.0.0.1:19100/api/v9/health
 
 # 5. Run tests · 运行测试
 npx vitest run
-# → 1,365 tests passing
+# → 1,697 tests passing
 ```
 
 > [Installation (EN)](docs/en/installation.md) · [安装配置 (中文)](docs/zh-CN/installation.md)
@@ -507,13 +514,13 @@ npx vitest run
 | [Architecture](docs/en/architecture.md) | 7-domain design, dual foundation, signal field, process model |
 | [Signal Field](docs/en/signal-mesh.md) | 12-dimensional field, forward-decay, GC, sensitivity filter |
 | [Model Registry](docs/en/model-registry.md) | 35+ models, 8D capability profiles, MoE routing |
-| [API Reference](docs/en/api-reference.md) | 10 tools, 16 hooks, 57+ REST endpoints, 27 events |
+| [API Reference](docs/en/api-reference.md) | 10 tools, 16 hooks, 58 REST endpoints, 27 events |
 | [Biomimicry](docs/en/biomimicry.md) | 20 algorithms with formal math and source anchors |
 | [Cross-Research](docs/en/cross-research.md) | 14 disciplines with academic foundations |
 | [Emotional Intelligence](docs/en/emotional-intelligence.md) | 6D emotion vectors, cultural friction |
 | [Module Guide](docs/en/module-guide.md) | Per-module responsibility across 7 domains |
 | [Installation](docs/en/installation.md) | Setup, config, model compatibility |
-| [Console Guide](docs/en/console-guide.md) | Dashboard views, REST endpoints, SSE connection |
+| [Console Guide](docs/en/console-guide.md) | Dashboard views, REST endpoints, WS bridge, legacy SSE |
 | [FAQ](docs/en/faq-troubleshooting.md) | Common issues and solutions |
 
 ### 中文文档
@@ -523,13 +530,13 @@ npx vitest run
 | [架构设计](docs/zh-CN/architecture.md) | 7 域设计、双基座、信号场、进程模型 |
 | [信号场](docs/zh-CN/signal-mesh.md) | 12 维信号场、前向衰减、GC、灵敏度过滤 |
 | [模型注册表](docs/zh-CN/model-registry.md) | 35+ 模型、8D 能力画像、MoE 路由 |
-| [API 参考](docs/zh-CN/api-reference.md) | 10 工具、16 钩子、57+ REST 端点、27 事件 |
+| [API 参考](docs/zh-CN/api-reference.md) | 10 工具、16 钩子、58 REST 端点、27 事件 |
 | [仿生学](docs/zh-CN/biomimicry.md) | 20 种算法的形式化数学与源码锚点 |
 | [交叉研究](docs/zh-CN/cross-research.md) | 14 个学科的学术基础 |
 | [情绪智慧](docs/zh-CN/emotional-intelligence.md) | 6D 情绪向量、文化摩擦 |
 | [模块指南](docs/zh-CN/module-guide.md) | 7 域各模块职责说明 |
 | [安装配置](docs/zh-CN/installation.md) | 安装步骤、配置选项、模型兼容性 |
-| [控制台指南](docs/zh-CN/console-guide.md) | 仪表盘视图、REST 端点、SSE 连接 |
+| [控制台指南](docs/zh-CN/console-guide.md) | 仪表盘视图、REST 端点、WS bridge、SSE 兼容 |
 | [常见问题](docs/zh-CN/faq-troubleshooting.md) | 常见问题与故障排查 |
 
 ---

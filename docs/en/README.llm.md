@@ -4,7 +4,7 @@
 
 ## What is Claw-Swarm
 
-An OpenClaw plugin (V9.0.0) that coordinates multiple LLM agents using bio-inspired algorithms. Runs in-process within the OpenClaw Gateway. Features a Field-Mediated Coupling Architecture where 7 autonomous domains communicate through a 12-dimensional continuous signal field.
+An OpenClaw plugin (V9.2.0) that coordinates multiple LLM agents using bio-inspired algorithms. Runs in-process within the OpenClaw Gateway. Features a Field-Mediated Coupling Architecture where 7 autonomous domains communicate through a 12-dimensional continuous signal field.
 
 ## Available Tools
 
@@ -87,6 +87,6 @@ Parameters:
 
 ## Architecture Summary
 
-121 source files across 7 domains. 12-dimensional signal field. 27 event topics. 16 hooks. 10 tools. 35+ model profiles. 57+ REST endpoints on port 19100.
+121 source files across 7 domains. 12-dimensional signal field. 27 event topics. 16 hooks. 10 tools. 35+ model profiles. 58 REST endpoints on port 19100 plus the ConsoleDataBridge WebSocket on port 19101.
 
 Dashboard: `http://127.0.0.1:19100/api/v9/health`

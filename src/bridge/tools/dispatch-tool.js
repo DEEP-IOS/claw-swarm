@@ -31,6 +31,12 @@ function resolvePriority(priority) {
 export function createDispatchTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_dispatch',
+    description: [
+      'Send a direct message to a specific running agent.',
+      'Use this for inter-agent communication: relay findings,',
+      'ask questions, or provide instructions to a named agent.',
+      'Supports priority levels: low, normal, high, critical.',
+    ].join('\n'),
 
     parameters: {
       type: 'object',

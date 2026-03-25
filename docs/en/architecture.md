@@ -2,7 +2,7 @@
 
 [<- Back to README](../../README.md) | [中文版](../zh-CN/architecture.md)
 
-Claw-Swarm V9.0 runs as an OpenClaw plugin using a **single-process, domain-oriented** architecture with a **12-dimensional signal field** at its foundation. This document describes the design motivations, the dual foundation layer, the 7-domain source structure, the signal field, four coupling mechanisms, the ModuleBase contract, process model, hook system, tool architecture, engine initialization, zero-idle guarantees, and key constants -- all with source-code anchors.
+Claw-Swarm V9.2 runs as an OpenClaw plugin using a **single-process, domain-oriented** architecture with a **12-dimensional signal field** at its foundation. This document describes the design motivations, the dual foundation layer, the 7-domain source structure, the signal field, four coupling mechanisms, the ModuleBase contract, process model, hook system, tool architecture, engine initialization, zero-idle guarantees, and key constants -- all with source-code anchors.
 
 ---
 

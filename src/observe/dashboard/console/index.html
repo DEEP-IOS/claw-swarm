@@ -3,26 +3,95 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Claw-Swarm Console</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐝</text></svg>">
+  <title>OpenClaw Swarm Operator Station</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%235cb8ff'/%3E%3Cstop offset='100%25' stop-color='%2335d399'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='6' y='6' width='52' height='52' rx='16' fill='%2307121d' stroke='url(%23g)' stroke-width='3'/%3E%3Cpath d='M20 24h24M20 32h24M20 40h24' stroke='url(%23g)' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+
   <style>
-    body { margin: 0; background: #0A0A1A; overflow: hidden; }
+    body { margin: 0; background: #07121d; overflow: hidden; }
     #root { width: 100vw; height: 100vh; }
     .loading-splash {
-      display: flex; align-items: center; justify-content: center;
-      width: 100vw; height: 100vh; background: #0A0A1A;
-      color: #00FFAA; font-family: 'Segoe UI', sans-serif; font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(92, 184, 255, 0.18), transparent 28%),
+        radial-gradient(circle at 84% 14%, rgba(53, 211, 153, 0.12), transparent 26%),
+        linear-gradient(180deg, rgba(8, 15, 25, 0.98) 0%, rgba(7, 16, 27, 1) 45%, rgba(4, 9, 16, 1) 100%);
+      color: #e8f0fa;
+      font-family: 'IBM Plex Sans', 'Segoe UI Variable', sans-serif;
+      font-size: 16px;
     }
-    .loading-splash .bee { font-size: 48px; animation: pulse 1.5s ease-in-out infinite; }
-    @keyframes pulse { 0%,100% { opacity: 0.4; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.1); } }
+    .loading-splash__mark {
+      width: 68px;
+      height: 68px;
+      margin: 0 auto 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 20px;
+      border: 1px solid rgba(92, 184, 255, 0.28);
+      background: linear-gradient(160deg, rgba(92, 184, 255, 0.2), rgba(53, 211, 153, 0.12));
+      color: #5cb8ff;
+      font-family: 'Space Grotesk', 'Segoe UI Variable Display', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      box-shadow: 0 0 22px rgba(92, 184, 255, 0.18);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .loading-splash__eyebrow {
+      color: #7f93ad;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .loading-splash__title {
+      font-family: 'Space Grotesk', 'Segoe UI Variable Display', sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    .loading-splash__body {
+      color: #b3c3d8;
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 0.55; transform: scale(0.96); }
+      50% { opacity: 1; transform: scale(1.04); }
+    }
   </style>
-  <script type="module" crossorigin src="/v9/console/assets/index-ChLu2LY1.js"></script>
-  <link rel="stylesheet" crossorigin href="/v9/console/assets/index-CR8SwRvE.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/v9/console/vendor/three.module.min.js"
+      }
+    }
+  </script>
+  <script type="module" crossorigin src="/v9/console/assets/index-BLkXu-NT.js"></script>
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/react-stack-tl5Sovec.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/vendor-B6iy8-HO.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/three-fiber-k1dxm1fW.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/three-support-Dt_-fznO.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/three-examples-BqQfdoai.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/three-extras-BbHp8bya.js">
+  <link rel="modulepreload" crossorigin href="/v9/console/assets/motion-stack-Bt1VKGKu.js">
+  <link rel="stylesheet" crossorigin href="/v9/console/assets/index-Cb7j4g2W.css">
 </head>
 <body>
   <div id="root">
     <div class="loading-splash">
-      <div><span class="bee">🐝</span><br/>Loading Swarm Console...</div>
+      <div>
+        <div class="loading-splash__mark">SW</div>
+        <div class="loading-splash__eyebrow">OpenClaw V9</div>
+        <div class="loading-splash__title">Swarm Operator Station</div>
+        <div class="loading-splash__body">Loading live telemetry, verification deck, and 3D field.</div>
+      </div>
     </div>
   </div>
 </body>

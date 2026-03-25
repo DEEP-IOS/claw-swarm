@@ -67,6 +67,8 @@ const ARCHETYPES = new Map([
 
 /** Trait value to numeric mapping */
 const TRAIT_VALUES = { low: 0.2, medium: 0.5, high: 0.8 }
+const SOUL_COLLECTION = 'soul'
+const ARCHETYPE_COLLECTION = 'soul-archetype'
 
 export class SoulDesigner extends ModuleBase {
   /** @returns {string[]} */
@@ -82,13 +84,36 @@ export class SoulDesigner extends ModuleBase {
    * @param {Object} deps
    * @param {Object} deps.signalStore - SignalStore instance
    */
-  constructor({ signalStore } = {}) {
+  constructor({ signalStore, domainStore } = {}) {
     super()
     this._signalStore = signalStore
+    this._domainStore = domainStore
+    /** @type {Map<string, string>} agentId → archetypeId */
+    this._agentArchetypes = new Map()
   }
 
   async start() {}
   async stop() {}
+
+  _storePut(collection, key, value) {
+    if (typeof this._domainStore?.put === 'function') {
+      this._domainStore.put(collection, key, value)
+      return
+    }
+    if (typeof this._domainStore?.set === 'function') {
+      this._domainStore.set(`${collection}:${key}`, value)
+    }
+  }
+
+  _storeGet(collection, key) {
+    if (typeof this._domainStore?.get === 'function') {
+      if (this._domainStore.get.length >= 2) {
+        return this._domainStore.get(collection, key)
+      }
+      return this._domainStore.get(`${collection}:${key}`)
+    }
+    return undefined
+  }
 
   /**
    * Design a soul (personality) for an agent based on archetype and role
@@ -173,6 +198,45 @@ export class SoulDesigner extends ModuleBase {
     }
 
     return adjusted
+  }
+
+  /**
+   * Persist a soul instance (soul.md text) for an agent
+   * @param {string} agentId
+   * @param {string} soulText - The soul.md content
+   */
+  persistSoulInstance(agentId, soulText) {
+    this._storePut(SOUL_COLLECTION, agentId, { text: soulText, ts: Date.now() })
+  }
+
+  /**
+   * Load a persisted soul instance
+   * @param {string} agentId
+   * @returns {string|null}
+   */
+  loadSoulInstance(agentId) {
+    return this._storeGet(SOUL_COLLECTION, agentId)?.text ?? null
+  }
+
+  /**
+   * Set the archetype for an agent (for tracking)
+   * @param {string} agentId
+   * @param {string} archetypeId
+   */
+  setAgentArchetype(agentId, archetypeId) {
+    this._agentArchetypes.set(agentId, archetypeId)
+    this._storePut(ARCHETYPE_COLLECTION, agentId, { archetypeId, ts: Date.now() })
+  }
+
+  /**
+   * Get the archetype assigned to an agent
+   * @param {string} agentId
+   * @returns {string}
+   */
+  getAgentArchetype(agentId) {
+    return this._agentArchetypes.get(agentId)
+      ?? this._storeGet(ARCHETYPE_COLLECTION, agentId)?.archetypeId
+      ?? 'pragmatic'
   }
 }
 

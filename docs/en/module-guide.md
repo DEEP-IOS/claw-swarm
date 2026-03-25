@@ -1,6 +1,6 @@
 # Module Guide (7 Domains)
 
-**Claw-Swarm V9.0** | ~110 Modules | 7 Domains + Dual Foundation
+**Claw-Swarm V9.2** | ~110 Modules | 7 Domains + Dual Foundation
 
 Claw-Swarm V9 organizes all source code into **7 domains** built atop a **dual foundation** (SwarmField + DomainStore). Modules interact exclusively through **field-mediated coupling**: they emit signals into a 12-dimensional SwarmField and perceive signals from it. No cross-domain direct function calls exist.
 
@@ -185,7 +185,7 @@ Individual agent intelligence: identity (roles, prompts, capabilities), multi-la
 
 | File | Lines | Responsibility | Produces | Consumes |
 |------|-------|----------------|----------|----------|
-| `intelligence/understanding/intent-classifier.js` | -- | Intent classification: bug/feature/refactor/optimize/explore. Routes tasks to appropriate planning strategies. | -- | DIM_TASK |
+| `intelligence/understanding/intent-classifier.js` | -- | Intent classification with 8 PHASE_TEMPLATES (bug_fix, new_feature, refactor, optimize, explore, analyze, content, question). Templates include parallel fork+merge branches (e.g., new_feature forks to [backend, frontend] then merges at review). Routes tasks to appropriate planning strategies. | -- | DIM_TASK |
 | `intelligence/understanding/requirement-clarifier.js` | -- | Requirement clarification dialogue. Detects ambiguity and generates targeted questions to resolve it. | -- | DIM_TASK |
 | `intelligence/understanding/scope-estimator.js` | -- | Scope estimation: affected file count, complexity, risk level. Feeds into budget and scheduling decisions. | -- | DIM_TASK, DIM_KNOWLEDGE, DIM_LEARNING |
 
@@ -199,7 +199,7 @@ Task coordination, DAG planning, scheduling, resource management, population evo
 
 | File | Lines | Responsibility | Produces | Consumes |
 |------|-------|----------------|----------|----------|
-| `orchestration/planning/dag-engine.js` | 669 | DAG construction, topological sort, state machine, dependency resolution, work-stealing, dead letter queue, auction integration. The core execution engine. | DIM_TASK | DIM_TRAIL, DIM_ALARM |
+| `orchestration/planning/dag-engine.js` | 669 | DAG construction, topological sort, state machine (NODE_STATE: PENDING → SPAWNING → ASSIGNED → EXECUTING → COMPLETED / DEAD_LETTER), dependency resolution, work-stealing, dead letter queue, auction integration. Exposes `spawnNode(dagId, nodeId)` for SPAWNING transition. The core execution engine. | DIM_TASK | DIM_TRAIL, DIM_ALARM |
 | `orchestration/planning/execution-planner.js` | 427 | Mixture-of-Experts top-k planning. Expert scoring based on keywords, capabilities, and history. Decomposes complex tasks into phase sequences. | -- | DIM_TASK, DIM_SNA, DIM_KNOWLEDGE |
 | `orchestration/planning/result-synthesizer.js` | 421 | Multi-role output synthesis with Jaccard deduplication, quality aggregation, and Trust-weighted merging. | -- | DIM_REPUTATION, DIM_TRUST |
 | `orchestration/planning/critical-path.js` | 325 | Critical Path Method analysis: forward pass (ES/EF), backward pass (LS/LF), slack computation. Feeds deadline tracking. | -- | DIM_TASK |
@@ -273,15 +273,15 @@ Real-time monitoring, health checking, metrics aggregation, and the console SPA.
 
 | File | Lines | Responsibility | Produces | Consumes |
 |------|-------|----------------|----------|----------|
-| `observe/dashboard/dashboard-service.js` | 662 | Fastify REST API server on port 19100. 57+ REST endpoints covering agents, tasks, pheromones, reputation, species, DAGs, health, traces, topology, affinity, dead letters, governance, metrics. Serves console SPA static files. SSE endpoint for real-time streaming. | -- | -- |
+| `observe/dashboard/dashboard-service.js` | 662 | Fastify REST API server on port 19100. 58 REST endpoints covering agents, tasks, pheromones, reputation, species, DAGs, health, traces, topology, affinity, dead letters, governance, metrics, bridge, and console diagnostics. Serves the console SPA static files and exposes bridge status endpoints. | -- | -- |
 | `observe/metrics/metrics-collector.js` | 249 | RED metrics aggregation: Rate (events/sec), Error (failure rate), Duration (latency percentiles). Subscribes to all domain events and computes rolling windows. | -- | All dimensions (read-only) |
 | `observe/health/trace-collector.js` | 227 | Distributed trace span collection. Bridges EventBus trace events to persistent storage. Parent-child span relationships for end-to-end task tracing. | -- | -- |
 | `observe/health/health-checker.js` | 185 | Multi-dimensional health scoring (0-100) with event-driven updates and adaptive polling fallback. Dimensions: field connectivity, agent responsiveness, bus throughput, memory usage, error rate. | -- | DIM_ALARM |
-| `observe/broadcast/state-broadcaster.js` | 192 | SSE real-time event streaming to connected console clients. Batches events at 100ms intervals. Subscribes to all domain event topics. | -- | -- |
+| `observe/broadcast/state-broadcaster.js` | 192 | Legacy SSE event streaming retained for diagnostics and backward compatibility. Batches events at 100ms intervals and subscribes to all domain event topics while the primary console path uses the WebSocket bridge. Supports `setVerbosity(level)` to control event filtering (0=critical, 1=default, 2=verbose). | -- | -- |
 
 ### Console SPA (Frontend Assets)
 
-React 18 application served from `observe/dashboard/console/`. Zustand state management, SSE real-time updates, 6 visualization views. Built with Vite.
+React 18 application served from `observe/dashboard/console/`. Zustand state management, WebSocket bridge updates via `ConsoleDataBridge` on port 19101, and 10 visualization views. Built with Vite.
 
 | View | Purpose |
 |------|---------|
@@ -291,6 +291,10 @@ React 18 application served from `observe/dashboard/console/`. Zustand state man
 | **Ecology** | Population dynamics: Lotka-Volterra curves, species competition, pheromone particle animation |
 | **Network** | Social network graph: agent communication topology, centrality heatmaps |
 | **Control** | Operations panel: global modulator control, breaker status, budget gauges, manual intervention |
+| **Field** | 12-dimensional signal field overview and raw field pressure |
+| **System** | Runtime architecture, workflow evidence, and health telemetry |
+| **Adaptation** | Explore/exploit balance, calibration, and species evolution |
+| **Communication** | Active channels, pheromone flow, and coordination traffic |
 
 Additional components: CommandPalette (Ctrl+K), SettingsDrawer, EventTimeline, Inspector, Toast notifications.
 
@@ -411,7 +415,7 @@ core (dual foundation)
 | intelligence | 34 | ~5,606 | 3-layer memory, 10 roles, 6D emotion, CRDT reputation, SNA, trust |
 | orchestration | 24 | ~6,889 | DAG engine, contract-net, spawn advisor (12D), Lotka-Volterra, GEP, Shapley |
 | quality | 10 | ~2,738 | Quality gates, circuit breaker, failure vaccination, anomaly detection |
-| observe | 13 | ~1,651 | 57+ REST endpoints, SSE push, React 18 SPA (6 views), health checker |
+| observe | 13 | ~1,651 | 58 REST endpoints, WS bridge + legacy SSE, React 18 SPA (10 views), health checker |
 | bridge | 24 | ~4,526 | 10 tools (4 public + 6 internal), 16 hooks, session bridge, 7-layer reliability |
 | **Total** | **~125** | **~24,644** | Zero idle modules, zero feature flags, 12D field-mediated coupling |
 

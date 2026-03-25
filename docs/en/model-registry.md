@@ -1,6 +1,6 @@
 # Model Capability Registry
 
-Claw-Swarm V9.0 maintains an 8-dimensional capability profile for 35+ LLM models, enabling Mixture-of-Experts (MoE) routing that matches task requirements to model strengths in real time.
+Claw-Swarm V9.2 maintains an 8-dimensional capability profile for 35+ LLM models, enabling Mixture-of-Experts (MoE) routing that matches task requirements to model strengths in real time.
 
 **Source:** `src/intelligence/identity/model-capability.js`
 

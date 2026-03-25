@@ -24,7 +24,7 @@ openclaw gateway restart
 
 ```bash
 openclaw gateway status
-# Should show: claw-swarm 9.0.0 enabled
+# Should show: claw-swarm 9.2.0 enabled
 ```
 
 ## Configuration

@@ -40,7 +40,7 @@ export class SemanticMemory extends ModuleBase {
     this._eventBus = eventBus;
 
     if (this._eventBus) {
-      this._eventBus.subscribe('memory.episode.recorded', (data) => {
+      this._unsubscribe = this._eventBus.on('memory.episode.recorded', (data) => {
         this._onEpisodeRecorded(data);
       });
     }

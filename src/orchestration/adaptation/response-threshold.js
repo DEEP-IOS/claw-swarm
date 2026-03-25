@@ -58,13 +58,41 @@ export class ResponseThreshold extends ModuleBase {
 
     /** @type {Map<string, { value: number, lastAdjusted: number, adjustCount: number }>} */
     this._thresholds = new Map()
+    this._unsubscribers = []
   }
 
   async start() {
     await this.restore()
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('agent.lifecycle.completed', (payload) => {
+        const roleId = payload?.roleId ?? payload?.role ?? 'generalist'
+        this.recordOutcome(roleId, true)
+      }),
+      listen('agent.lifecycle.failed', (payload) => {
+        const roleId = payload?.roleId ?? payload?.role ?? 'generalist'
+        this.recordOutcome(roleId, false)
+      }),
+      // Also listen to DAG node completions/failures for per-node threshold
+      // adjustment. Not every node triggers agent lifecycle events (e.g.
+      // single-agent DAGs), so this ensures thresholds update during tasks.
+      listen('dag.phase.completed', (payload) => {
+        const roleId = payload?.role ?? 'generalist'
+        this.recordOutcome(roleId, true)
+      }),
+      listen('dag.phase.failed', (payload) => {
+        const roleId = payload?.role ?? 'generalist'
+        this.recordOutcome(roleId, false)
+      }),
+    )
   }
 
   async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
     await this.persist()
   }
 

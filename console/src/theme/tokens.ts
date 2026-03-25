@@ -19,18 +19,18 @@ export const colors = {
   },
   /** 12 signal dimensions — each with a unique hue */
   dimension: {
-    task_load:         '#4ECBFF',
-    error_rate:        '#FF4B6E',
-    latency:           '#FFB800',
-    throughput:        '#00FFAA',
-    cost:              '#FF8B4E',
-    quality:           '#00FF88',
-    coherence:         '#7B61FF',
-    trust:             '#61FFB4',
-    novelty:           '#FF61E6',
-    urgency:           '#FFD93D',
-    complexity:        '#B4FF61',
-    resource_pressure: '#FF61A6',
+    trail:        '#4ECBFF',
+    alarm:        '#FF4B6E',
+    reputation:   '#F5A623',
+    task:         '#00FFAA',
+    knowledge:    '#7B61FF',
+    coordination: '#06B6D4',
+    emotion:      '#FF61A6',
+    trust:        '#61FFB4',
+    sna:          '#84CC16',
+    learning:     '#10B981',
+    calibration:  '#FFD93D',
+    species:      '#FF8B4E',
   } as Record<string, string>,
   text: {
     primary:   '#E8E8FF',
@@ -63,22 +63,43 @@ export const transitions = {
 } as const;
 
 export const DIMENSIONS = [
-  'task_load', 'error_rate', 'latency', 'throughput',
-  'cost', 'quality', 'coherence', 'trust',
-  'novelty', 'urgency', 'complexity', 'resource_pressure',
+  'trail',
+  'alarm',
+  'reputation',
+  'task',
+  'knowledge',
+  'coordination',
+  'emotion',
+  'trust',
+  'sna',
+  'learning',
+  'calibration',
+  'species',
 ] as const;
 
-export const DIMENSION_LABELS: Record<string, string> = {
-  task_load: 'Task Load',
-  error_rate: 'Error Rate',
-  latency: 'Latency',
-  throughput: 'Throughput',
-  cost: 'Cost',
-  quality: 'Quality',
-  coherence: 'Coherence',
+export type DimensionId = (typeof DIMENSIONS)[number];
+
+export const DIMENSION_LABELS: Record<DimensionId, string> = {
+  trail: 'Trail',
+  alarm: 'Alarm',
+  reputation: 'Reputation',
+  task: 'Task',
+  knowledge: 'Knowledge',
+  coordination: 'Coordination',
+  emotion: 'Emotion',
   trust: 'Trust',
-  novelty: 'Novelty',
-  urgency: 'Urgency',
-  complexity: 'Complexity',
-  resource_pressure: 'Resource',
+  sna: 'SNA',
+  learning: 'Learning',
+  calibration: 'Calibration',
+  species: 'Species',
 };
+
+export const DIMENSION_META: ReadonlyArray<{
+  id: DimensionId;
+  label: string;
+  color: string;
+}> = DIMENSIONS.map((id) => ({
+  id,
+  label: DIMENSION_LABELS[id],
+  color: colors.dimension[id],
+}));

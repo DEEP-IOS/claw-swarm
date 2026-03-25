@@ -24,7 +24,7 @@ import {
 // ============================================================================
 
 const DEFAULT_CONFIG = {
-  calibrationInterval: 10,
+  calibrationInterval: 3,
   maxObservations: 100,
   minWeight: 0.5,
   maxWeight: 1.5,
@@ -71,13 +71,22 @@ export class SignalCalibrator extends ModuleBase {
 
     /** @type {Map<string, number>} dimension -> MI score */
     this._miScores = new Map()
+    this._unsubscribe = null
   }
 
   async start() {
     await this.restore()
+    this._unsubscribe = this._bus?.on?.('dag.completed', (payload) => {
+      const scope = payload?.dagId ?? 'global'
+      const fieldSnapshot = this._field?.superpose?.(scope) || {}
+      const outcome = payload?.success !== false
+      this.recordObservation(fieldSnapshot, outcome)
+    }) ?? null
   }
 
   async stop() {
+    this._unsubscribe?.()
+    this._unsubscribe = null
     await this.persist()
   }
 
@@ -96,6 +105,13 @@ export class SignalCalibrator extends ModuleBase {
     // Evict oldest when exceeding capacity
     if (this._observations.length > this._cfg.maxObservations) {
       this._observations.shift()
+    }
+
+    // Seed neutral weights on first observation so getWeights() is never empty
+    if (this._observations.length === 1 && Object.keys(this._weights).length === 0) {
+      for (const dim of SignalCalibrator.consumes()) {
+        this._weights[dim] = 1.0
+      }
     }
 
     // Auto-calibrate at interval

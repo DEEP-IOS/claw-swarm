@@ -2,7 +2,7 @@
 
 [<- Back to README](../../README.md) | [中文版](../zh-CN/api-reference.md)
 
-This document covers the complete public interface of Claw-Swarm V9: 10 tools, 16 hooks, 27 events, 57+ REST endpoints, and the SSE event stream. All counts, schemas, and return values are derived directly from source code.
+This document covers the complete public interface of Claw-Swarm V9: 10 tools, 16 hooks, 27 events, 58 REST endpoints, the WebSocket console bridge, and the legacy SSE event stream. All counts, schemas, and return values are derived directly from source code.
 
 ---
 
@@ -13,7 +13,7 @@ This document covers the complete public interface of Claw-Swarm V9: 10 tools, 1
    - [swarm_pheromone](#swarm_pheromone) | [swarm_gate](#swarm_gate) | [swarm_memory](#swarm_memory) | [swarm_plan](#swarm_plan) | [swarm_zone](#swarm_zone)
 2. [Hooks (16)](#hooks)
 3. [Event Catalog (27)](#event-catalog)
-4. [REST Endpoints (57+)](#rest-endpoints)
+4. [REST Endpoints (58)](#rest-endpoints)
 5. [SSE Event Stream](#sse-event-stream)
 
 ---
@@ -26,9 +26,9 @@ All 10 tools live in `src/bridge/tools/`. Each tool follows the OpenClaw plugin 
 
 ### swarm_run
 
-**File:** `src/bridge/tools/run-tool.js` (248 lines)
+**File:** `src/bridge/tools/run-tool.js`
 
-Full-pipeline task execution. Routes through DualProcessRouter (S1 fast / S2 deliberate), classifies intent, creates a DAG plan, consults SpawnAdvisor for role selection, checks ImmunitySystem for known failure patterns, builds a prompt via PromptArchitect, and spawns an agent via SpawnClient.
+Full-pipeline task execution. The tool classifies intent, estimates scope, asks the orchestration facade whether the task can stay on the fast path, and only returns a `direct_reply` when a real answer exists. If System 1 is selected but no usable answer is available, `swarm_run` falls back to the deliberate dispatch pipeline instead of fabricating a full response.
 
 **Parameters:**
 
@@ -41,19 +41,34 @@ Full-pipeline task execution. Routes through DualProcessRouter (S1 fast / S2 del
 | `cancel` | string | no | -- | Cancel a running agent by its ID |
 | `resume` | string | no | -- | Resume a paused agent by its ID |
 
-**Execution Pipeline (System 2):**
+**Execution Flow:**
 
 ```
-1. DualProcessRouter.routeTask(task)
-   - S1 (fast): returns direct answer, no agent spawn
-   - S2 (deliberate): proceeds to full pipeline
-2. IntentClassifier.classifyIntent(task) -> { type, confidence, keywords }
-3. PlanEngine.createPlan(intent, scope) -> { dagId, suggestedRole, timeBudgetMs }
-4. SpawnAdvisor.adviseSpawn(scope, role) -> { role, reason, parallelism }
-5. ImmunitySystem.checkImmunity(task) -> { immune, preventionPrompts, riskScore }
-6. PromptArchitect.buildPrompt(role, context) -> prompt string
-7. SpawnClient.spawn({ role, model, prompt, tools, label, dagId, scope })
-8. PipelineTracker.startPipelineTracking(dagId, timeBudgetMs)
+1. IntentClassifier.classifyIntent(task) -> { primary, confidence, keywords }
+   Recognized intent types (8):
+   | Intent | Nodes | Template |
+   |--------|-------|----------|
+   | bug_fix | 3 | diagnose → fix → test |
+   | new_feature | 5 | research → plan → [backend, frontend] → review |
+   | refactor | 5 | analyze → plan → [core, tests] → verify |
+   | optimize | 3 | profile → implement → benchmark |
+   | explore | 3 | gather → synthesize → report |
+   | analyze | 4 | collect → [quant, qual] → conclude |
+   | content | 4 | [facts, style] → draft → review |
+   | question | 1 | answer |
+2. ScopeEstimator.estimateScope(intent, { scope }) -> scope estimate
+3. orchestration.routeTask(intent, scopeEstimate)
+   - if System 1 and a router answer exists -> direct reply
+   - if System 1 and deterministic fast-reply helper matches -> direct reply
+   - otherwise continue to deliberate dispatch
+4. PlanEngine.createPlan(intent, scope) -> { dagId, suggestedRole, timeBudgetMs }
+5. SpawnAdvisor.adviseSpawn(scope, role) -> { role, reason, parallelism }
+6. ImmunitySystem.checkImmunity(task) -> { immune, preventionPrompts, riskScore }
+7. PromptArchitect.buildPrompt(role, context) -> prompt string
+8. orchestration.selectTools(role, intent) -> tools[]
+9. SpawnClient.spawn({ role, model, prompt, tools, label, dagId, scope })
+10. PipelineTracker.startPipelineTracking(dagId, timeBudgetMs)
+11. Field + bus emit task creation telemetry
 ```
 
 **Return value (S2 dispatched):**
@@ -67,8 +82,10 @@ Full-pipeline task execution. Routes through DualProcessRouter (S1 fast / S2 del
   "dagId": "dag-1710590400000",
   "intent": "coding",
   "confidence": 0.85,
+  "system": 2,
   "background": false,
-  "immuneWarnings": 0
+  "immuneWarnings": 0,
+  "routeFallback": "system1_unanswered"
 }
 ```
 
@@ -77,7 +94,7 @@ Full-pipeline task execution. Routes through DualProcessRouter (S1 fast / S2 del
 ```json
 {
   "status": "direct_reply",
-  "answer": "The answer is ...",
+  "answer": "6*7 = 42",
   "confidence": 0.92,
   "system": 1
 }
@@ -99,7 +116,7 @@ Full-pipeline task execution. Routes through DualProcessRouter (S1 fast / S2 del
 
 **File:** `src/bridge/tools/query-tool.js` (320 lines)
 
-Unified read-only query interface with 10 scopes: `status`, `plan`, `agents`, `pheromones`, `reputation`, `memory`, `progress`, `cost`, `artifacts`, `field`.
+Unified read-only query interface with 16 scopes: `status`, `plan`, `agents`, `tasks`, `health`, `budget`, `species`, `pheromones`, `channels`, `stigmergy`, `reputation`, `memory`, `progress`, `cost`, `artifacts`, `field`.
 
 **Parameters:**
 
@@ -109,37 +126,43 @@ Unified read-only query interface with 10 scopes: `status`, `plan`, `agents`, `p
 | `dagId` | string | no | -- | DAG ID (for `plan`, `progress`, `cost`, `artifacts` scopes) |
 | `query` | string | no | -- | Search query (for `memory` scope) |
 
-**10 Query Scopes:**
+**16 Query Scopes:**
 
 | Scope | Description | Required Params | Key Return Fields |
 |-------|-------------|-----------------|-------------------|
 | `status` | Swarm overview | -- | `activeAgents`, `agents[]`, `activePipelines`, `budget`, `field` |
 | `plan` | DAG plan detail | `dagId` | `nodes[]`, `edges[]`, `state`, `summary` |
 | `agents` | All active agents | -- | `count`, `agents[].{id, role, model, state, dagId, tokensUsed}` |
+| `tasks` | Active DAG/task summaries | -- | `count`, `tasks[].{id, dagId, state, summary, nodeCount, edgeCount}` |
+| `health` | Observe-domain health | -- | `status`, `score`, `dimensions`, `ts` |
+| `budget` | Budget tracker state | -- | `dagCount`, `dags[]`, `global.{totalSession, spent, remaining, utilization}` |
+| `species` | Species/adaptation state | -- | species-evolver snapshot |
 | `pheromones` | Pheromone trails | -- | `activeTypes[]`, `totalDeposits`, `trails[]` |
+| `channels` | Active communication channels | -- | `count`, `channels[]` |
+| `stigmergy` | Stigmergic board entries | -- | `boardScope`, `count`, `entries[]` |
 | `reputation` | Agent reputation | -- | `globalScore`, `agents[].{id, score, tasksCompleted, failureRate}` |
-| `memory` | Semantic search | `query` | `entries[].{id, type, content, relevance, tags}` |
-| `progress` | Pipeline progress | `dagId` | `completedNodes`, `totalNodes`, `percentage`, `blockers[]` |
-| `cost` | Budget usage | -- | `totalUsed`, `limit`, `remaining`, `byModel`, `byRole` |
+| `memory` | Semantic search | `query` | `entries[].{id, type, content, relevance, createdAt, source}` |
+| `progress` | Pipeline progress | `dagId` | `completedNodes`, `totalNodes`, `percentage`, `state`, `elapsed`, `remainingBudget`, `blockers[]` |
+| `cost` | Budget usage | -- | `totalSpent`, `totalSession`, `remaining`, `utilization`, `dagCount`, `dags[]` |
 | `artifacts` | DAG artifacts | `dagId` | `artifacts[].{id, type, name, path, size, producedBy}` |
-| `field` | 12D signal field | -- | `dimensions{}` (12 dims), `coherence`, `totalSignals` |
+| `field` | 12D signal field | -- | `dimensions{}` (12 dims), `dimensionsCount`, `supportedDimensions[]`, `totalSignals` |
 
 **12 Field Dimensions:**
 
 | Dimension | Description |
 |-----------|-------------|
-| `urgency` | Time-sensitivity pressure on pending work |
-| `complexity` | Estimated cognitive load of current tasks |
-| `risk` | Risk level across active operations |
-| `progress` | Overall task completion progress |
-| `quality` | Output quality scores from audit feedback |
-| `cost` | Token and API cost accumulation rate |
-| `collaboration` | Inter-agent goal alignment measurement |
-| `knowledge` | Knowledge density in current scope |
-| `innovation` | Divergence from established solution patterns |
-| `stability` | System stability measurement |
-| `momentum` | Rate of progress change |
-| `entropy` | Disorder/uncertainty in the system |
+| `trail` | Recent path/progress signal left by active work |
+| `alarm` | Risk, anomaly, and breaker pressure |
+| `reputation` | Historical reliability / contribution quality |
+| `task` | Pending work pressure and budget stress |
+| `knowledge` | Knowledge density available in the current scope |
+| `coordination` | Multi-agent coordination / routing pressure |
+| `emotion` | Frustration, urgency, and other affective residue |
+| `trust` | Pairwise collaboration confidence |
+| `sna` | Social-network topology and collaboration centrality |
+| `learning` | Learning/improvement trace across recent outcomes |
+| `calibration` | Signal-weight / threshold calibration pressure |
+| `species` | Role/species evolution pressure |
 
 **Return value (status scope):**
 
@@ -151,7 +174,10 @@ Unified read-only query interface with 10 scopes: `status`, `plan`, `agents`, `p
     { "id": "agent-a1", "role": "implementer", "state": "running", "elapsed": 45000 }
   ],
   "activePipelines": 1,
-  "budget": { "used": 15000, "limit": 100000 },
+  "budget": {
+    "dagCount": 1,
+    "global": { "totalSession": 500000, "spent": 15000, "remaining": 485000, "utilization": 0.03 }
+  },
   "field": { "dimensions": 12 },
   "timestamp": 1710590400000
 }
@@ -326,20 +352,18 @@ Stigmergic communication via pheromone trails. Four actions: `deposit`, `read`, 
 | `metadata` | object | no | `{}` | Additional metadata to attach |
 | `message` | string | no | `""` | Human-readable message |
 
-**10 Built-in Pheromone Types:**
+**6 canonical pheromone types + supported legacy aliases:**
 
-| Type | Decay Rate | Description |
-|------|-----------|-------------|
-| `progress` | 0.05 | Task progress signals |
-| `warning` | 0.10 | Risk or issue warnings |
-| `success` | 0.03 | Successful completion markers |
-| `failure` | 0.15 | Failure indicators |
-| `discovery` | 0.02 | New information found |
-| `dependency` | 0.01 | Dependency relationships |
-| `collaboration` | 0.04 | Collaboration opportunities |
-| `conflict` | 0.08 | Resource or zone conflicts |
-| `dispatch` | 0.10 | Message dispatch trails |
-| `checkpoint` | 0.02 | Checkpoint markers |
+| Canonical Type | Decay Rate | Description | Accepted legacy aliases |
+|------|-----------|-------------|--------------------------|
+| `trail` | 0.008 | Path / progress trails | `progress`, `dependency` |
+| `alarm` | 0.15 | Alarm / anomaly signals | `warning`, `failure`, `conflict` |
+| `recruit` | 0.03 | Recruitment / assistance requests | `collaboration`, `dispatch` |
+| `queen` | 0.005 | Global directive signals | `checkpoint` |
+| `dance` | 0.02 | Knowledge discovery signals | `discovery` |
+| `food` | 0.006 | High-quality outcome markers | `success` |
+
+Legacy aliases are still accepted on input for backward compatibility, but the runtime registry is canonicalized to the six types above.
 
 **Return value (deposit):**
 
@@ -348,9 +372,10 @@ Stigmergic communication via pheromone trails. Four actions: `deposit`, `read`, 
   "status": "deposited",
   "trailId": "ph-1710590400000-k9m3x7",
   "type": "success",
+  "canonicalType": "food",
   "scope": "default",
   "intensity": 0.8,
-  "decay": 0.03
+  "decay": 0.006
 }
 ```
 
@@ -367,6 +392,7 @@ Stigmergic communication via pheromone trails. Four actions: `deposit`, `read`, 
     {
       "id": "ph-...",
       "type": "progress",
+      "canonicalType": "trail",
       "scope": "default",
       "intensity": 0.7,
       "message": "Phase 1 complete",
@@ -386,7 +412,7 @@ Stigmergic communication via pheromone trails. Four actions: `deposit`, `read`, 
   "action": "stats",
   "scope": "default",
   "totalActive": 12,
-  "byType": { "progress": 5, "success": 3, "warning": 4 },
+  "byType": { "trail": 5, "food": 3, "alarm": 4 },
   "averageIntensity": 0.62,
   "oldestTrail": 1710580000000
 }
@@ -594,6 +620,25 @@ DAG plan management. Four actions: `view`, `modify`, `validate`, `cancel`.
   "cancelledAgentCount": 2
 }
 ```
+
+**DAG Engine Node State Machine:**
+
+```
+PENDING → SPAWNING → ASSIGNED → EXECUTING → COMPLETED
+                                          └→ DEAD_LETTER
+```
+
+The `SPAWNING` state indicates a node whose agent spawn has been requested but not yet confirmed by the gateway. This prevents duplicate spawns during high-concurrency DAG execution.
+
+**DAGEngine API Methods:**
+
+| Method | Description |
+|--------|-------------|
+| `planTask(intent, scope)` | Create a DAG from intent classification and scope estimate |
+| `addNode(dagId, node)` | Add a node to an existing DAG |
+| `spawnNode(dagId, nodeId)` | Transition a PENDING node to SPAWNING and request agent spawn |
+| `completeNode(dagId, nodeId, result)` | Mark a node as COMPLETED and trigger downstream dependencies |
+| `failNode(dagId, nodeId, error)` | Move a node to DEAD_LETTER with error context |
 
 ---
 
@@ -835,8 +880,8 @@ Source: `src/observe/dashboard/dashboard-service.js` (662 lines). All endpoints 
 | `GET /api/v9/shapley` | Shapley credit attribution | `{ dagId, credits: {} }` |
 | `GET /api/v9/species` | Species evolver state | `{ active: [], retired: [] }` |
 | `GET /api/v9/calibration` | Signal calibration state | `{ phase, weights }` |
-| `GET /api/v9/budget` | Budget usage | `{ used, limit, byModel }` |
-| `GET /api/v9/budget-forecast` | Budget forecast and projections | `{ projected, exhaustionTime }` |
+| `GET /api/v9/budget` | Budget tracker aggregate state | `{ dagCount, dags: CostReport[], global }` |
+| `GET /api/v9/budget-forecast` | Budget forecaster history and accuracy | `{ historyCount, lastRecordedAt, accuracy, byTaskType }` |
 | `GET /api/v9/dual-process` | Dual-process routing stats | `{ s1Count, s2Count, avgLatency }` |
 | `GET /api/v9/signal-weights` | Signal calibration weights (one per dimension) | `{ dimension: weight }` |
 | `GET /api/v9/role-discovery` | Emergent role discovery patterns | `{ discovered: [...] }` |
@@ -877,8 +922,8 @@ Source: `src/observe/dashboard/dashboard-service.js` (662 lines). All endpoints 
 
 | Path | Description | Return Type |
 |------|-------------|-------------|
-| `GET /api/v9/metrics` | Metrics collector snapshot | `{ requests, errors, durations }` |
-| `GET /api/v9/health` | System health check | `{ status, uptime, domains }` |
+| `GET /api/v9/metrics` | Metrics collector snapshot | `{ agents, tasks, signals, pheromones, quality, budget, channels, memory, errors, performance, hooks }` |
+| `GET /api/v9/health` | System health check | `{ status, score, dimensions, ts }` |
 | `GET /api/v9/config` | Dashboard configuration | `{ port, consolePath, fieldDimensions, registeredRoutes }` |
 | `GET /api/v9/bus/stats` | EventBus statistics | `{ published, subscribers, queued }` |
 | `GET /api/v9/store/stats` | Persistent store statistics | `{ domains, totalKeys, snapshotCount }` |
@@ -887,8 +932,8 @@ Source: `src/observe/dashboard/dashboard-service.js` (662 lines). All endpoints 
 
 | Path | Description | Return Type |
 |------|-------------|-------------|
-| `GET /api/v9/progress/:dagId` | DAG progress report | `{ completedNodes, totalNodes, percentage }` |
-| `GET /api/v9/cost-report/:dagId` | Cost report by DAG | `{ totalCost, byModel, byRole }` |
+| `GET /api/v9/progress/:dagId` | DAG progress report | `{ dagId, completedNodes, totalNodes, percentage, state, elapsed, remainingBudget, blockers }` |
+| `GET /api/v9/cost-report/:dagId` | Cost report by DAG | `{ dagId, totalBudget, spent, remaining, utilization, phases, overrun, timestamp }` |
 | `GET /api/v9/artifacts/:dagId` | Artifacts produced by a DAG | `Artifact[]` |
 
 ### Memory / Identity (3 endpoints)
@@ -897,23 +942,23 @@ Source: `src/observe/dashboard/dashboard-service.js` (662 lines). All endpoints 
 |------|-------------|-------------|
 | `GET /api/v9/memory/stats` | Memory store statistics | `{ totalEntries, byType }` |
 | `GET /api/v9/identity` | Agent identity map | `{ agentId: identity }` |
-| `GET /api/v9/context-window` | Context window usage stats | `{ used, limit, efficiency }` |
+| `GET /api/v9/context-window` | Context window usage stats | `{ maxTokens, reservedTokens, workingMemoryBuffers, workingMemoryEntries }` |
 
 ### Bridge (2 endpoints)
 
 | Path | Description | Return Type |
 |------|-------------|-------------|
-| `GET /api/v9/bridge/status` | Bridge connection status | `{ connected, sessions, tools }` |
+| `GET /api/v9/bridge/status` | Bridge readiness and registered capabilities | `{ ready, hooks, tools, sessionBridge, spawnClient, modelFallback }` |
 | `GET /api/v9/bridge/queue` | Bridge message queue | `Message[]` |
 
 ### Topology (4 endpoints)
 
 | Path | Description | Return Type |
 |------|-------------|-------------|
-| `GET /api/v9/topology` | Module topology overview | `{ modules, connections }` |
-| `GET /api/v9/topology/graph` | Force-directed topology graph | `{ nodes: [], edges: [] }` |
-| `GET /api/v9/modules` | Module manifest | `Module[]` |
-| `GET /api/v9/modules/:moduleId` | Single module detail | `Module` |
+| `GET /api/v9/topology` | Module topology overview | `{ moduleCount, dagCount, zones, domains }` |
+| `GET /api/v9/topology/graph` | Produces/consumes graph | `{ nodes: [], edges: [] }` |
+| `GET /api/v9/modules` | Module manifest | `ModuleManifest[]` |
+| `GET /api/v9/modules/:moduleId` | Single module detail | `ModuleManifest` |
 
 ### Legacy Aliases (14 endpoints)
 
@@ -944,6 +989,8 @@ These V1 paths redirect to their V9 counterparts:
 | `GET /v9/console/*` | Console static assets + SPA fallback |
 | `GET /api/v9/events` | SSE event stream (see below) |
 
+The live console state feed itself uses the WebSocket bridge on port `19101`; SSE remains available as a legacy diagnostics/event stream.
+
 ---
 
 ## SSE Event Stream
@@ -951,6 +998,8 @@ These V1 paths redirect to their V9 counterparts:
 **Endpoint:** `GET /api/v9/events` on port 19100
 
 The `StateBroadcaster` subscribes to EventBus topics and streams them as Server-Sent Events to connected console clients.
+
+**API:** `StateBroadcaster.setVerbosity(level)` -- Controls event filtering granularity. Levels: `0` (critical only), `1` (default -- domain events), `2` (verbose -- includes field ticks and internal diagnostics).
 
 ### Wire Format
 

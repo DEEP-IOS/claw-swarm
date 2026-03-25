@@ -72,9 +72,12 @@ export class RoleDiscovery extends ModuleBase {
   // --------------------------------------------------------------------------
 
   async start() {
-    this._unsub = this._bus?.on?.('dag.completed', (evt) => {
-      const history = evt?.payload?.sessionHistory ?? evt?.sessionHistory
-      if (history) this.analyze(history)
+    this._unsub = this._bus?.on?.('dag.completed', (payload) => {
+      const history = payload?.sessionHistory ?? payload?.history ?? []
+      if (history.length > 0) {
+        this.analyze(history)
+        this.promoteIfReady()
+      }
     })
   }
 
@@ -335,6 +338,17 @@ export class RoleDiscovery extends ModuleBase {
    */
   getDiscoveries() {
     return [...this._discoveries.values()]
+  }
+
+  /**
+   * Get a dashboard-friendly snapshot of pending discoveries.
+   * @returns {{ pendingCount: number, discoveries: Array }}
+   */
+  getState() {
+    return {
+      pendingCount: this._discoveries.size,
+      discoveries: this.getDiscoveries(),
+    }
   }
 }
 

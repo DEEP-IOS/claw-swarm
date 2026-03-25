@@ -1,6 +1,6 @@
 {
   "name": "openclaw-swarm",
-  "version": "9.1.0",
+  "version": "9.2.0",
   "description": "Claw-Swarm V9.0 — Field-mediated swarm intelligence plugin / 场中介蜂群智能引擎: 12-dimensional signal field, 7-domain architecture, forward-decay encoding, dual-process routing, species evolution, zero feature flags for OpenClaw",
   "type": "module",
   "engines": {
@@ -31,7 +31,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "install:swarm": "node install.js",
+    "patch": "node scripts/swarm-patcher.js",
+    "patch:dry": "node scripts/swarm-patcher.js --dry-run --verbose"
   },
   "repository": {
     "type": "git",
@@ -66,7 +69,9 @@
     "ajv": "^8.18.0",
     "eventemitter3": "^5.0.1",
     "nanoid": "^5.1.2",
+    "openclaw": "^2026.3.23-2",
     "tiktoken": "^1.0.22",
+    "ws": "^8.19.0",
     "zod": "^3.24.2"
   },
   "optionalDependencies": {

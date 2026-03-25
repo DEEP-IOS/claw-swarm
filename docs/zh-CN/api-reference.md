@@ -2,7 +2,7 @@
 
 [<- 返回 README](../../README.zh-CN.md) | [English](../en/api-reference.md)
 
-本文档涵盖 Claw-Swarm V9 的完整公开接口：10 个工具、16 个 Hook、27 个事件、57+ 个 REST 端点以及 SSE 事件流。所有计数、schema 和返回值均直接来源于源代码。
+本文档涵盖 Claw-Swarm V9 的完整公开接口：10 个工具、16 个 Hook、27 个事件、58 个 REST 端点、控制台使用的 WebSocket bridge，以及仍然保留的 SSE 事件流。所有计数、schema 和返回值均直接来源于源代码。
 
 ---
 
@@ -13,7 +13,7 @@
    - [swarm_pheromone](#swarm_pheromone) | [swarm_gate](#swarm_gate) | [swarm_memory](#swarm_memory) | [swarm_plan](#swarm_plan) | [swarm_zone](#swarm_zone)
 2. [Hooks (16 个)](#hooks)
 3. [事件目录 (27 个)](#事件目录)
-4. [REST 端点 (57+)](#rest-端点)
+4. [REST 端点 (58)](#rest-端点)
 5. [SSE 事件流](#sse-事件流)
 
 ---
@@ -26,9 +26,9 @@
 
 ### swarm_run
 
-**文件：** `src/bridge/tools/run-tool.js` (248 行)
+**文件：** `src/bridge/tools/run-tool.js`
 
-全流水线任务执行。经过 DualProcessRouter (S1 快速 / S2 审慎) 路由，分类意图，创建 DAG 计划，咨询 SpawnAdvisor 选择角色，通过 ImmunitySystem 检查已知失败模式，由 PromptArchitect 构建提示词，最终通过 SpawnClient 生成代理。
+全流水线任务执行。该工具会先分类意图、估计 scope，再向编排层询问当前任务是否可以走快路径。只有在确实存在可用答案时才返回 `direct_reply`。如果 System 1 被选中但没有可用答案，`swarm_run` 会回退到审慎调度流水线，而不是凭空伪造完整回复。
 
 **参数：**
 
@@ -41,19 +41,34 @@
 | `cancel` | string | 否 | -- | 通过代理 ID 取消运行中的代理 |
 | `resume` | string | 否 | -- | 通过代理 ID 恢复暂停的代理 |
 
-**执行流水线 (System 2)：**
+**执行流程：**
 
 ```
-1. DualProcessRouter.routeTask(task)
-   - S1 (快速)：直接返回答案，不生成代理
-   - S2 (审慎)：进入完整流水线
-2. IntentClassifier.classifyIntent(task) -> { type, confidence, keywords }
-3. PlanEngine.createPlan(intent, scope) -> { dagId, suggestedRole, timeBudgetMs }
-4. SpawnAdvisor.adviseSpawn(scope, role) -> { role, reason, parallelism }
-5. ImmunitySystem.checkImmunity(task) -> { immune, preventionPrompts, riskScore }
-6. PromptArchitect.buildPrompt(role, context) -> prompt 字符串
-7. SpawnClient.spawn({ role, model, prompt, tools, label, dagId, scope })
-8. PipelineTracker.startPipelineTracking(dagId, timeBudgetMs)
+1. IntentClassifier.classifyIntent(task) -> { primary, confidence, keywords }
+   已识别的意图类型（8 种）：
+   | 意图 | 节点数 | 模板 |
+   |------|--------|------|
+   | bug_fix | 3 | diagnose → fix → test |
+   | new_feature | 5 | research → plan → [backend, frontend] → review |
+   | refactor | 5 | analyze → plan → [core, tests] → verify |
+   | optimize | 3 | profile → implement → benchmark |
+   | explore | 3 | gather → synthesize → report |
+   | analyze | 4 | collect → [quant, qual] → conclude |
+   | content | 4 | [facts, style] → draft → review |
+   | question | 1 | answer |
+2. ScopeEstimator.estimateScope(intent, { scope }) -> scope estimate
+3. orchestration.routeTask(intent, scopeEstimate)
+   - 如果是 System 1 且 router 已提供答案 -> 直接回复
+   - 如果是 System 1 且命中确定性快回复助手 -> 直接回复
+   - 否则继续进入审慎调度
+4. PlanEngine.createPlan(intent, scope) -> { dagId, suggestedRole, timeBudgetMs }
+5. SpawnAdvisor.adviseSpawn(scope, role) -> { role, reason, parallelism }
+6. ImmunitySystem.checkImmunity(task) -> { immune, preventionPrompts, riskScore }
+7. PromptArchitect.buildPrompt(role, context) -> prompt 字符串
+8. orchestration.selectTools(role, intent) -> tools[]
+9. SpawnClient.spawn({ role, model, prompt, tools, label, dagId, scope })
+10. PipelineTracker.startPipelineTracking(dagId, timeBudgetMs)
+11. 向 field 和 bus 写入 task 创建遥测
 ```
 
 **返回值 (S2 已调度)：**
@@ -67,8 +82,10 @@
   "dagId": "dag-1710590400000",
   "intent": "coding",
   "confidence": 0.85,
+  "system": 2,
   "background": false,
-  "immuneWarnings": 0
+  "immuneWarnings": 0,
+  "routeFallback": "system1_unanswered"
 }
 ```
 
@@ -77,7 +94,7 @@
 ```json
 {
   "status": "direct_reply",
-  "answer": "答案是...",
+  "answer": "6*7 = 42",
   "confidence": 0.92,
   "system": 1
 }
@@ -99,7 +116,7 @@
 
 **文件：** `src/bridge/tools/query-tool.js` (320 行)
 
-统一只读查询接口，10 个查询范围：`status`、`plan`、`agents`、`pheromones`、`reputation`、`memory`、`progress`、`cost`、`artifacts`、`field`。
+统一只读查询接口，16 个查询范围：`status`、`plan`、`agents`、`tasks`、`health`、`budget`、`species`、`pheromones`、`channels`、`stigmergy`、`reputation`、`memory`、`progress`、`cost`、`artifacts`、`field`。
 
 **参数：**
 
@@ -109,37 +126,43 @@
 | `dagId` | string | 否 | -- | DAG ID（用于 `plan`、`progress`、`cost`、`artifacts` 范围） |
 | `query` | string | 否 | -- | 搜索查询（用于 `memory` 范围） |
 
-**10 个查询范围：**
+**16 个查询范围：**
 
 | 范围 | 描述 | 必需参数 | 主要返回字段 |
 |------|------|---------|-------------|
 | `status` | 蜂群总览 | -- | `activeAgents`、`agents[]`、`activePipelines`、`budget`、`field` |
 | `plan` | DAG 计划详情 | `dagId` | `nodes[]`、`edges[]`、`state`、`summary` |
 | `agents` | 所有活跃代理 | -- | `count`、`agents[].{id, role, model, state, dagId, tokensUsed}` |
+| `tasks` | 活跃 DAG/任务摘要 | -- | `count`、`tasks[].{id, dagId, state, summary, nodeCount, edgeCount}` |
+| `health` | Observe 域健康状态 | -- | `status`、`score`、`dimensions`、`ts` |
+| `budget` | 预算跟踪器状态 | -- | `dagCount`、`dags[]`、`global.{totalSession, spent, remaining, utilization}` |
+| `species` | 物种/自适应状态 | -- | species-evolver 快照 |
 | `pheromones` | 信息素轨迹 | -- | `activeTypes[]`、`totalDeposits`、`trails[]` |
+| `channels` | 活跃通信通道 | -- | `count`、`channels[]` |
+| `stigmergy` | 痕迹协作板条目 | -- | `boardScope`、`count`、`entries[]` |
 | `reputation` | 代理声誉 | -- | `globalScore`、`agents[].{id, score, tasksCompleted, failureRate}` |
-| `memory` | 语义搜索 | `query` | `entries[].{id, type, content, relevance, tags}` |
-| `progress` | 流水线进度 | `dagId` | `completedNodes`、`totalNodes`、`percentage`、`blockers[]` |
-| `cost` | 预算使用 | -- | `totalUsed`、`limit`、`remaining`、`byModel`、`byRole` |
+| `memory` | 语义搜索 | `query` | `entries[].{id, type, content, relevance, createdAt, source}` |
+| `progress` | 流水线进度 | `dagId` | `completedNodes`、`totalNodes`、`percentage`、`state`、`elapsed`、`remainingBudget`、`blockers[]` |
+| `cost` | 预算使用 | -- | `totalSpent`、`totalSession`、`remaining`、`utilization`、`dagCount`、`dags[]` |
 | `artifacts` | DAG 产出物 | `dagId` | `artifacts[].{id, type, name, path, size, producedBy}` |
-| `field` | 12 维信号场 | -- | `dimensions{}`（12 维）、`coherence`、`totalSignals` |
+| `field` | 12 维信号场 | -- | `dimensions{}`（12 维）、`dimensionsCount`、`supportedDimensions[]`、`totalSignals` |
 
 **12 个场维度：**
 
 | 维度 | 描述 |
 |------|------|
-| `urgency` | 待处理工作的时间敏感性压力 |
-| `complexity` | 当前任务的预估认知负荷 |
-| `risk` | 活跃操作的风险水平 |
-| `progress` | 整体任务完成进度 |
-| `quality` | 来自审计反馈的输出质量分数 |
-| `cost` | Token 和 API 成本累计速率 |
-| `collaboration` | 代理间目标对齐度量 |
-| `knowledge` | 当前范围内的知识密度 |
-| `innovation` | 与已有解决方案模式的偏离度 |
-| `stability` | 系统稳定性度量 |
-| `momentum` | 进度变化速率 |
-| `entropy` | 系统中的无序/不确定性 |
+| `trail` | 执行轨迹、路径跟随与历史路线线索 |
+| `alarm` | 异常、故障与紧急告警信号 |
+| `reputation` | 代理长期表现形成的信誉强度 |
+| `task` | 任务创建、推进与完成压力 |
+| `knowledge` | 发现事实、检索记忆与共享知识密度 |
+| `coordination` | 多代理同步、委派和协作强度 |
+| `emotion` | 代理情绪、压力与主观负荷信号 |
+| `trust` | 对输出与协作者的信任程度 |
+| `sna` | 协作网络结构与中介中心性线索 |
+| `learning` | 从结果中获得的能力提升与学习信号 |
+| `calibration` | 参数校准、置信度调整与系统调优信号 |
+| `species` | 角色进化、群体分化与种群动态信号 |
 
 **返回值 (status 范围)：**
 
@@ -326,20 +349,18 @@ list:
 | `metadata` | object | 否 | `{}` | 附加的元数据 |
 | `message` | string | 否 | `""` | 人类可读消息 |
 
-**10 种内置信息素类型：**
+**6 种 canonical 信息素类型 + 兼容旧别名：**
 
-| 类型 | 衰减速率 | 描述 |
-|------|---------|------|
-| `progress` | 0.05 | 任务进度信号 |
-| `warning` | 0.10 | 风险或问题警告 |
-| `success` | 0.03 | 成功完成标记 |
-| `failure` | 0.15 | 失败指示器 |
-| `discovery` | 0.02 | 发现的新信息 |
-| `dependency` | 0.01 | 依赖关系 |
-| `collaboration` | 0.04 | 协作机会 |
-| `conflict` | 0.08 | 资源或区域冲突 |
-| `dispatch` | 0.10 | 消息分派轨迹 |
-| `checkpoint` | 0.02 | 检查点标记 |
+| Canonical 类型 | 衰减速率 | 描述 | 接受的旧别名 |
+|------|---------|------|---------------|
+| `trail` | 0.008 | 路径 / 进度轨迹 | `progress`、`dependency` |
+| `alarm` | 0.15 | 警报 / 异常信号 | `warning`、`failure`、`conflict` |
+| `recruit` | 0.03 | 招募 / 协助请求 | `collaboration`、`dispatch` |
+| `queen` | 0.005 | 全局指令信号 | `checkpoint` |
+| `dance` | 0.02 | 知识发现信号 | `discovery` |
+| `food` | 0.006 | 高质量结果标记 | `success` |
+
+为兼容旧接口，工具输入仍接受历史别名；但运行时 registry 已统一收口为上表 6 种 canonical type。
 
 **返回值 (deposit)：**
 
@@ -348,9 +369,10 @@ list:
   "status": "deposited",
   "trailId": "ph-1710590400000-k9m3x7",
   "type": "success",
+  "canonicalType": "food",
   "scope": "default",
   "intensity": 0.8,
-  "decay": 0.03
+  "decay": 0.006
 }
 ```
 
@@ -367,6 +389,7 @@ list:
     {
       "id": "ph-...",
       "type": "progress",
+      "canonicalType": "trail",
       "scope": "default",
       "intensity": 0.7,
       "message": "Phase 1 complete",
@@ -386,7 +409,7 @@ list:
   "action": "stats",
   "scope": "default",
   "totalActive": 12,
-  "byType": { "progress": 5, "success": 3, "warning": 4 },
+  "byType": { "trail": 5, "food": 3, "alarm": 4 },
   "averageIntensity": 0.62,
   "oldestTrail": 1710580000000
 }
@@ -594,6 +617,25 @@ DAG 计划管理。四个动作：`view`（查看）、`modify`（修改）、`v
   "cancelledAgentCount": 2
 }
 ```
+
+**DAG Engine 节点状态机：**
+
+```
+PENDING → SPAWNING → ASSIGNED → EXECUTING → COMPLETED
+                                          └→ DEAD_LETTER
+```
+
+`SPAWNING` 状态表示节点的代理孵化请求已发出但尚未被 Gateway 确认。此状态可防止高并发 DAG 执行时的重复孵化。
+
+**DAGEngine API 方法：**
+
+| 方法 | 描述 |
+|------|------|
+| `planTask(intent, scope)` | 根据意图分类和范围估计创建 DAG |
+| `addNode(dagId, node)` | 向已有 DAG 添加节点 |
+| `spawnNode(dagId, nodeId)` | 将 PENDING 节点转换为 SPAWNING 并请求代理孵化 |
+| `completeNode(dagId, nodeId, result)` | 标记节点为 COMPLETED 并触发下游依赖 |
+| `failNode(dagId, nodeId, error)` | 将节点移至 DEAD_LETTER 并附加错误上下文 |
 
 ---
 
@@ -835,8 +877,8 @@ adapter.getStats();
 | `GET /api/v9/shapley` | Shapley 信用归因 | `{ dagId, credits: {} }` |
 | `GET /api/v9/species` | 种群进化器状态 | `{ active: [], retired: [] }` |
 | `GET /api/v9/calibration` | 信号校准状态 | `{ phase, weights }` |
-| `GET /api/v9/budget` | 预算使用 | `{ used, limit, byModel }` |
-| `GET /api/v9/budget-forecast` | 预算预测和推算 | `{ projected, exhaustionTime }` |
+| `GET /api/v9/budget` | 预算跟踪聚合状态 | `{ dagCount, dags: CostReport[], global }` |
+| `GET /api/v9/budget-forecast` | 预算预测器历史与精度 | `{ historyCount, lastRecordedAt, accuracy, byTaskType }` |
 | `GET /api/v9/dual-process` | 双过程路由统计 | `{ s1Count, s2Count, avgLatency }` |
 | `GET /api/v9/signal-weights` | 信号校准权重（每维一个） | `{ dimension: weight }` |
 | `GET /api/v9/role-discovery` | 涌现角色发现模式 | `{ discovered: [...] }` |
@@ -877,8 +919,8 @@ adapter.getStats();
 
 | 路径 | 描述 | 返回类型 |
 |------|------|---------|
-| `GET /api/v9/metrics` | 指标收集器快照 | `{ requests, errors, durations }` |
-| `GET /api/v9/health` | 系统健康检查 | `{ status, uptime, domains }` |
+| `GET /api/v9/metrics` | 指标收集器快照 | `{ agents, tasks, signals, pheromones, quality, budget, channels, memory, errors, performance, hooks }` |
+| `GET /api/v9/health` | 系统健康检查 | `{ status, score, dimensions, ts }` |
 | `GET /api/v9/config` | Dashboard 配置 | `{ port, consolePath, fieldDimensions, registeredRoutes }` |
 | `GET /api/v9/bus/stats` | EventBus 统计 | `{ published, subscribers, queued }` |
 | `GET /api/v9/store/stats` | 持久化存储统计 | `{ domains, totalKeys, snapshotCount }` |
@@ -887,8 +929,8 @@ adapter.getStats();
 
 | 路径 | 描述 | 返回类型 |
 |------|------|---------|
-| `GET /api/v9/progress/:dagId` | DAG 进度报告 | `{ completedNodes, totalNodes, percentage }` |
-| `GET /api/v9/cost-report/:dagId` | 按 DAG 分组的成本报告 | `{ totalCost, byModel, byRole }` |
+| `GET /api/v9/progress/:dagId` | DAG 进度报告 | `{ dagId, completedNodes, totalNodes, percentage, state, elapsed, remainingBudget, blockers }` |
+| `GET /api/v9/cost-report/:dagId` | 按 DAG 分组的成本报告 | `{ dagId, totalBudget, spent, remaining, utilization, phases, overrun, timestamp }` |
 | `GET /api/v9/artifacts/:dagId` | DAG 产出的工件 | `Artifact[]` |
 
 ### 记忆/身份域 (3 个端点)
@@ -903,17 +945,17 @@ adapter.getStats();
 
 | 路径 | 描述 | 返回类型 |
 |------|------|---------|
-| `GET /api/v9/bridge/status` | 桥接连接状态 | `{ connected, sessions, tools }` |
+| `GET /api/v9/bridge/status` | 桥接就绪状态与已注册能力 | `{ ready, hooks, tools, sessionBridge, spawnClient, modelFallback }` |
 | `GET /api/v9/bridge/queue` | 桥接消息队列 | `Message[]` |
 
 ### 拓扑域 (4 个端点)
 
 | 路径 | 描述 | 返回类型 |
 |------|------|---------|
-| `GET /api/v9/topology` | 模块拓扑总览 | `{ modules, connections }` |
-| `GET /api/v9/topology/graph` | 力导向拓扑图 | `{ nodes: [], edges: [] }` |
-| `GET /api/v9/modules` | 模块清单 | `Module[]` |
-| `GET /api/v9/modules/:moduleId` | 单个模块详情 | `Module` |
+| `GET /api/v9/topology` | 模块拓扑总览 | `{ moduleCount, dagCount, zones, domains }` |
+| `GET /api/v9/topology/graph` | produces/consumes 关系图 | `{ nodes: [], edges: [] }` |
+| `GET /api/v9/modules` | 模块清单 | `ModuleManifest[]` |
+| `GET /api/v9/modules/:moduleId` | 单个模块详情 | `ModuleManifest` |
 
 ### 遗留别名 (14 个端点)
 
@@ -944,6 +986,8 @@ adapter.getStats();
 | `GET /v9/console/*` | 控制台静态资源 + SPA 回退 |
 | `GET /api/v9/events` | SSE 事件流（见下文） |
 
+控制台实时状态主通道使用 `19101` 端口上的 WebSocket bridge；SSE 仍然保留，主要用于兼容和诊断事件流。
+
 ---
 
 ## SSE 事件流
@@ -951,6 +995,8 @@ adapter.getStats();
 **端点：** `GET /api/v9/events`（端口 19100）
 
 `StateBroadcaster` 订阅 EventBus 主题并通过 Server-Sent Events 推送到已连接的控制台客户端。
+
+**API：** `StateBroadcaster.setVerbosity(level)` -- 控制事件过滤粒度。级别：`0`（仅关键事件）、`1`（默认 -- 域事件）、`2`（详细 -- 包含场心跳和内部诊断）。
 
 ### 消息格式
 

@@ -96,6 +96,7 @@ export class LifecycleManager extends ModuleBase {
       agentId,
       roleId,
       state: STATES.IDLE,
+      parentId: options?.parentId ?? null,
       spawnedAt: Date.now(),
       lastTransitionAt: Date.now(),
       options,
@@ -118,7 +119,11 @@ export class LifecycleManager extends ModuleBase {
     }
 
     if (this._eventBus) {
-      this._eventBus.publish('agent.lifecycle.spawned', { agentId, roleId, provider: options.provider })
+      this._eventBus.publish('agent.lifecycle.spawned', {
+        agentId,
+        roleId,
+        provider: options.provider,
+      })
     }
 
     return { ...record }
@@ -142,7 +147,11 @@ export class LifecycleManager extends ModuleBase {
     }
 
     if (this._eventBus) {
-      this._eventBus.publish('agent.lifecycle.active', { agentId })
+      const agent = this._agents.get(agentId)
+      this._eventBus.publish('agent.lifecycle.active', {
+        agentId,
+        roleId: agent?.roleId ?? null,
+      })
     }
   }
 
@@ -157,7 +166,11 @@ export class LifecycleManager extends ModuleBase {
     agent.result = result
 
     if (this._eventBus) {
-      this._eventBus.publish('agent.lifecycle.completed', { agentId, result })
+      this._eventBus.publish('agent.lifecycle.completed', {
+        agentId,
+        roleId: agent?.roleId ?? null,
+        result,
+      })
     }
   }
 
@@ -183,7 +196,11 @@ export class LifecycleManager extends ModuleBase {
     }
 
     if (this._eventBus) {
-      this._eventBus.publish('agent.lifecycle.failed', { agentId, error: agent.error })
+      this._eventBus.publish('agent.lifecycle.failed', {
+        agentId,
+        roleId: agent?.roleId ?? null,
+        error: agent.error,
+      })
     }
   }
 
@@ -205,7 +222,11 @@ export class LifecycleManager extends ModuleBase {
     }
 
     if (this._eventBus) {
-      this._eventBus.publish('agent.lifecycle.ended', { agentId })
+      const agent = this._agents.get(agentId)
+      this._eventBus.publish('agent.lifecycle.ended', {
+        agentId,
+        roleId: agent?.roleId ?? null,
+      })
     }
   }
 

@@ -1,6 +1,6 @@
 # Emotional Intelligence
 
-Claw-Swarm V9.0 introduces a 6-dimensional emotional awareness layer that tracks agent affective state in real time. This enables adaptive workload management, conflict-sensitive routing, and early detection of systemic problems through emotional signal patterns.
+Claw-Swarm V9.2 introduces a 6-dimensional emotional awareness layer that tracks agent affective state in real time. This enables adaptive workload management, conflict-sensitive routing, and early detection of systemic problems through emotional signal patterns.
 
 ## Design Rationale
 

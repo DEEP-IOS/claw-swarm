@@ -23,6 +23,16 @@ function errorResponse(error) {
 export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_memory',
+    description: [
+      'Swarm episodic memory — store and retrieve learned experiences.',
+      '',
+      'Actions:',
+      '  search — Find relevant memories by query',
+      '  record — Store a new experience/lesson',
+      '  forget — Remove a memory by ID',
+      '  stats — Memory usage statistics',
+      '  export — Export all memories as JSON',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -65,7 +75,7 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
       try {
         const { action } = params;
         const scope = sessionBridge?.getCurrentScope?.() ?? 'default';
-        const memory = core?.intelligence?.memory;
+        const memory = core?.intelligence;
 
         switch (action) {
           case 'search': {
@@ -77,20 +87,11 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
             const maxResults = limit || 20;
             let results = [];
 
-            if (memory?.search) {
-              results = await memory.search({
-                query,
-                type: type || undefined,
-                scope,
-                limit: maxResults,
-              });
-            } else if (core?.intelligence?.searchMemory) {
-              results = await core.intelligence.searchMemory(query, {
-                type,
-                scope,
-                limit: maxResults,
-              });
-            }
+            results = await memory?.searchMemory?.(query, {
+              type,
+              scope,
+              limit: maxResults,
+            }) ?? [];
 
             return toolResponse({
               status: 'ok',
@@ -126,19 +127,14 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
               createdAt: Date.now(),
             };
 
-            if (memory?.store) {
-              await memory.store(entry);
-            } else if (core?.intelligence?.recordMemory) {
-              await core.intelligence.recordMemory(entry);
-            }
+            await memory?.recordMemory?.(entry);
 
-            // Emit field signal
-            core?.field?.emit?.('memory.recorded', {
+            core?.bus?.publish?.('memory.recorded', {
               memoryId: entryId,
               type: entry.type,
               scope,
               timestamp: entry.createdAt,
-            });
+            }, 'swarm-memory');
 
             return toolResponse({
               status: 'recorded',
@@ -155,19 +151,13 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
               return errorResponse('memoryId is required for forget action');
             }
 
-            let deleted = false;
-            if (memory?.delete) {
-              deleted = await memory.delete(memoryId);
-            } else if (core?.intelligence?.forgetMemory) {
-              deleted = await core.intelligence.forgetMemory(memoryId);
-            }
+            const deleted = await memory?.forgetMemory?.(memoryId);
 
-            // Emit field signal
-            core?.field?.emit?.('memory.forgotten', {
+            core?.bus?.publish?.('memory.forgotten', {
               memoryId,
               scope,
               timestamp: Date.now(),
-            });
+            }, 'swarm-memory');
 
             return toolResponse({
               status: deleted ? 'forgotten' : 'not_found',
@@ -183,11 +173,7 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
               newestEntry: null,
             };
 
-            if (memory?.getStats) {
-              stats = await memory.getStats({ scope });
-            } else if (core?.intelligence?.getMemoryStats) {
-              stats = await core.intelligence.getMemoryStats({ scope });
-            }
+            stats = await memory?.getMemoryStats?.({ scope }) ?? stats;
 
             return toolResponse({
               status: 'ok',
@@ -206,11 +192,7 @@ export function createMemoryTool({ core, quality, sessionBridge, spawnClient }) 
             const maxExport = limit || 100;
             let entries = [];
 
-            if (memory?.exportAll) {
-              entries = await memory.exportAll({ type, scope, limit: maxExport });
-            } else if (core?.intelligence?.exportMemory) {
-              entries = await core.intelligence.exportMemory({ type, scope, limit: maxExport });
-            }
+            entries = await memory?.exportMemory?.({ type, scope, limit: maxExport }) ?? [];
 
             return toolResponse({
               status: 'ok',

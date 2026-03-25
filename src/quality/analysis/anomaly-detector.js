@@ -28,7 +28,9 @@ export class AnomalyDetector extends ModuleBase {
    * @param {number} [deps.config.windowSize=50] - Max events per agent history
    */
   constructor({ field, bus, config = {} }) {
-    super({ field, bus, config });
+    super();
+    /** @private */ this.field = field;
+    /** @private */ this.bus = bus;
     this._agentHistories = new Map();
     this._windowSize = config.windowSize ?? 50;
     this._stats = { totalDetections: 0, typeDistribution: {} };

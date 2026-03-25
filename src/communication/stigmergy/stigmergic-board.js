@@ -13,12 +13,23 @@ import { ModuleBase } from '../../core/module-base.js'
 import { DIM_KNOWLEDGE } from '../../core/field/types.js'
 
 const COLLECTION = 'board'
+const MAX_HIGHLIGHTS = 5
+
+function truncateText(value, max = 140) {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  return text.length <= max ? text : `${text.slice(0, max - 3)}...`
+}
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))]
+}
 
 class StigmergicBoard extends ModuleBase {
   static produces()    { return [DIM_KNOWLEDGE] }
   static consumes()    { return [] }
-  static publishes()   { return ['stigmergy.entry.written', 'stigmergy.entry.read'] }
-  static subscribes()  { return [] }
+  static publishes()   { return ['stigmergy.entry.written', 'stigmergy.entry.read', 'stigmergy.updated'] }
+  static subscribes()  { return ['dag.completed'] }
 
   /**
    * @param {Object} deps
@@ -34,6 +45,30 @@ class StigmergicBoard extends ModuleBase {
     this._field          = field || null
     this._eventBus       = eventBus || null
     this._gossipProtocol = gossipProtocol || null
+    this._unsubscribers  = []
+  }
+
+  async start() {
+    if (this._unsubscribers.length > 0) return
+    const subscribe = this._eventBus?.subscribe?.bind(this._eventBus)
+    if (!subscribe) return
+
+    const onDagCompleted = (envelope) => {
+      this._onDagCompleted(envelope?.data ?? envelope)
+    }
+
+    const unsubscribe = subscribe('dag.completed', onDagCompleted)
+    this._unsubscribers.push(
+      typeof unsubscribe === 'function'
+        ? unsubscribe
+        : () => this._eventBus?.unsubscribe?.('dag.completed', onDagCompleted)
+    )
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.()
+    }
   }
 
   /**
@@ -78,6 +113,12 @@ class StigmergicBoard extends ModuleBase {
 
     if (this._eventBus) {
       this._eventBus.publish('stigmergy.entry.written', { agentId, key, scope })
+      this._eventBus.publish('stigmergy.updated', {
+        agentId,
+        key,
+        scope,
+        action: 'write',
+      })
     }
   }
 
@@ -153,6 +194,12 @@ class StigmergicBoard extends ModuleBase {
     }
 
     this._domainStore.delete(COLLECTION, key)
+    this._eventBus?.publish?.('stigmergy.updated', {
+      agentId,
+      key,
+      scope: entry.scope,
+      action: 'remove',
+    })
     return true
   }
 
@@ -162,6 +209,50 @@ class StigmergicBoard extends ModuleBase {
    */
   stats() {
     return { totalEntries: this._domainStore.count(COLLECTION) }
+  }
+
+  _onDagCompleted(payload = {}) {
+    if (!payload?.dagId) return
+
+    const key = `dag-summary:${payload.dagId}`
+    const scope = payload.metadata?.scope || payload.metadata?.sessionId || payload.dagId || 'global'
+    const sessionId = payload.metadata?.sessionId || null
+
+    this.write('system', key, this._summarizeDagCompletion(payload), {
+      scope,
+      visibility: 'immediate',
+      session: sessionId,
+    })
+  }
+
+  _summarizeDagCompletion(payload = {}) {
+    const nodes = Array.isArray(payload.nodes) ? payload.nodes : []
+    const sessionHistory = Array.isArray(payload.sessionHistory) ? payload.sessionHistory : []
+    const completedNodes = nodes.filter((node) => node.state === 'COMPLETED').length
+    const deadLetterNodes = nodes.filter((node) => node.state === 'DEAD_LETTER').length
+    const roles = unique(nodes.map((node) => node.role))
+    const tasks = unique(nodes.map((node) => truncateText(node.taskId, 80))).slice(0, MAX_HIGHLIGHTS)
+    const highlights = unique(
+      sessionHistory.map((entry) =>
+        truncateText(entry?.content || entry?.summary || entry?.tool || entry?.action || '', 90)
+      )
+    ).slice(0, MAX_HIGHLIGHTS)
+
+    return {
+      kind: 'dag_summary',
+      dagId: payload.dagId,
+      success: payload.success !== false,
+      completedNodes,
+      deadLetterNodes,
+      roles,
+      tasks,
+      summary: payload.success !== false
+        ? `DAG ${payload.dagId} completed with ${completedNodes}/${nodes.length} node(s) completed.`
+        : `DAG ${payload.dagId} finished with ${deadLetterNodes} dead-letter node(s).`,
+      highlights,
+      metadata: payload.metadata || {},
+      completedAt: payload.completedAt || Date.now(),
+    }
   }
 }
 

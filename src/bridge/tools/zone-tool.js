@@ -29,6 +29,16 @@ function errorResponse(error) {
 export function createZoneTool({ core, quality, sessionBridge, spawnClient }) {
   return {
     name: 'swarm_zone',
+    description: [
+      'File/directory conflict zone management.',
+      'Prevent multiple agents from editing the same files simultaneously.',
+      '',
+      'Actions:',
+      '  detect — Check if a path has active locks',
+      '  lock — Acquire an exclusive lock on a path',
+      '  unlock — Release a lock',
+      '  list — Show all active zone locks',
+    ].join('\n'),
 
     parameters: {
       type: 'object',
@@ -139,14 +149,13 @@ export function createZoneTool({ core, quality, sessionBridge, spawnClient }) {
             }
 
             if (result?.granted) {
-              // Emit field signal
-              core?.field?.emit?.('zone.locked', {
+              core?.bus?.publish?.('zone.locked', {
                 lockId: result.lockId || lockId,
                 path,
                 agentId: lockRequest.agentId,
                 scope,
                 timestamp: Date.now(),
-              });
+              }, 'swarm-zone');
 
               return toolResponse({
                 status: 'locked',
@@ -193,14 +202,13 @@ export function createZoneTool({ core, quality, sessionBridge, spawnClient }) {
             }
 
             if (result?.released) {
-              // Emit field signal
-              core?.field?.emit?.('zone.unlocked', {
+              core?.bus?.publish?.('zone.unlocked', {
                 path,
                 agentId: unlockRequest.agentId,
                 forced: unlockRequest.force,
                 scope,
                 timestamp: Date.now(),
-              });
+              }, 'swarm-zone');
 
               return toolResponse({
                 status: 'unlocked',

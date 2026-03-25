@@ -115,7 +115,7 @@ export class ToolResilience extends ModuleBase {
       `Please re-generate the tool call with corrected parameters.`
 
     // Emit alarm signal into the field
-    this._field.emit({
+    this._field?.emit?.({
       dimension: DIM_ALARM,
       scope: toolName,
       strength: 0.5,
@@ -124,7 +124,7 @@ export class ToolResilience extends ModuleBase {
     })
 
     // Publish bus event
-    this._bus.publish('quality.tool.validation_failed', {
+    this._bus?.publish?.('quality.tool.validation_failed', {
       toolName,
       errors: errorMsg,
       timestamp: Date.now(),
@@ -155,7 +155,7 @@ export class ToolResilience extends ModuleBase {
 
     const delay = Math.min(1000 * Math.pow(2, current - 1), 8000)
 
-    this._bus.publish('quality.tool.retry_injected', {
+    this._bus?.publish?.('quality.tool.retry_injected', {
       toolName,
       toolCallId,
       attempt: current,

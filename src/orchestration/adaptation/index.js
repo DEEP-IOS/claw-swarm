@@ -20,6 +20,63 @@ import { SkillGovernor }      from './skill-governor.js'
 import { BudgetTracker }      from './budget-tracker.js'
 import { BudgetForecaster }   from './budget-forecaster.js'
 
+const ADAPTATION_STATE_COLLECTION = 'adaptation-state'
+
+function createAdaptationBus(bus) {
+  if (!bus) return null
+
+  return {
+    publish: (...args) => bus.publish?.(...args) ?? bus.emit?.(...args),
+    emit: (...args) => bus.emit?.(...args) ?? bus.publish?.(...args),
+    subscribe: (...args) => bus.subscribe?.(...args),
+    unsubscribe: (...args) => bus.unsubscribe?.(...args),
+    on(topic, handler) {
+      if (typeof bus.on === 'function') {
+        return bus.on(topic, handler)
+      }
+      if (typeof bus.subscribe === 'function') {
+        const wrapped = (envelope) => handler(envelope?.data ?? envelope)
+        bus.subscribe(topic, wrapped)
+        return () => bus.unsubscribe?.(topic, wrapped)
+      }
+      return () => {}
+    },
+  }
+}
+
+function createAdaptationStore(store) {
+  if (!store) return null
+
+  return {
+    put: (...args) => store.put?.(...args),
+    query: (...args) => store.query?.(...args) ?? [],
+    queryAll: (...args) => store.queryAll?.(...args) ?? [],
+    count: (...args) => store.count?.(...args) ?? 0,
+    has(collectionOrKey, maybeKey) {
+      if (maybeKey === undefined) {
+        return store.has?.(ADAPTATION_STATE_COLLECTION, collectionOrKey) ?? false
+      }
+      return store.has?.(collectionOrKey, maybeKey) ?? false
+    },
+    delete(collectionOrKey, maybeKey) {
+      if (maybeKey === undefined) {
+        return store.delete?.(ADAPTATION_STATE_COLLECTION, collectionOrKey) ?? false
+      }
+      return store.delete?.(collectionOrKey, maybeKey) ?? false
+    },
+    get(collectionOrKey, maybeKey) {
+      if (maybeKey === undefined) {
+        return store.get?.(ADAPTATION_STATE_COLLECTION, collectionOrKey)
+      }
+      return store.get?.(collectionOrKey, maybeKey)
+    },
+    set(key, value) {
+      store.put?.(ADAPTATION_STATE_COLLECTION, key, value)
+      return value
+    },
+  }
+}
+
 /**
  * Create the full adaptation system with all 10 modules.
  *
@@ -35,17 +92,19 @@ import { BudgetForecaster }   from './budget-forecaster.js'
  */
 export function createAdaptationSystem(deps) {
   const { field, bus, store, roleRegistry, capabilityEngine, reputationCRDT, config = {} } = deps
+  const adaptationBus = createAdaptationBus(bus)
+  const adaptationStore = createAdaptationStore(store)
 
-  const dualProcessRouter = new DualProcessRouter({ field, bus, store, config: config.dualProcess })
-  const globalModulator   = new GlobalModulator({ field, bus, store, config: config.modulator })
-  const responseThreshold = new ResponseThreshold({ field, bus, config: config.threshold })
-  const signalCalibrator  = new SignalCalibrator({ field, bus, store, config: config.calibrator })
-  const shapleyCredit     = new ShapleyCredit({ field, bus, store, config: config.shapley })
-  const speciesEvolver    = new SpeciesEvolver({ field, bus, store, roleRegistry, config: config.species })
-  const roleDiscovery     = new RoleDiscovery({ field, bus, store, roleRegistry, reputationCRDT, config: config.discovery })
-  const skillGovernor     = new SkillGovernor({ field, bus, store, capabilityEngine })
-  const budgetTracker     = new BudgetTracker({ field, bus, config: config.budget })
-  const budgetForecaster  = new BudgetForecaster({ field, bus, store })
+  const dualProcessRouter = new DualProcessRouter({ field, bus: adaptationBus, store: adaptationStore, config: config.dualProcess })
+  const globalModulator   = new GlobalModulator({ field, bus: adaptationBus, store: adaptationStore, config: config.modulator })
+  const responseThreshold = new ResponseThreshold({ field, bus: adaptationBus, store: adaptationStore, config: config.threshold })
+  const signalCalibrator  = new SignalCalibrator({ field, bus: adaptationBus, store: adaptationStore, config: config.calibrator })
+  const shapleyCredit     = new ShapleyCredit({ field, bus: adaptationBus, reputationCRDT, config: config.shapley })
+  const speciesEvolver    = new SpeciesEvolver({ field, bus: adaptationBus, store: adaptationStore, roleRegistry, config: config.species })
+  const roleDiscovery     = new RoleDiscovery({ field, bus: adaptationBus, store: adaptationStore, roleRegistry, reputationCRDT, config: config.discovery })
+  const skillGovernor     = new SkillGovernor({ field, bus: adaptationBus, store: adaptationStore, capabilityEngine })
+  const budgetTracker     = new BudgetTracker({ field, bus: adaptationBus, config: config.budget })
+  const budgetForecaster  = new BudgetForecaster({ field, bus: adaptationBus, store: adaptationStore })
 
   const modules = [
     dualProcessRouter, globalModulator, responseThreshold, signalCalibrator,

@@ -19,6 +19,51 @@ import { DIM_KNOWLEDGE } from '../../core/field/types.js';
 // --- Constants -----------------------------------------------------------
 const COLLECTION_EPISODES     = 'episodes';
 const COLLECTION_CONSOLIDATED = 'consolidated';
+const MAX_ACTIONS = 8;
+
+function clampQuality(value, fallback) {
+  const numeric = typeof value === 'number' ? value : fallback;
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function truncateText(value, max = 120) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
+}
+
+function normalizeOutcome(result) {
+  if (result?.outcome === 'failure' || result?.success === false) return 'failure';
+  if (result?.outcome === 'partial' || result?.partial === true) return 'partial';
+  return 'success';
+}
+
+function extractActions(sessionHistory = []) {
+  const actions = [];
+
+  for (const entry of sessionHistory) {
+    if (!entry) continue;
+
+    const label = entry.tool || entry.action || entry.type || entry.name || '';
+    const detail = truncateText(
+      entry.content
+      || entry.summary
+      || entry.message
+      || entry.result
+      || '',
+      80,
+    );
+
+    const combined = [label, detail].filter(Boolean).join(': ');
+    if (combined) {
+      actions.push(combined);
+    }
+
+    if (actions.length >= MAX_ACTIONS) break;
+  }
+
+  return actions;
+}
 
 // --- EpisodicMemory ------------------------------------------------------
 export class EpisodicMemory extends ModuleBase {
@@ -42,6 +87,30 @@ export class EpisodicMemory extends ModuleBase {
     this._eventBus        = eventBus;
     this._embeddingEngine = embeddingEngine;
     this._vectorIndex     = vectorIndex;
+    this._unsubscribers   = [];
+  }
+
+  async start() {
+    if (this._unsubscribers.length > 0) return;
+    const subscribe = this._eventBus?.subscribe?.bind(this._eventBus);
+    if (!subscribe) return;
+
+    const onCompleted = (envelope) => {
+      void this._recordFromLifecycle(envelope?.data ?? envelope);
+    };
+
+    const unsubscribe = subscribe('agent.lifecycle.completed', onCompleted);
+    this._unsubscribers.push(
+      typeof unsubscribe === 'function'
+        ? unsubscribe
+        : () => this._eventBus?.unsubscribe?.('agent.lifecycle.completed', onCompleted),
+    );
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.();
+    }
   }
 
   // --- Core Methods -------------------------------------------------------
@@ -249,6 +318,61 @@ export class EpisodicMemory extends ModuleBase {
       .map(([l]) => l);
 
     return { tags, lessons };
+  }
+
+  async _recordFromLifecycle(payload) {
+    if (!payload?.agentId) return;
+
+    const result = payload.result || {};
+    const outcome = normalizeOutcome(result);
+    const actions = extractActions(result.sessionHistory);
+    const quality = clampQuality(
+      result.quality
+      ?? result.qualityScore
+      ?? result.score
+      ?? result.audit?.score,
+      outcome === 'success' ? 0.8 : outcome === 'partial' ? 0.5 : 0.2,
+    );
+
+    const tags = [...new Set([
+      ...(Array.isArray(result.tags) ? result.tags : []),
+      payload.roleId || payload.role || null,
+      payload.dagId ? 'dag' : null,
+    ].filter(Boolean))];
+
+    const lessons = Array.isArray(result.lessons)
+      ? result.lessons.map((lesson) => truncateText(lesson, 140)).filter(Boolean)
+      : (outcome === 'failure' && result.error
+        ? [truncateText(`Failure: ${result.error}`, 140)]
+        : []);
+
+    const goal = truncateText(
+      payload.task
+      || result.goal
+      || result.task
+      || result.summary
+      || result.content
+      || result.output
+      || payload.taskId
+      || `Agent ${payload.agentId} completed work`,
+      240,
+    );
+
+    const episode = {
+      id: result.episodeId || `ep-${payload.agentId}-${Date.now()}`,
+      taskId: payload.taskId || result.taskId || payload.agentId,
+      role: payload.roleId || payload.role || 'generalist',
+      goal,
+      actions: actions.length > 0 ? actions : [truncateText(payload.taskId || payload.agentId, 80)],
+      outcome,
+      quality,
+      sessionId: payload.sessionId || result.sessionId || payload.dagId || 'global',
+      tags,
+      lessons,
+      recordedAt: result.completedAt || Date.now(),
+    };
+
+    await this.record(episode);
   }
 }
 

@@ -1,6 +1,6 @@
 # FAQ & Troubleshooting
 
-> Claw-Swarm V9.0.0 — Frequently asked questions and common issue resolution
+> Claw-Swarm V9.2.0 — Frequently asked questions and common issue resolution
 
 [← Back to README](../../README.md) | [中文版](../zh-CN/faq-troubleshooting.md)
 
@@ -10,11 +10,11 @@
 
 ### What is Claw-Swarm?
 
-Claw-Swarm is an OpenClaw plugin that enables multi-agent collaboration through bio-inspired swarm intelligence. It coordinates LLM agents using biological algorithms — pheromone trails (ant colony optimization), bee colony scheduling (ABC), immune-system anomaly detection, and Lotka-Volterra population dynamics — rather than centralized control. The system operates as a single-process in-gateway architecture with 7 domains, 121 source files, and 1,365 tests. See [Biomimicry & Design Philosophy](biomimicry.md) for the design rationale.
+Claw-Swarm is an OpenClaw plugin that enables multi-agent collaboration through bio-inspired swarm intelligence. It coordinates LLM agents using biological algorithms — pheromone trails (ant colony optimization), bee colony scheduling (ABC), immune-system anomaly detection, and Lotka-Volterra population dynamics — rather than centralized control. The system operates as a single-process in-gateway architecture with 7 domains, 121 source files, and 1,697 tests. See [Biomimicry & Design Philosophy](biomimicry.md) for the design rationale.
 
 ### How does the signal field architecture differ from traditional event systems?
 
-Traditional event systems use flat pub/sub: publishers emit events to named channels, and all subscribers on that channel receive the message regardless of context. The V9.0 12-dimensional signal field architecture introduces three key differences:
+Traditional event systems use flat pub/sub: publishers emit events to named channels, and all subscribers on that channel receive the message regardless of context. The V9.2 12-dimensional signal field architecture introduces three key differences:
 
 1. **Field-mediated coupling:** Modules interact exclusively through the SignalStore. Each `ModuleBase` subclass (~110 modules) declares `produces` and `consumes` signal dimensions, creating automatic coupling without explicit wiring.
 2. **Typed receptors with thresholds:** Each module declares typed receptors that only fire when signal intensity exceeds a configurable threshold. This prevents noise from triggering expensive downstream computation.
@@ -145,7 +145,7 @@ Always verify that port 19100 is free before restarting the gateway.
 
 **Symptom:** Startup warnings about V8 SQLite data migration.
 
-**Cause:** V9.0 uses DomainStore with JSON snapshots instead of SQLite. On first startup, the system attempts to migrate existing V8 data automatically.
+**Cause:** V9.2 uses DomainStore with JSON snapshots instead of SQLite. On first startup, the system attempts to migrate existing V8 data automatically.
 
 **Fix:**
 
@@ -183,7 +183,7 @@ Always verify that port 19100 is free before restarting the gateway.
    ```bash
    npx vitest run
    ```
-   V9.0 expects 1,365 tests to pass.
+   V9.2 expects 1,697 tests to pass.
 4. If specific tests fail, check whether they depend on optional dependencies (`@xenova/transformers`, `usearch`) that may not be installed.
 
 ---
@@ -273,9 +273,10 @@ curl http://127.0.0.1:19100/api/v1/diagnostics | jq .
 
 1. **Check the logs:** Gateway logs and SwarmCore child process logs contain detailed error messages with source file references.
 2. **Run diagnostics:** `curl http://127.0.0.1:19100/api/v1/diagnostics` provides a comprehensive health report.
-3. **Run tests:** `npx vitest run` validates that all 1,365 tests pass in your environment.
-4. **Inspect events:** `curl -N http://127.0.0.1:19100/events` streams real-time events for live debugging.
-5. **Console browser devtools:** Open the browser developer console on the Console SPA page. SSE connection status and event dispatch are logged.
+3. **Run tests:** `npx vitest run` validates that all 1,697 tests pass in your environment.
+4. **Inspect bridge status:** `curl http://127.0.0.1:19100/api/v9/bridge/status` confirms the live console bridge is up.
+5. **Inspect events:** `curl -N http://127.0.0.1:19100/events` streams legacy SSE events for live debugging.
+6. **Console browser devtools:** Open the browser developer console on the Console SPA page. WebSocket bridge connection status and event dispatch are logged.
 
 ---
 

@@ -34,7 +34,8 @@ const MAX_DISTANCE = Math.sqrt(DIMENSIONS.length); // sqrt(5) for normalization
 
 class CulturalFriction extends ModuleBase {
   constructor({ field }) {
-    super({ field });
+    super();
+    this.field = field;
     this._profiles = new Map(Object.entries(PROFILES));
   }
 

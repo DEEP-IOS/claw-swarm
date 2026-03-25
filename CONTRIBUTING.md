@@ -1,4 +1,4 @@
-# Contributing to Claw-Swarm V9.0 / 贡献指南
+# Contributing to Claw-Swarm V9.2 / 贡献指南
 
 Thank you for your interest in contributing to Claw-Swarm!
 感谢你有兴趣为蜂群项目做贡献！
@@ -21,8 +21,8 @@ npm test
 
 ### Project Structure / 项目结构
 
-V9.0 organizes 121 source JS files across 7 domains with field-mediated coupling.
-V9.0 将 121 个源文件组织在 7 个域中，通过场中介耦合连接。
+V9.2 organizes 121 source JS files across 7 domains with field-mediated coupling.
+V9.2 将 121 个源文件组织在 7 个域中，通过场中介耦合连接。
 
 ```
 src/
@@ -44,7 +44,7 @@ src/
 
 ### Running Tests / 运行测试
 
-1,365 tests across 107 test files, powered by Vitest 2.1.8.
+1,697 tests across 107 test files, powered by Vitest 2.1.8.
 
 ```bash
 npm test                  # All tests / 全部测试
@@ -70,7 +70,7 @@ npx vitest run --coverage # Coverage report / 覆盖率报告
 2. Create a **feature branch**: `git checkout -b feature/my-feature`
 3. Follow coding standards (2-space indent, single quotes, no semicolons, ES modules)
 4. Write tests for your changes
-5. Ensure all 1,365+ tests pass: `npm test`
+5. Ensure all 1,697+ tests pass: `npm test`
 6. Submit a **Pull Request**
 
 ---

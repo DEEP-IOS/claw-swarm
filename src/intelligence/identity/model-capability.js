@@ -72,8 +72,10 @@ export class ModelCapability extends ModuleBase {
   /** @returns {string[]} */
   static subscribes() { return [] }
 
-  constructor() {
+  constructor({ field, config } = {}) {
     super()
+    this._field = field || null
+    this._config = config || {}
     /** @type {Map<string, Object>} */
     this._models = new Map(MODELS)
   }

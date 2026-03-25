@@ -52,6 +52,21 @@ export const ALL_DIMENSIONS = Object.freeze([
   DIM_SNA, DIM_LEARNING, DIM_CALIBRATION, DIM_SPECIES,
 ])
 
+export const FIELD_DIMENSION_DESCRIPTORS = Object.freeze([
+  { id: DIM_TRAIL, label: 'Trail', description: 'Execution traces and path-following cues across the swarm.' },
+  { id: DIM_ALARM, label: 'Alarm', description: 'Anomaly, failure, and urgency signals requiring attention.' },
+  { id: DIM_REPUTATION, label: 'Reputation', description: 'Credibility and performance trust accumulated over time.' },
+  { id: DIM_TASK, label: 'Task', description: 'Task creation, progress, and completion pressure in the system.' },
+  { id: DIM_KNOWLEDGE, label: 'Knowledge', description: 'Discovered facts, memory recall, and shared learnings.' },
+  { id: DIM_COORDINATION, label: 'Coordination', description: 'Multi-agent synchronization, routing, and delegation activity.' },
+  { id: DIM_EMOTION, label: 'Emotion', description: 'Affective state and stress-related context from agents.' },
+  { id: DIM_TRUST, label: 'Trust', description: 'Inter-agent trust and confidence in outputs or collaborators.' },
+  { id: DIM_SNA, label: 'SNA', description: 'Social-network structure and collaboration topology indicators.' },
+  { id: DIM_LEARNING, label: 'Learning', description: 'Capability improvement and adaptation gained from outcomes.' },
+  { id: DIM_CALIBRATION, label: 'Calibration', description: 'System-tuning and confidence-adjustment signals.' },
+  { id: DIM_SPECIES, label: 'Species', description: 'Role evolution and population-level specialization dynamics.' },
+])
+
 /**
  * 每个维度的默认衰减率（λ）— 值越大衰减越快
  * Default decay rate (lambda) per dimension — higher = faster decay

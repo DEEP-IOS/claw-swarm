@@ -15,16 +15,20 @@ const INTENTS = Object.freeze({
   REFACTOR: 'refactor',
   OPTIMIZE: 'optimize',
   EXPLORE: 'explore',
+  ANALYZE: 'analyze',
+  CONTENT: 'content',
   QUESTION: 'question',
 })
 
 const KEYWORD_MAP = Object.freeze({
-  bug_fix: ['bug', 'fix', 'error', 'broken', 'crash', '报错', '修复', '出错', '崩溃', '不work'],
-  new_feature: ['add', 'create', 'implement', 'build', 'new', '新增', '添加', '创建', '实现'],
-  refactor: ['refactor', 'restructure', 'reorganize', 'clean', '重构', '整理', '优化结构'],
-  optimize: ['optimize', 'performance', 'speed', 'slow', 'fast', '优化', '加速', '性能', '慢'],
-  explore: ['explore', 'investigate', 'understand', 'how', 'why', '了解', '探索', '调研', '为什么'],
-  question: ['what', 'where', 'explain', '什么', '哪里', '解释', '怎么'],
+  bug_fix: ['bug', 'fix', 'error', 'broken', 'crash', 'issue', 'problem', 'debug', '报错', '修复', '出错', '崩溃', '不work', '问题', '故障'],
+  new_feature: ['add', 'create', 'implement', 'build', 'new', 'develop', 'design', '新增', '添加', '创建', '实现', '开发', '设计', '搭建', '构建'],
+  refactor: ['refactor', 'restructure', 'reorganize', 'clean', 'simplify', '重构', '整理', '优化结构', '简化', '拆分'],
+  optimize: ['optimize', 'performance', 'speed', 'slow', 'fast', 'efficient', '优化', '加速', '性能', '慢', '提升', '效率'],
+  explore: ['explore', 'investigate', 'understand', 'how', 'why', 'research', 'impact', 'affect', 'review', 'study', '了解', '探索', '调研', '为什么', '影响', '调查', '趋势'],
+  analyze: ['analyze', 'analyse', 'evaluate', 'assess', 'compare', 'benchmark', 'audit', 'inspect', '分析', '评估', '对比', '审计', '检查', '评价', '考察', '诊断'],
+  content: ['write', 'article', 'blog', 'report', 'essay', 'post', 'draft', 'compose', 'publish', '写', '文章', '报告', '撰写', '草稿', '公众号', '博客', '发布', '内容', '稿'],
+  question: ['what', 'where', 'explain', 'describe', 'tell', '什么', '哪里', '解释', '怎么', '是什么', '介绍', '说明', '帮我', '研究'],
 })
 
 class IntentClassifier extends ModuleBase {
@@ -76,6 +80,11 @@ class IntentClassifier extends ModuleBase {
     const [topIntent, topScore] = sorted[0]
     const [, secondScore] = sorted[1] || [null, 0]
 
+    // Zero-match fallback: when no keywords hit, default to 'explore' with low confidence
+    if (topScore === 0) {
+      return { primary: INTENTS.EXPLORE, confidence: 0.2, ambiguity: [INTENTS.QUESTION] }
+    }
+
     // Confidence: top1 / (top1 + top2 + 1)
     const confidence = Math.round((topScore / (topScore + secondScore + 1)) * 100) / 100
 
@@ -95,7 +104,7 @@ class IntentClassifier extends ModuleBase {
         `意图不够明确，可能是 ${topIntent} 或 ${ambiguity.join('/')}, 能否进一步说明？`
     }
 
-    this._bus.publish('intent.classified', result)
+    this._bus?.publish('intent.classified', result)
     return result
   }
 

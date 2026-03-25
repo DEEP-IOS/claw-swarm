@@ -19,7 +19,7 @@ import {
 // ============================================================================
 
 const DEFAULT_CONFIG = {
-  complexityThreshold: 0.4,
+  complexityThreshold: 0.15,
   thresholdAdjustStep: 0.02,
   minThreshold: 0.2,
   maxThreshold: 0.7,
@@ -59,10 +59,44 @@ export class DualProcessRouter extends ModuleBase {
 
     /** @type {{ system1Count: number, system2Count: number, overrideCount: number }} */
     this._stats = { system1Count: 0, system2Count: 0, overrideCount: 0 }
+    this._unsubscribe = null
   }
 
-  async start() {}
-  async stop() {}
+  async start() {
+    this._unsubscribers = []
+    const listen = this._bus?.on?.bind(this._bus)
+    if (!listen) return
+
+    this._unsubscribers.push(
+      listen('intent.classified', (payload) => {
+        if (payload?.scope == null && payload?.riskLevel == null) return
+        this.route({
+          confidence: payload?.confidence ?? 0.5,
+          riskLevel: payload?.riskLevel ?? 'low',
+          scope: payload?.scope ?? 'global',
+        }, { scope: payload?.scope ?? 'global' })
+      }),
+      // Adapt threshold based on DAG outcomes: successful DAGs raise the
+      // threshold (allow more fast paths), failed DAGs lower it.
+      listen('dag.completed', (payload) => {
+        const success = payload?.success !== false
+        // Determine which system was used from route metadata
+        const route = payload?.metadata?.route
+        const system = route?.route?.name === 'fast' ? 1 : 2
+        this.adjustThreshold({ system, success })
+      }),
+    )
+  }
+
+  async stop() {
+    if (this._unsubscribers) {
+      for (const unsub of this._unsubscribers) unsub?.()
+      this._unsubscribers = []
+    }
+    // Legacy cleanup
+    this._unsubscribe?.()
+    this._unsubscribe = null
+  }
 
   // ━━━ Core API ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

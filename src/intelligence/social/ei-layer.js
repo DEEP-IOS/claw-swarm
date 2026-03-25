@@ -7,7 +7,8 @@ import { DIM_EMOTION, DIM_TRUST } from '../../core/field/types.js';
 
 class EILayer extends ModuleBase {
   constructor({ field }) {
-    super({ field });
+    super();
+    this.field = field;
   }
 
   static produces() { return []; }

@@ -102,6 +102,7 @@ export class SpeciesEvolver extends ModuleBase {
   // --------------------------------------------------------------------------
 
   async start() {
+    await this.restore()
     this._unsub = this._bus?.on?.('dag.completed', () => {
       this._completedDAGs++
       if (this._completedDAGs % this._config.evolveInterval === 0) {
@@ -112,6 +113,7 @@ export class SpeciesEvolver extends ModuleBase {
 
   async stop() {
     if (typeof this._unsub === 'function') this._unsub()
+    await this.persist()
   }
 
   // --------------------------------------------------------------------------
@@ -408,6 +410,19 @@ export class SpeciesEvolver extends ModuleBase {
   }
 
   /**
+   * Get a snapshot of the current evolution state for dashboards/facades.
+   * @returns {{ generation: number, completedDAGs: number, populationSize: number, population: Species[] }}
+   */
+  getState() {
+    return {
+      generation: this._generationCounter,
+      completedDAGs: this._completedDAGs,
+      populationSize: this._population.size,
+      population: this.getPopulation(),
+    }
+  }
+
+  /**
    * Get the best species for a specific role by fitness.
    * @param {string} roleId
    * @returns {Species|null}
@@ -460,6 +475,26 @@ export class SpeciesEvolver extends ModuleBase {
   // --------------------------------------------------------------------------
   // Internal helpers
   // --------------------------------------------------------------------------
+
+  /**
+   * Record the outcome of a task for a given role.
+   * Convenience method called by cross-wiring in index-v9.js.
+   * Increments the task count of the best species for that role
+   * and adjusts its fitness based on success/failure.
+   *
+   * @param {{ roleId: string, success: boolean }} outcome
+   */
+  recordOutcome({ roleId, success }) {
+    if (!roleId) return
+
+    const best = this.getBestByRole(roleId)
+    if (best) {
+      best.taskCount++
+      // Nudge fitness: success raises it, failure lowers it
+      const delta = success ? 0.02 : -0.03
+      best.fitness = Math.max(0, Math.min(1, best.fitness + delta))
+    }
+  }
 
   /** @private @returns {number} */
   _averageFitness() {

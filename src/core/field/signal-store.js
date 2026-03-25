@@ -28,7 +28,7 @@ import {
   DEFAULT_EXPIRED_THRESHOLD,
 } from './types.js'
 import { encode, actualStrength } from './forward-decay.js'
-import { superpose as computeSuperpose } from './field-vector.js'
+import { superpose as computeSuperpose, applyCalibration } from './field-vector.js'
 import { GCScheduler } from './gc-scheduler.js'
 import { MemoryBackend } from './backends/memory.js'
 
@@ -101,6 +101,8 @@ export class SignalStore extends ModuleBase {
     this._eventBus = eventBus || null
     /** @private */
     this._maxSignals = maxSignals
+    /** @private 校准权重（由 SignalCalibrator 通过事件更新） */
+    this._calibrationWeights = null
 
     /** @private */
     this._gcScheduler = new GCScheduler({
@@ -286,7 +288,23 @@ export class SignalStore extends ModuleBase {
    */
   superpose(scope, dimensions = ALL_DIMENSIONS) {
     const signals = this._backend.scan({ scope })
-    return computeSuperpose(signals, dimensions, Date.now())
+    const raw = computeSuperpose(signals, dimensions, Date.now())
+    // 应用校准权重（如有），使 SignalCalibrator 的互信息权重生效
+    if (this._calibrationWeights) {
+      return applyCalibration(raw, this._calibrationWeights)
+    }
+    return raw
+  }
+
+  /**
+   * 设置校准权重（由 SignalCalibrator calibration.completed 事件驱动）
+   * Set calibration weights (driven by calibration.completed event)
+   * @param {Record<string, number>} weights
+   */
+  setCalibrationWeights(weights) {
+    if (weights && typeof weights === 'object') {
+      this._calibrationWeights = weights
+    }
   }
 
   // ==========================================================================
@@ -348,6 +366,17 @@ export class SignalStore extends ModuleBase {
       totalQueried: this._totalQueried,
       maxSignals: this._maxSignals,
     }
+  }
+
+  read(filter = {}) {
+    return this.query(filter)
+  }
+
+  getWeights() {
+    if (this._calibrationWeights) {
+      return { ...this._calibrationWeights }
+    }
+    return Object.fromEntries(ALL_DIMENSIONS.map((dimension) => [dimension, 1.0]))
   }
 
   // ==========================================================================

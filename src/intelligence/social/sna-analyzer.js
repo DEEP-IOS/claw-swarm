@@ -7,7 +7,9 @@ import { DIM_SNA, DIM_TRAIL } from '../../core/field/types.js';
 
 class SNAAnalyzer extends ModuleBase {
   constructor({ field, bus }) {
-    super({ field, bus });
+    super();
+    this.field = field;
+    this.bus = bus;
     this._edges = new Map(); // "agentA::agentB" -> {weight, successes, failures}
   }
 
@@ -85,6 +87,38 @@ class SNAAnalyzer extends ModuleBase {
       else if (b === agentId) collaborators.push({ agentId: a, edge });
     }
     return collaborators;
+  }
+
+  getMetrics() {
+    const centrality = Object.fromEntries(this.computeCentrality());
+    const edges = Array.from(this._edges.entries()).map(([key, edge]) => {
+      const [agentA, agentB] = key.split('::');
+      return {
+        id: key,
+        agentA,
+        agentB,
+        weight: edge.weight,
+        successes: edge.successes,
+        failures: edge.failures,
+        successRate: edge.weight > 0 ? edge.successes / edge.weight : 0,
+      };
+    });
+
+    const nodeIds = new Set();
+    for (const edge of edges) {
+      nodeIds.add(edge.agentA);
+      nodeIds.add(edge.agentB);
+    }
+
+    return {
+      nodeCount: nodeIds.size,
+      edgeCount: edges.length,
+      nodes: [...nodeIds].map((id) => ({ id, centrality: centrality[id] || 0 })),
+      edges,
+      centrality,
+      strongPairs: this.getStrongPairs(),
+      weakPairs: this.getWeakPairs(),
+    };
   }
 
   toFieldSignal() {

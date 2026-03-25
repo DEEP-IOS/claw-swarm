@@ -10,6 +10,7 @@ import { HealthChecker } from './health/health-checker.js';
 import { TraceCollector } from './health/trace-collector.js';
 import { StateBroadcaster } from './broadcast/state-broadcaster.js';
 import { AdaptiveTicker } from './tick/adaptive-ticker.js';
+import { ConsoleDataBridge } from './bridge/console-data-bridge.js';
 
 /**
  * Create the entire Observe subsystem.
@@ -34,6 +35,12 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
   });
 
   const adaptiveTicker = new AdaptiveTicker({ field, bus, metricsCollector, healthChecker, config: config.ticker });
+
+  const consoleBridge = new ConsoleDataBridge({
+    field, bus, store, domains,
+    metricsCollector, healthChecker,
+    config: config.bridge,
+  });
 
   return {
     // ── Metrics ────────────────────────────────────────────────
@@ -63,8 +70,11 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
     // ── Ticker ────────────────────────────────────────────────
     getTickerStats: () => adaptiveTicker.getStats(),
 
-    _modules: { metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker },
-    allModules: () => [metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker],
+    // ── Console Bridge ────────────────────────────────────────
+    getBridgeStats: () => consoleBridge.getStats(),
+
+    _modules: { metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker, consoleBridge },
+    allModules: () => [metricsCollector, dashboardService, healthChecker, traceCollector, stateBroadcaster, adaptiveTicker, consoleBridge],
 
     // ── Lifecycle ──────────────────────────────────────────────
     async start() {
@@ -74,9 +84,11 @@ export function createObserveSystem({ field, bus, store, domains = {}, config = 
       traceCollector.start();
       await dashboardService.start();
       await adaptiveTicker.start();
+      await consoleBridge.start();
     },
 
     async stop() {
+      await consoleBridge.stop();
       await adaptiveTicker.stop();
       await dashboardService.stop();
       healthChecker.stop();
@@ -94,3 +106,4 @@ export { HealthChecker } from './health/health-checker.js';
 export { TraceCollector } from './health/trace-collector.js';
 export { StateBroadcaster } from './broadcast/state-broadcaster.js';
 export { AdaptiveTicker } from './tick/adaptive-ticker.js';
+export { ConsoleDataBridge } from './bridge/console-data-bridge.js';

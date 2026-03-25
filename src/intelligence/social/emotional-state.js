@@ -7,14 +7,41 @@ import { DIM_EMOTION, DIM_ALARM, DIM_REPUTATION } from '../../core/field/types.j
 
 class EmotionalState extends ModuleBase {
   constructor({ field, bus }) {
-    super({ field, bus });
+    super();
+    this.field = field;
+    this.bus = bus;
     this._agentStates = new Map(); // agentId -> {history, current}
+    this._unsubscribers = [];
   }
 
   static produces() { return [DIM_EMOTION]; }
   static consumes() { return [DIM_ALARM, DIM_REPUTATION]; }
   static publishes() { return ['emotion.changed']; }
-  static subscribes() { return ['agent.completed', 'agent.failed']; }
+  static subscribes() { return ['agent.lifecycle.completed', 'agent.lifecycle.failed']; }
+
+  async start() {
+    const listen = this.bus?.on?.bind(this.bus);
+    if (!listen) return;
+
+    this._unsubscribers.push(
+      listen('agent.lifecycle.completed', (payload) => {
+        if (payload?.agentId) {
+          this.recordOutcome(payload.agentId, true);
+        }
+      }),
+      listen('agent.lifecycle.failed', (payload) => {
+        if (payload?.agentId) {
+          this.recordOutcome(payload.agentId, false);
+        }
+      }),
+    );
+  }
+
+  async stop() {
+    for (const unsubscribe of this._unsubscribers.splice(0)) {
+      unsubscribe?.();
+    }
+  }
 
   _ensureState(agentId) {
     if (!this._agentStates.has(agentId)) {
@@ -81,6 +108,14 @@ class EmotionalState extends ModuleBase {
   getEmotion(agentId) {
     const state = this._ensureState(agentId);
     return { agentId, ...state.current, historyLength: state.history.length };
+  }
+
+  getAll() {
+    const states = {};
+    for (const agentId of this._agentStates.keys()) {
+      states[agentId] = this.getEmotion(agentId);
+    }
+    return states;
   }
 
   emitToField(agentId) {
